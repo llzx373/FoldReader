@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -23,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,6 +138,7 @@ fun ReaderMenuPanel(
 fun ChapterListDialog(
     chapters: List<Chapter>,
     currentIndex: Int,
+    remainingText: String?,
     colors: ReaderColors,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -148,18 +151,40 @@ fun ChapterListDialog(
         },
         title = { Text("目录") },
         text = {
-            LazyColumn(modifier = Modifier.height(360.dp)) {
-                itemsIndexed(chapters) { index, chapter ->
+            Column {
+                if (remainingText != null) {
                     Text(
-                        text = chapter.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (index == currentIndex) colors.accent else Color.Unspecified,
-                        maxLines = 1,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(index) }
-                            .padding(vertical = 10.dp),
+                        text = remainingText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accent,
+                        modifier = Modifier.padding(bottom = 8.dp),
                     )
+                }
+                if (chapters.size <= 1) {
+                    Text(
+                        text = "未识别到章节，可用进度条跳转",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                } else {
+                    val listState = rememberLazyListState()
+                    LaunchedEffect(Unit) {
+                        listState.scrollToItem(currentIndex.coerceIn(0, chapters.lastIndex))
+                    }
+                    LazyColumn(state = listState, modifier = Modifier.height(360.dp)) {
+                        itemsIndexed(chapters) { index, chapter ->
+                            Text(
+                                text = chapter.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (index == currentIndex) colors.accent else Color.Unspecified,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(index) }
+                                    .padding(vertical = 10.dp),
+                            )
+                        }
+                    }
                 }
             }
         },

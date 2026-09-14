@@ -3,13 +3,17 @@ package com.llzx373.foldreader.core.data.repository
 import com.llzx373.foldreader.core.data.db.BookDao
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
+import com.llzx373.foldreader.core.data.db.ChapterDao
+import com.llzx373.foldreader.core.data.db.ChapterEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
+import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
 
 class BookshelfRepositoryImpl(
     private val bookDao: BookDao,
     private val progressDao: ReadingProgressDao,
+    private val chapterDao: ChapterDao,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -40,4 +44,22 @@ class BookshelfRepositoryImpl(
 
     override suspend fun saveProgress(progress: ReadingProgressEntity) =
         progressDao.upsert(progress)
+
+    override suspend fun getChapters(bookId: Long): List<Chapter> =
+        chapterDao.getForBook(bookId).map { Chapter(it.title, it.charStart, it.charEnd) }
+
+    override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
+        chapterDao.deleteForBook(bookId)
+        chapterDao.upsertAll(
+            chapters.mapIndexed { index, chapter ->
+                ChapterEntity(
+                    bookId = bookId,
+                    chapterIndex = index,
+                    title = chapter.title,
+                    charStart = chapter.charStart,
+                    charEnd = chapter.charEnd,
+                )
+            },
+        )
+    }
 }

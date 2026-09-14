@@ -78,6 +78,8 @@ class ReaderViewModel(
     private val anchorOffset = MutableStateFlow(0L)
     private val viewport = MutableStateFlow<Viewport?>(null)
     private val pendingSave = MutableStateFlow<Long?>(null)
+    private val timer = ReadingTimer()
+    private val speedTracker = ReadingSpeedTracker()
 
     init {
         viewModelScope.launch {
@@ -89,12 +91,19 @@ class ReaderViewModel(
             try {
                 val uri = Uri.parse(book.fileUri)
                 val opened = withContext(Dispatchers.IO) {
-                    parser.openContent(uri) to parser.parseChapters(uri)
+                    val stored = bookshelfRepository.getChapters(bookId)
+                    val resolved = stored.ifEmpty {
+                        parser.parseChapters(uri).also { scanned ->
+                            runCatching { bookshelfRepository.saveChapters(bookId, scanned) }
+                        }
+                    }
+                    parser.openContent(uri) to resolved
                 }
                 content = opened.first
                 chapters = opened.second
-                baseReadingMillis = bookshelfRepository.getProgress(bookId)?.totalReadingMillis ?: 0L
-                anchorOffset.value = bookshelfRepository.getProgress(bookId)?.charOffset ?: 0L
+                val progress = bookshelfRepository.getProgress(bookId)
+                baseReadingMillis = progress?.totalReadingMillis ?: 0L
+                anchorOffset.value = progress?.charOffset ?: 0L
                 _uiState.update {
                     it.copy(bookTitle = book.title, totalChars = opened.first.charCount)
                 }
@@ -105,20 +114,22 @@ class ReaderViewModel(
         }
         viewModelScope.launch {
             pendingSave.filterNotNull().debounce(500L).collect { offset ->
-                runCatching {
-                    bookshelfRepository.saveProgress(
-                        ReadingProgressEntity(
-                            bookId = bookId,
-                            charOffset = offset,
-                            chapterIndex = chapterIndexAt(chapters, offset),
-                            totalReadingMillis = baseReadingMillis,
-                            updatedAt = System.currentTimeMillis(),
-                        ),
-                    )
-                    bookshelfRepository.touchLastRead(bookId)
-                }
+                runCatching { persistProgress(offset) }
             }
         }
+    }
+
+    private fun buildProgress(offset: Long, nowMs: Long) = ReadingProgressEntity(
+        bookId = bookId,
+        charOffset = offset,
+        chapterIndex = chapterIndexAt(chapters, offset),
+        totalReadingMillis = baseReadingMillis + timer.totalMs(nowMs),
+        updatedAt = nowMs,
+    )
+
+    private suspend fun persistProgress(offset: Long) {
+        bookshelfRepository.saveProgress(buildProgress(offset, System.currentTimeMillis()))
+        bookshelfRepository.touchLastRead(bookId)
     }
 
     private suspend fun collectViewport() {
@@ -166,6 +177,7 @@ class ReaderViewModel(
 
     fun showPage(page: Page) {
         anchorOffset.value = page.charStart
+        trackSpeed(page.charStart)
         publish(page, _uiState.value.layoutConfig)
         pendingSave.value = page.charStart
     }
@@ -206,6 +218,7 @@ class ReaderViewModel(
 
     fun scrollAnchorTo(charStart: Long) {
         anchorOffset.value = charStart
+        trackSpeed(charStart)
         pendingSave.value = charStart
         _uiState.update {
             it.copy(
@@ -228,6 +241,23 @@ class ReaderViewModel(
         viewModelScope.launch { settingsRepository.setReaderBrightness(brightness) }
     }
 
+    fun setReadingActive(active: Boolean) {
+        val now = System.currentTimeMillis()
+        if (active) timer.start(now) else timer.stop(now)
+    }
+
+    fun remainingTimeText(): String? {
+        val total = _uiState.value.totalChars
+        if (total <= 0L) return null
+        val minutes = speedTracker.remainingMinutes(total, anchorOffset.value) ?: return null
+        if (minutes <= 0.0 || minutes > 100_000.0) return null
+        return formatRemainingTime(minutes)
+    }
+
+    private fun trackSpeed(offset: Long) {
+        if (timer.isRunning) speedTracker.feed(offset, System.currentTimeMillis())
+    }
+
     private fun publish(page: Page, config: LayoutConfig) {
         _uiState.update {
             it.copy(
@@ -248,15 +278,7 @@ class ReaderViewModel(
         if (offset != null) {
             kotlinx.coroutines.runBlocking {
                 runCatching {
-                    bookshelfRepository.saveProgress(
-                        ReadingProgressEntity(
-                            bookId = bookId,
-                            charOffset = offset,
-                            chapterIndex = chapterIndexAt(chapters, offset),
-                            totalReadingMillis = baseReadingMillis,
-                            updatedAt = System.currentTimeMillis(),
-                        ),
-                    )
+                    bookshelfRepository.saveProgress(buildProgress(offset, System.currentTimeMillis()))
                 }
             }
         }

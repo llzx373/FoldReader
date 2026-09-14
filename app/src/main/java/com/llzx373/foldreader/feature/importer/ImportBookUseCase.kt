@@ -76,9 +76,9 @@ class ImportBookUseCase(
                 lastReadAt = null,
             ),
         )
+        bookshelfRepository.saveChapters(bookId, index.chapters)
         return Result.Imported(bookId, title, index.chapters.size)
     }
-
     private fun readAt(channel: SeekableByteChannel, offset: Long, length: Int): ByteArray {
         channel.position(offset)
         val buffer = ByteBuffer.allocate(length)

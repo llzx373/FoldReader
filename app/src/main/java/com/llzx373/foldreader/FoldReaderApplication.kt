@@ -28,6 +28,7 @@ class AppContainer(context: Context) {
     val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
         bookDao = database.bookDao(),
         progressDao = database.readingProgressDao(),
+        chapterDao = database.chapterDao(),
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val txtBookParser = TxtBookParser(context)

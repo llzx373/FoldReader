@@ -46,10 +46,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
@@ -107,6 +110,25 @@ fun ReaderScreen(
 
     SystemBarEffects(menuVisible = menuVisible, keepScreenOn = prefs.keepScreenOn)
     BrightnessEffect(prefs.readerBrightness)
+
+    var foreground by remember { mutableStateOf(true) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> foreground = true
+                Lifecycle.Event.ON_PAUSE -> foreground = false
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error) {
+        viewModel.setReadingActive(
+            foreground && !menuVisible && !uiState.loading && uiState.error == null,
+        )
+    }
 
     LaunchedEffect(rawMode) {
         if (rawMode == PageTurnMode.SIMULATION) {
@@ -271,6 +293,7 @@ fun ReaderScreen(
             ChapterListDialog(
                 chapters = viewModel.chapterList(),
                 currentIndex = uiState.chapterIndex,
+                remainingText = viewModel.remainingTimeText(),
                 colors = colors,
                 onSelect = { index ->
                     catalogVisible = false

@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.data.db
 
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 
@@ -9,8 +10,10 @@ import androidx.room.RoomDatabase
         ReadingProgressEntity::class,
         BookmarkEntity::class,
         AnnotationEntity::class,
+        ChapterEntity::class,
     ],
-    version = 1,
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {
@@ -18,4 +21,5 @@ abstract class FoldReaderDatabase : RoomDatabase() {
     abstract fun readingProgressDao(): ReadingProgressDao
     abstract fun bookmarkDao(): BookmarkDao
     abstract fun annotationDao(): AnnotationDao
+    abstract fun chapterDao(): ChapterDao
 }

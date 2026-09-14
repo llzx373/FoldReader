@@ -32,6 +32,12 @@ class ReaderLogicTest {
     }
 
     @Test
+    fun `chapter index boundary cases`() {
+        assertEquals(0, chapterIndexAt(emptyList(), 123L))
+        assertEquals(0, chapterIndexAt(chapters, -5L))
+    }
+
+    @Test
     fun `progress percent clamps to range`() {
         assertEquals(0f, progressPercentOf(0L, 1000L))
         assertEquals(0.5f, progressPercentOf(500L, 1000L))
