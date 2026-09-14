@@ -1,8 +1,34 @@
 package com.llzx373.foldreader.feature.reader
 
+import com.llzx373.foldreader.core.data.settings.DualPageMode
+import com.llzx373.foldreader.core.foldable.FoldingPosture
+import com.llzx373.foldreader.core.foldable.HingeOrientation
+import com.llzx373.foldreader.core.foldable.Posture
+import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
 
 enum class TapZone { PREVIOUS, MENU, NEXT }
+
+enum class PageLayoutMode { SINGLE, DUAL }
+
+fun resolvePageLayoutMode(
+    posture: FoldingPosture,
+    widthCategory: WidthCategory,
+    pref: DualPageMode,
+): PageLayoutMode = when (pref) {
+    DualPageMode.FORCE_SINGLE -> PageLayoutMode.SINGLE
+    DualPageMode.FORCE_DUAL -> PageLayoutMode.DUAL
+    DualPageMode.AUTO -> {
+        val bookOpen = posture.posture == Posture.FLAT &&
+            posture.hingeOrientation == HingeOrientation.VERTICAL &&
+            (posture.hingeBounds?.width ?: 0f) > 0f
+        if (bookOpen || widthCategory == WidthCategory.EXPANDED) {
+            PageLayoutMode.DUAL
+        } else {
+            PageLayoutMode.SINGLE
+        }
+    }
+}
 
 fun tapZoneOf(x: Float, widthPx: Float, hotspotRatio: Float): TapZone {
     if (widthPx <= 0f) return TapZone.MENU

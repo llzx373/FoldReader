@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
+import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
@@ -43,6 +44,7 @@ class SettingsViewModel(
         launch { settingsRepository.setDarkThemeOption(option) }
     fun updateFontKey(fontKey: String) = launch { settingsRepository.setFontKey(fontKey) }
     fun updatePageTurnMode(mode: PageTurnMode) = launch { settingsRepository.setPageTurnMode(mode) }
+    fun updateDualPageMode(mode: DualPageMode) = launch { settingsRepository.setDualPageMode(mode) }
     fun updateHotspotRatio(ratio: Float) = launch { settingsRepository.setPageTurnHotspotRatio(ratio) }
     fun updateVolumeKeyPaging(enabled: Boolean) =
         launch { settingsRepository.setVolumeKeyPagingEnabled(enabled) }

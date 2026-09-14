@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
+import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.format.txt.UriChannels
@@ -132,6 +133,24 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("翻页与交互")
+            SegmentedSetting(
+                label = "双页模式",
+                options = listOf("自动", "强制双页", "强制单栏"),
+                selectedIndex = when (prefs.dualPageMode) {
+                    DualPageMode.AUTO -> 0
+                    DualPageMode.FORCE_DUAL -> 1
+                    DualPageMode.FORCE_SINGLE -> 2
+                },
+                onSelect = { index ->
+                    viewModel.updateDualPageMode(
+                        when (index) {
+                            1 -> DualPageMode.FORCE_DUAL
+                            2 -> DualPageMode.FORCE_SINGLE
+                            else -> DualPageMode.AUTO
+                        },
+                    )
+                },
+            )
             SegmentedSetting(
                 label = "翻页方式",
                 options = listOf("覆盖", "无动画", "上下滚动"),

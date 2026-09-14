@@ -37,6 +37,7 @@ fun FoldReaderNavHost(
                 bookId = backStackEntry.arguments?.getLong("bookId") ?: 0L,
                 onBack = { navController.popBackStack() },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                foldableUiState = foldableUiState,
             )
         }
         composable(Routes.SETTINGS) {

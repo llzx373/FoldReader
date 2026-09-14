@@ -12,6 +12,7 @@ interface SettingsRepository {
     suspend fun setCustomColors(backgroundArgb: Int?, textArgb: Int?)
     suspend fun setDarkThemeOption(option: DarkThemeOption)
     suspend fun setFontKey(fontKey: String)
+    suspend fun setDualPageMode(mode: DualPageMode)
     suspend fun setPageTurnMode(mode: PageTurnMode)
     suspend fun setPageTurnHotspotRatio(ratio: Float)
     suspend fun setVolumeKeyPagingEnabled(enabled: Boolean)

@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
@@ -82,6 +83,7 @@ fun ReaderMenuPanel(
     onSeekFraction: (Float) -> Unit,
     onOpenCatalog: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
+    onCycleDualPageMode: () -> Unit,
     onSetBrightness: (Float) -> Unit,
     onSetFontSize: (Float) -> Unit,
     onSetLineSpacing: (Float) -> Unit,
@@ -220,6 +222,9 @@ fun ReaderMenuPanel(
                 TextButton(onClick = onCyclePageTurnMode) {
                     Text("翻页：${pageTurnModeLabel(prefs.pageTurnMode)}")
                 }
+                TextButton(onClick = onCycleDualPageMode) {
+                    Text("双页：${dualPageModeLabel(prefs.dualPageMode)}")
+                }
                 TextButton(onClick = onOpenSettings) { Text("设置") }
             }
         }
@@ -295,4 +300,16 @@ fun nextPageTurnMode(mode: PageTurnMode): PageTurnMode = when (mode) {
     PageTurnMode.NONE -> PageTurnMode.SCROLL
     PageTurnMode.SCROLL -> PageTurnMode.COVER
     PageTurnMode.SIMULATION -> PageTurnMode.COVER
+}
+
+fun dualPageModeLabel(mode: DualPageMode): String = when (mode) {
+    DualPageMode.AUTO -> "自动"
+    DualPageMode.FORCE_DUAL -> "强制"
+    DualPageMode.FORCE_SINGLE -> "单栏"
+}
+
+fun nextDualPageMode(mode: DualPageMode): DualPageMode = when (mode) {
+    DualPageMode.AUTO -> DualPageMode.FORCE_DUAL
+    DualPageMode.FORCE_DUAL -> DualPageMode.FORCE_SINGLE
+    DualPageMode.FORCE_SINGLE -> DualPageMode.AUTO
 }

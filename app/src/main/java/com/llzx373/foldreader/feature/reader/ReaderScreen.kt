@@ -13,12 +13,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -40,15 +46,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -56,18 +67,23 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
-import com.llzx373.foldreader.core.reader.Page
+import com.llzx373.foldreader.core.foldable.FoldableUiState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private val INNER_SPINE_PAD = 12.dp
+private val SPINE_OVERLAY_WIDTH = 32.dp
 
 @Composable
 fun ReaderScreen(
     bookId: Long,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    foldableUiState: FoldableUiState,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as FoldReaderApplication
@@ -83,28 +99,66 @@ fun ReaderScreen(
     var menuVisible by remember { mutableStateOf(false) }
     var catalogVisible by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    var windowOffsetX by remember { mutableStateOf(0f) }
+    var windowOffsetY by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
 
     val rawMode = prefs.pageTurnMode
     val scrollMode = rawMode == PageTurnMode.SCROLL
     val effectiveMode = if (rawMode == PageTurnMode.SIMULATION) PageTurnMode.COVER else rawMode
 
-    var animPage by remember { mutableStateOf<Page?>(null) }
+    val layoutMode = resolvePageLayoutMode(
+        posture = foldableUiState.posture,
+        widthCategory = foldableUiState.widthCategory,
+        pref = prefs.dualPageMode,
+    )
+    val dual = layoutMode == PageLayoutMode.DUAL && !scrollMode
+
+    val hingeLocal = foldableUiState.posture.hingeBounds
+        ?.takeIf { it.width > 0f }
+        ?.let { Rect(it.left - windowOffsetX, it.top - windowOffsetY, it.right - windowOffsetX, it.bottom - windowOffsetY) }
+    val splitLeftPx = (hingeLocal?.left ?: size.width / 2f).coerceIn(0f, size.width.toFloat())
+    val splitRightPx = (hingeLocal?.right ?: size.width / 2f).coerceIn(splitLeftPx, size.width.toFloat())
+
+    LaunchedEffect(dual, size, splitLeftPx, splitRightPx, density.density, density.fontScale) {
+        if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+        if (dual) {
+            viewModel.setViewports(
+                dual = true,
+                leftWidthPx = splitLeftPx.roundToInt(),
+                rightWidthPx = (size.width - splitRightPx).roundToInt(),
+                heightPx = size.height,
+                density = density.density,
+                scaledDensity = density.density * density.fontScale,
+            )
+        } else {
+            viewModel.setViewports(
+                dual = false,
+                leftWidthPx = size.width,
+                rightWidthPx = 0,
+                heightPx = size.height,
+                density = density.density,
+                scaledDensity = density.density * density.fontScale,
+            )
+        }
+    }
+
+    var animSpread by remember { mutableStateOf<PageSpread?>(null) }
     val animX = remember { Animatable(0f) }
 
     fun turn(forward: Boolean) {
         scope.launch {
-            if (animPage != null) return@launch
-            val target = viewModel.adjacentPage(forward) ?: return@launch
+            if (animSpread != null) return@launch
+            val target = viewModel.adjacentSpread(forward) ?: return@launch
             if (effectiveMode == PageTurnMode.NONE || size.width <= 0) {
-                viewModel.showPage(target)
+                viewModel.showSpread(target)
                 return@launch
             }
-            animPage = target
+            animSpread = target
             animX.snapTo(if (forward) size.width.toFloat() else -size.width.toFloat())
             animX.animateTo(0f, tween(220))
-            viewModel.showPage(target)
-            animPage = null
+            viewModel.showSpread(target)
+            animSpread = null
         }
     }
 
@@ -140,18 +194,20 @@ fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    val innerPadPx = with(density) { INNER_SPINE_PAD.toPx() }
+    val spineOverlayPx = with(density) { SPINE_OVERLAY_WIDTH.toPx() }
+    val leftDp = with(density) { splitLeftPx.toDp() }
+    val hingeDp = with(density) { (splitRightPx - splitLeftPx).toDp() }
+    val rightDp = with(density) { (size.width - splitRightPx).toDp() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
-            .onSizeChanged {
-                size = it
-                viewModel.setViewport(
-                    widthPx = it.width,
-                    heightPx = it.height,
-                    density = density.density,
-                    scaledDensity = density.density * density.fontScale,
-                )
+            .onSizeChanged { size = it }
+            .onGloballyPositioned {
+                windowOffsetX = it.boundsInWindow().left
+                windowOffsetY = it.boundsInWindow().top
             }
             .focusRequester(focusRequester)
             .focusable()
@@ -213,23 +269,44 @@ fun ReaderScreen(
                 pageHeight = size.height,
             )
             else -> {
-                val page = uiState.page
-                if (page != null) {
-                    PageView(
-                        page = page,
+                val spread = uiState.spread
+                if (spread != null) {
+                    SpreadContent(
+                        spread = spread,
                         config = uiState.layoutConfig,
                         colors = colors,
+                        dual = dual,
+                        leftDp = leftDp,
+                        hingeDp = hingeDp,
+                        rightDp = rightDp,
+                        innerPadPx = innerPadPx,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    val overlay = animPage
+                    val overlay = animSpread
                     if (overlay != null) {
-                        PageView(
-                            page = overlay,
+                        SpreadContent(
+                            spread = overlay,
                             config = uiState.layoutConfig,
                             colors = colors,
+                            dual = dual,
+                            leftDp = leftDp,
+                            hingeDp = hingeDp,
+                            rightDp = rightDp,
+                            innerPadPx = innerPadPx,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer { translationX = animX.value },
+                        )
+                    }
+                    if (dual) {
+                        val spineCenter = (splitLeftPx + splitRightPx) / 2f
+                        SpineOverlay(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(SPINE_OVERLAY_WIDTH)
+                                .offset {
+                                    IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
+                                },
                         )
                     }
                 }
@@ -237,26 +314,75 @@ fun ReaderScreen(
         }
 
         if (!uiState.loading && uiState.error == null) {
-            if (prefs.showChapterTitle) {
-                ReaderHeader(
-                    chapterTitle = uiState.chapterTitle,
-                    colors = colors,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding(),
-                )
-            }
             val battery by rememberBatteryPercent()
             val time by rememberClock()
-            ReaderFooter(
-                progressText = if (prefs.showPageProgress) formatPercent(uiState.progressFraction) else null,
-                batteryText = if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
-                timeText = if (prefs.showTime) time else null,
-                colors = colors,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding(),
-            )
+            val progressText = if (prefs.showPageProgress) formatPercent(uiState.progressFraction) else null
+            val rightFooter = listOfNotNull(
+                if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
+                if (prefs.showTime) time else null,
+            ).joinToString("  ")
+
+            if (dual) {
+                if (prefs.showChapterTitle) {
+                    CornerLabel(
+                        text = uiState.chapterTitle,
+                        colors = colors,
+                        endAligned = false,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .width(leftDp),
+                    )
+                }
+                CornerLabel(
+                    text = uiState.bookTitle,
+                    colors = colors,
+                    endAligned = true,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .width(rightDp),
+                )
+                if (progressText != null) {
+                    CornerLabel(
+                        text = progressText,
+                        colors = colors,
+                        endAligned = false,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .navigationBarsPadding()
+                            .width(leftDp),
+                    )
+                }
+                CornerLabel(
+                    text = rightFooter,
+                    colors = colors,
+                    endAligned = true,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .width(rightDp),
+                )
+            } else {
+                if (prefs.showChapterTitle) {
+                    ReaderHeader(
+                        chapterTitle = uiState.chapterTitle,
+                        colors = colors,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding(),
+                    )
+                }
+                ReaderFooter(
+                    progressText = progressText,
+                    batteryText = if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
+                    timeText = if (prefs.showTime) time else null,
+                    colors = colors,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding(),
+                )
+            }
         }
 
         if (menuVisible) {
@@ -280,6 +406,9 @@ fun ReaderScreen(
                 onOpenCatalog = { catalogVisible = true },
                 onCyclePageTurnMode = {
                     viewModel.setPageTurnMode(nextPageTurnMode(prefs.pageTurnMode))
+                },
+                onCycleDualPageMode = {
+                    viewModel.setDualPageMode(nextDualPageMode(prefs.dualPageMode))
                 },
                 onSetBrightness = viewModel::setReaderBrightness,
                 onSetFontSize = viewModel::setFontSize,
@@ -315,6 +444,75 @@ fun ReaderScreen(
                 onDismiss = { catalogVisible = false },
             )
         }
+    }
+}
+
+@Composable
+private fun SpreadContent(
+    spread: PageSpread,
+    config: com.llzx373.foldreader.core.reader.LayoutConfig,
+    colors: ReaderColors,
+    dual: Boolean,
+    leftDp: androidx.compose.ui.unit.Dp,
+    hingeDp: androidx.compose.ui.unit.Dp,
+    rightDp: androidx.compose.ui.unit.Dp,
+    innerPadPx: Float,
+    modifier: Modifier = Modifier,
+) {
+    if (!dual) {
+        PageView(
+            page = spread.left,
+            config = config,
+            colors = colors,
+            modifier = modifier,
+        )
+        return
+    }
+    Row(modifier = modifier) {
+        Box(modifier = Modifier.width(leftDp).fillMaxHeight()) {
+            PageView(
+                page = spread.left,
+                config = config,
+                colors = colors,
+                modifier = Modifier.fillMaxSize(),
+                innerPaddingPx = innerPadPx,
+                innerOnRight = true,
+            )
+        }
+        Box(modifier = Modifier.width(hingeDp).fillMaxHeight())
+        Box(modifier = Modifier.width(rightDp).fillMaxHeight()) {
+            spread.right?.let { right ->
+                PageView(
+                    page = right,
+                    config = config,
+                    colors = colors,
+                    modifier = Modifier.fillMaxSize(),
+                    innerPaddingPx = innerPadPx,
+                    innerOnRight = false,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CornerLabel(
+    text: String,
+    colors: ReaderColors,
+    endAligned: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (text.isEmpty()) return
+    Row(
+        modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = if (endAligned) Arrangement.End else Arrangement.Start,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.text.copy(alpha = 0.55f),
+            maxLines = 1,
+        )
     }
 }
 

@@ -1,5 +1,11 @@
 package com.llzx373.foldreader.feature.reader
 
+import androidx.compose.ui.geometry.Rect
+import com.llzx373.foldreader.core.data.settings.DualPageMode
+import com.llzx373.foldreader.core.foldable.FoldingPosture
+import com.llzx373.foldreader.core.foldable.HingeOrientation
+import com.llzx373.foldreader.core.foldable.Posture
+import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -78,5 +84,39 @@ class ReaderLogicTest {
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SCROLL))
         assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SIMULATION))
+    }
+
+    @Test
+    fun `dual page mode resolution`() {
+        val flatVertical = FoldingPosture(
+            posture = Posture.FLAT,
+            hingeBounds = Rect(500f, 0f, 520f, 1800f),
+            hingeOrientation = HingeOrientation.VERTICAL,
+        )
+        val flatHorizontal = flatVertical.copy(hingeOrientation = HingeOrientation.HORIZONTAL)
+        val halfOpened = flatVertical.copy(posture = Posture.HALF_OPENED)
+        val closed = FoldingPosture.Closed
+
+        assertEquals(PageLayoutMode.DUAL,
+            resolvePageLayoutMode(flatVertical, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(flatHorizontal, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(halfOpened, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(closed, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL,
+            resolvePageLayoutMode(closed, WidthCategory.EXPANDED, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(closed, WidthCategory.MEDIUM, DualPageMode.AUTO))
+
+        val zeroWidthHinge = flatVertical.copy(hingeBounds = Rect(500f, 0f, 500f, 1800f))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(zeroWidthHinge, WidthCategory.COMPACT, DualPageMode.AUTO))
+
+        assertEquals(PageLayoutMode.DUAL,
+            resolvePageLayoutMode(closed, WidthCategory.COMPACT, DualPageMode.FORCE_DUAL))
+        assertEquals(PageLayoutMode.SINGLE,
+            resolvePageLayoutMode(flatVertical, WidthCategory.EXPANDED, DualPageMode.FORCE_SINGLE))
     }
 }

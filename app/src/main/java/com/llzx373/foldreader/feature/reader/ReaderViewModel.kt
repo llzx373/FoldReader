@@ -9,6 +9,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.data.settings.DualPageMode
+import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -37,12 +40,18 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+data class PageSpread(
+    val left: Page,
+    val right: Page?,
+)
+
 data class ReaderUiState(
     val loading: Boolean = true,
     val error: String? = null,
     val bookTitle: String = "",
     val totalChars: Long = 0,
-    val page: Page? = null,
+    val spread: PageSpread? = null,
+    val dualPage: Boolean = false,
     val chapterTitle: String = "",
     val chapterIndex: Int = 0,
     val chapterCount: Int = 0,
@@ -51,8 +60,10 @@ data class ReaderUiState(
     val scrollPages: List<Page> = emptyList(),
 )
 
-private data class Viewport(
-    val widthPx: Int,
+private data class SpreadViewport(
+    val dual: Boolean,
+    val leftWidthPx: Int,
+    val rightWidthPx: Int,
     val heightPx: Int,
     val density: Float,
     val scaledDensity: Float,
@@ -76,10 +87,12 @@ class ReaderViewModel(
     private var content: BookContent? = null
     private var chapters: List<Chapter> = emptyList()
     private var baseReadingMillis = 0L
-    private var paginator: Paginator? = null
+    private var paginatorLeft: Paginator? = null
+    private var paginatorRight: Paginator? = null
+    private var dualActive = false
     private val pageMutex = Mutex()
     private val anchorOffset = MutableStateFlow(0L)
-    private val viewport = MutableStateFlow<Viewport?>(null)
+    private val viewport = MutableStateFlow<SpreadViewport?>(null)
     private val pendingSave = MutableStateFlow<Long?>(null)
     private val timer = ReadingTimer()
     private val speedTracker = ReadingSpeedTracker()
@@ -136,7 +149,7 @@ class ReaderViewModel(
     }
 
     private suspend fun collectViewport() {
-        kotlinx.coroutines.flow.combine(
+        combine(
             viewport.filterNotNull(),
             settingsRepository.preferences
                 .distinctUntilChanged { a, b ->
@@ -158,41 +171,102 @@ class ReaderViewModel(
                 fontKey = p.fontKey,
                 typeface = fontManager.resolve(p.fontKey),
             )
-            val newPaginator = Paginator(
-                content = source,
-                config = config,
-                measurer = StaticLayoutTextMeasurer(),
-                widthPx = v.widthPx,
-                heightPx = v.heightPx,
-                density = v.density,
-                scaledDensity = v.scaledDensity,
-            )
-            val page = withContext(Dispatchers.Default) {
-                newPaginator.pageAt(anchorOffset.value)
+            val left = buildPaginator(source, config, v.leftWidthPx, v.heightPx, v.density, v.scaledDensity)
+            val right = if (v.dual && v.rightWidthPx != v.leftWidthPx) {
+                buildPaginator(source, config, v.rightWidthPx, v.heightPx, v.density, v.scaledDensity)
+            } else {
+                left
             }
-            pageMutex.withLock { paginator = newPaginator }
-            publish(page, config)
+            val spread = withContext(Dispatchers.Default) {
+                spreadFrom(left, right, v.dual, anchorOffset.value)
+            }
+            pageMutex.withLock {
+                paginatorLeft = left
+                paginatorRight = right
+                dualActive = v.dual
+            }
+            publish(spread, config, v.dual)
         }
     }
 
-    fun setViewport(widthPx: Int, heightPx: Int, density: Float, scaledDensity: Float) {
-        if (widthPx <= 0 || heightPx <= 0) return
-        viewport.value = Viewport(widthPx, heightPx, density, scaledDensity)
-    }
+    private fun buildPaginator(
+        source: BookContent,
+        config: LayoutConfig,
+        widthPx: Int,
+        heightPx: Int,
+        density: Float,
+        scaledDensity: Float,
+    ) = Paginator(
+        content = source,
+        config = config,
+        measurer = StaticLayoutTextMeasurer(),
+        widthPx = widthPx,
+        heightPx = heightPx,
+        density = density,
+        scaledDensity = scaledDensity,
+    )
 
-    suspend fun adjacentPage(forward: Boolean): Page? {
-        val current = _uiState.value.page ?: return null
-        val p = pageMutex.withLock { paginator } ?: return null
-        return withContext(Dispatchers.Default) {
-            if (forward) p.pageAfter(current.charStart) else p.pageBefore(current.charStart)
+    private suspend fun spreadFrom(
+        left: Paginator,
+        right: Paginator,
+        dual: Boolean,
+        anchor: Long,
+    ): PageSpread {
+        val leftPage = left.pageAt(anchor)
+        val total = content?.charCount ?: 0L
+        val rightPage = if (dual && leftPage.charEnd < total) {
+            right.pageAt(leftPage.charEnd).takeIf { it.charEnd > it.charStart }
+        } else {
+            null
         }
+        return PageSpread(leftPage, rightPage)
     }
 
-    fun showPage(page: Page) {
-        anchorOffset.value = page.charStart
-        trackSpeed(page.charStart)
-        publish(page, _uiState.value.layoutConfig)
-        pendingSave.value = page.charStart
+    private suspend fun currentSpreadFrom(anchor: Long): PageSpread? {
+        val (left, right, dual) = pageMutex.withLock {
+            Triple(paginatorLeft, paginatorRight, dualActive)
+        }
+        val l = left ?: return null
+        val r = right ?: return null
+        return withContext(Dispatchers.Default) { spreadFrom(l, r, dual, anchor) }
+    }
+
+    fun setViewports(
+        dual: Boolean,
+        leftWidthPx: Int,
+        rightWidthPx: Int,
+        heightPx: Int,
+        density: Float,
+        scaledDensity: Float,
+    ) {
+        if (leftWidthPx <= 0 || heightPx <= 0 || (dual && rightWidthPx <= 0)) return
+        viewport.value = SpreadViewport(dual, leftWidthPx, rightWidthPx, heightPx, density, scaledDensity)
+    }
+
+    suspend fun adjacentSpread(forward: Boolean): PageSpread? {
+        val current = _uiState.value.spread ?: return null
+        val left = pageMutex.withLock { paginatorLeft } ?: return null
+        val dual = pageMutex.withLock { dualActive }
+        val total = _uiState.value.totalChars
+        val anchor = when {
+            forward && dual -> current.right?.charEnd ?: return null
+            forward -> if (current.left.charEnd < total) current.left.charEnd else return null
+            else -> {
+                val one = withContext(Dispatchers.Default) {
+                    left.pageBefore(current.left.charStart)
+                } ?: return null
+                val two = withContext(Dispatchers.Default) { left.pageBefore(one.charStart) }
+                if (dual) two?.charStart ?: one.charStart else one.charStart
+            }
+        }
+        return currentSpreadFrom(anchor)
+    }
+
+    fun showSpread(spread: PageSpread) {
+        anchorOffset.value = spread.left.charStart
+        trackSpeed(spread.left.charStart)
+        publish(spread, _uiState.value.layoutConfig, _uiState.value.dualPage)
+        pendingSave.value = spread.left.charStart
     }
 
     suspend fun seekToFraction(fraction: Float) {
@@ -203,9 +277,7 @@ class ReaderViewModel(
     }
 
     suspend fun seekToOffset(offset: Long) {
-        val p = pageMutex.withLock { paginator } ?: return
-        val page = withContext(Dispatchers.Default) { p.pageAt(offset) }
-        showPage(page)
+        currentSpreadFrom(offset)?.let { showSpread(it) }
     }
 
     suspend fun relocate() {
@@ -213,14 +285,14 @@ class ReaderViewModel(
     }
 
     fun enterScrollMode() {
-        val current = _uiState.value.page ?: return
-        _uiState.update { it.copy(scrollPages = listOf(current)) }
+        val current = _uiState.value.spread ?: return
+        _uiState.update { it.copy(scrollPages = listOf(current.left)) }
     }
 
     suspend fun scrollExtend(forward: Boolean) {
         val pages = _uiState.value.scrollPages
         if (pages.isEmpty()) return
-        val p = pageMutex.withLock { paginator } ?: return
+        val p = pageMutex.withLock { paginatorLeft } ?: return
         val next = withContext(Dispatchers.Default) {
             if (forward) p.pageAfter(pages.last().charStart) else p.pageBefore(pages.first().charStart)
         } ?: return
@@ -246,8 +318,12 @@ class ReaderViewModel(
 
     fun chapterList(): List<Chapter> = chapters
 
-    fun setPageTurnMode(mode: com.llzx373.foldreader.core.data.settings.PageTurnMode) {
+    fun setPageTurnMode(mode: PageTurnMode) {
         viewModelScope.launch { settingsRepository.setPageTurnMode(mode) }
+    }
+
+    fun setDualPageMode(mode: DualPageMode) {
+        viewModelScope.launch { settingsRepository.setDualPageMode(mode) }
     }
 
     fun setReaderBrightness(brightness: Float) {
@@ -291,16 +367,17 @@ class ReaderViewModel(
         if (timer.isRunning) speedTracker.feed(offset, System.currentTimeMillis())
     }
 
-    private fun publish(page: Page, config: LayoutConfig) {
+    private fun publish(spread: PageSpread, config: LayoutConfig, dual: Boolean) {
         _uiState.update {
             it.copy(
                 loading = false,
                 error = null,
-                page = page,
+                spread = spread,
+                dualPage = dual,
                 layoutConfig = config,
-                progressFraction = progressPercentOf(page.charStart, it.totalChars),
-                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, page.charStart))?.title.orEmpty(),
-                chapterIndex = chapterIndexAt(chapters, page.charStart),
+                progressFraction = progressPercentOf(spread.left.charStart, it.totalChars),
+                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, spread.left.charStart))?.title.orEmpty(),
+                chapterIndex = chapterIndexAt(chapters, spread.left.charStart),
                 chapterCount = chapters.size,
             )
         }

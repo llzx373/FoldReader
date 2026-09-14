@@ -6,6 +6,8 @@ enum class PageTurnMode { SIMULATION, COVER, NONE, SCROLL }
 
 enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
 
+enum class DualPageMode { AUTO, FORCE_DUAL, FORCE_SINGLE }
+
 data class ReadingPreferences(
     val fontSizeSp: Float = 18f,
     val lineSpacingMultiplier: Float = 1.5f,
@@ -15,6 +17,7 @@ data class ReadingPreferences(
     val customTextArgb: Int? = null,
     val darkThemeOption: DarkThemeOption = DarkThemeOption.SYSTEM,
     val fontKey: String = "default",
+    val dualPageMode: DualPageMode = DualPageMode.AUTO,
     val pageTurnMode: PageTurnMode = PageTurnMode.COVER,
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,

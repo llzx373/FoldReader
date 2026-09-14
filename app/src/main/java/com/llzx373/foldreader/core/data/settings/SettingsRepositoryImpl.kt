@@ -29,6 +29,7 @@ class SettingsRepositoryImpl(
         val CUSTOM_TEXT_ARGB = intPreferencesKey("custom_text_argb")
         val DARK_THEME_OPTION = stringPreferencesKey("dark_theme_option")
         val FONT_KEY = stringPreferencesKey("font_key")
+        val DUAL_PAGE_MODE = stringPreferencesKey("dual_page_mode")
         val PAGE_TURN_MODE = stringPreferencesKey("page_turn_mode")
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
@@ -54,6 +55,7 @@ class SettingsRepositoryImpl(
                 customTextArgb = prefs[Keys.CUSTOM_TEXT_ARGB],
                 darkThemeOption = enumOrDefault(prefs[Keys.DARK_THEME_OPTION], defaults.darkThemeOption),
                 fontKey = prefs[Keys.FONT_KEY] ?: defaults.fontKey,
+                dualPageMode = enumOrDefault(prefs[Keys.DUAL_PAGE_MODE], defaults.dualPageMode),
                 pageTurnMode = enumOrDefault(prefs[Keys.PAGE_TURN_MODE], defaults.pageTurnMode),
                 pageTurnHotspotRatio = prefs[Keys.PAGE_TURN_HOTSPOT_RATIO]
                     ?: defaults.pageTurnHotspotRatio,
@@ -96,6 +98,10 @@ class SettingsRepositoryImpl(
 
     override suspend fun setFontKey(fontKey: String) {
         context.readingPreferencesStore.edit { it[Keys.FONT_KEY] = fontKey }
+    }
+
+    override suspend fun setDualPageMode(mode: DualPageMode) {
+        context.readingPreferencesStore.edit { it[Keys.DUAL_PAGE_MODE] = mode.name }
     }
 
     override suspend fun setTheme(theme: ReadingTheme) {
