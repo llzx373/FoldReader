@@ -123,6 +123,63 @@ class ReaderViewModel(
     private val _shiftedAnnotationIds = MutableStateFlow<Set<Long>>(emptySet())
     val shiftedAnnotationIds: StateFlow<Set<Long>> = _shiftedAnnotationIds.asStateFlow()
 
+    data class SearchState(
+        val query: String = "",
+        val running: Boolean = false,
+        val scannedChars: Long = 0,
+        val totalChars: Long = 0,
+        val hits: List<com.llzx373.foldreader.core.format.SearchHit> = emptyList(),
+    )
+
+    private val _searchState = MutableStateFlow(SearchState())
+    val searchState: StateFlow<SearchState> = _searchState.asStateFlow()
+    private var searchJob: kotlinx.coroutines.Job? = null
+
+    /** 命中后正文高亮区间（[起始, 结束 Exclusive)），几秒后由 UI 淡出清除。 */
+    private val _searchHighlight = MutableStateFlow<Pair<Long, Long>?>(null)
+    val searchHighlight: StateFlow<Pair<Long, Long>?> = _searchHighlight.asStateFlow()
+
+    fun startSearch(query: String) {
+        searchJob?.cancel()
+        val source = content
+        if (source == null || query.isBlank()) {
+            _searchState.value = SearchState()
+            return
+        }
+        _searchState.value = SearchState(
+            query = query,
+            running = true,
+            totalChars = source.charCount,
+        )
+        searchJob = viewModelScope.launch {
+            com.llzx373.foldreader.core.format.searchContent(
+                content = source,
+                query = query,
+                onHit = { hit ->
+                    _searchState.update { it.copy(hits = it.hits + hit) }
+                },
+                onProgress = { scanned ->
+                    _searchState.update { it.copy(scannedChars = scanned) }
+                },
+            )
+            _searchState.update { it.copy(running = false) }
+        }
+    }
+
+    fun cancelSearch() {
+        searchJob?.cancel()
+        searchJob = null
+        _searchState.update { it.copy(running = false) }
+    }
+
+    fun setSearchHighlight(start: Long, endExclusive: Long) {
+        _searchHighlight.value = start to endExclusive
+    }
+
+    fun clearSearchHighlight() {
+        _searchHighlight.value = null
+    }
+
     private suspend fun verifyAnnotationSnapshots() {
         val source = content ?: return
         val anns = withContext(Dispatchers.IO) {

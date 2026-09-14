@@ -125,6 +125,17 @@ fun ReaderScreen(
     var catalogVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
     var annotationsVisible by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(false) }
+    val searchState by viewModel.searchState.collectAsState()
+    val searchHighlight by viewModel.searchHighlight.collectAsState()
+
+    // 命中高亮 5 秒后淡出（或下一次操作清除）
+    LaunchedEffect(searchHighlight) {
+        if (searchHighlight != null) {
+            delay(5000)
+            viewModel.clearSearchHighlight()
+        }
+    }
     // 长按选择（仅翻页模式；滚动模式降级为仅渲染标注，见 TODO 5.2 注记）
     var selection by remember { mutableStateOf<SelectionUi?>(null) }
     var noteDraft by remember { mutableStateOf<SelectionUi?>(null) }
@@ -369,13 +380,19 @@ fun ReaderScreen(
     }
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page?): List<TextRangeSpan> {
-        if (page == null || annotations.isEmpty()) return emptyList()
-        return annotations.mapNotNull { ann ->
+        if (page == null) return emptyList()
+        val spans = annotations.mapNotNull { ann ->
             if (ann.endCharOffset > page.charStart && ann.startCharOffset < page.charEnd) {
                 TextRangeSpan(ann.startCharOffset, ann.endCharOffset, Color(ann.color.toInt()))
             } else {
                 null
             }
+        }
+        val hit = searchHighlight
+        return if (hit != null && hit.second > page.charStart && hit.first < page.charEnd) {
+            spans + TextRangeSpan(hit.first, hit.second, colors.accent.copy(alpha = 0.5f))
+        } else {
+            spans
         }
     }
 
@@ -888,6 +905,7 @@ fun ReaderScreen(
                 rightBookmarked = uiState.spread?.right?.charStart in bookmarkedOffsets,
                 onToggleBookmark = viewModel::toggleBookmark,
                 onOpenBookmarks = { bookmarksVisible = true },
+                onOpenSearch = { searchVisible = true },
                 modifier = Modifier.align(Alignment.TopCenter),
             )
             ReaderMenuPanel(
@@ -1032,6 +1050,31 @@ fun ReaderScreen(
                 onDismiss = { annotationsVisible = false },
             )
         }
+
+        if (searchVisible) {
+            ReaderSearchDialog(
+                state = searchState,
+                chapters = viewModel.chapterList(),
+                colors = colors,
+                onSearch = viewModel::startSearch,
+                onJump = { hit ->
+                    searchVisible = false
+                    menuVisible = false
+                    scope.launch {
+                        viewModel.seekToOffset(hit.offset)
+                        if (scrollMode) viewModel.enterScrollMode()
+                        viewModel.setSearchHighlight(
+                            hit.offset,
+                            hit.offset + hit.matchLength,
+                        )
+                    }
+                },
+                onDismiss = {
+                    searchVisible = false
+                    viewModel.cancelSearch() // 关闭面板即取消后台扫描
+                },
+            )
+        }
     }
 }
 
@@ -1131,6 +1174,7 @@ private fun ScrollContent(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val annotations by viewModel.annotations.collectAsState()
+    val searchHighlight by viewModel.searchHighlight.collectAsState()
     val listState = rememberLazyListState()
     var extending by remember { mutableStateOf(false) }
 
@@ -1162,6 +1206,13 @@ private fun ScrollContent(
                     TextRangeSpan(ann.startCharOffset, ann.endCharOffset, Color(ann.color.toInt()))
                 } else {
                     null
+                }
+            }.let { spans ->
+                val hit = searchHighlight
+                if (hit != null && hit.second > page.charStart && hit.first < page.charEnd) {
+                    spans + TextRangeSpan(hit.first, hit.second, colors.accent.copy(alpha = 0.5f))
+                } else {
+                    spans
                 }
             }
             PageView(

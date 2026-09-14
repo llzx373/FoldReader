@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +63,7 @@ fun ReaderTopBar(
     rightBookmarked: Boolean = false,
     onToggleBookmark: (leftPage: Boolean) -> Unit = {},
     onOpenBookmarks: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
 ) {
     TopAppBar(
         title = {
@@ -82,6 +84,9 @@ fun ReaderTopBar(
             }
         },
         actions = {
+            IconButton(onClick = onOpenSearch) {
+                Icon(Icons.Filled.Search, contentDescription = "书内搜索")
+            }
             if (dualPage && hasRightPage) {
                 // 双页：左/右页各一枚书签 toggle，锚点取对应页首字符
                 IconButton(onClick = { onToggleBookmark(true) }) {

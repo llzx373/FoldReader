@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -106,7 +108,20 @@ fun BookshelfScreen(
     val scope = rememberCoroutineScope()
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var fabMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     val selectionMode = selectedIds.isNotEmpty()
+    val displayBooks = remember(books, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) {
+            books
+        } else {
+            books.filter {
+                it.book.title.contains(q, ignoreCase = true) ||
+                    it.book.author?.contains(q, ignoreCase = true) == true
+            }
+        }
+    }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     val openDocumentLauncher = rememberLauncherForActivityResult(
@@ -172,10 +187,33 @@ fun BookshelfScreen(
                         }
                     },
                 )
+            } else if (searchActive) {
+                TopAppBar(
+                    title = {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("搜索书名 / 作者") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            searchActive = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
+                        }
+                    },
+                )
             } else {
                 LargeTopAppBar(
                     title = { Text("书架") },
                     actions = {
+                        IconButton(onClick = { searchActive = true }) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索书架")
+                        }
                         IconButton(onClick = viewModel::toggleViewMode) {
                             if (gridView) {
                                 Icon(
@@ -236,6 +274,12 @@ fun BookshelfScreen(
             when {
                 loading -> LoadingIndicator(modifier = Modifier.align(Alignment.Center))
                 books.isEmpty() -> EmptyBookshelf(onImportClick = launchImport)
+                displayBooks.isEmpty() -> Text(
+                    text = "没有匹配「$searchQuery」的书籍",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.Center),
+                )
                 else -> {
                     val recent = remember(books) {
                         books.filter { it.book.lastReadAt != null }
@@ -243,13 +287,13 @@ fun BookshelfScreen(
                             .take(10)
                     }
                     Column(modifier = Modifier.fillMaxSize()) {
-                        if (!selectionMode && recent.isNotEmpty()) {
+                        if (!selectionMode && searchQuery.isBlank() && recent.isNotEmpty()) {
                             RecentReadsCarousel(recent = recent, onOpenBook = onOpenBook)
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             if (gridView) {
                                 BookGrid(
-                                    books = books,
+                                    books = displayBooks,
                                     selectedIds = selectedIds,
                                     selectionMode = selectionMode,
                                     minColumnWidth = when (foldableUiState.widthCategory) {
@@ -262,7 +306,7 @@ fun BookshelfScreen(
                                 )
                             } else {
                                 BookList(
-                                    books = books,
+                                    books = displayBooks,
                                     selectedIds = selectedIds,
                                     selectionMode = selectionMode,
                                     onOpenBook = onOpenBook,
