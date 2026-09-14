@@ -2,6 +2,7 @@ package com.llzx373.foldreader.core.data.repository
 
 import com.llzx373.foldreader.core.data.db.BookDao
 import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import kotlinx.coroutines.flow.Flow
@@ -12,6 +13,9 @@ class BookshelfRepositoryImpl(
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
+
+    override fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>> =
+        bookDao.observeBookshelfWithProgress()
 
     override suspend fun getBook(bookId: Long): BookEntity? = bookDao.getById(bookId)
 

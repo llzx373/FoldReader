@@ -25,6 +25,7 @@ fun FoldReaderNavHost(
     ) {
         composable(Routes.BOOKSHELF) {
             BookshelfScreen(
+                foldableUiState = foldableUiState,
                 onOpenBook = { bookId -> navController.navigate(Routes.reader(bookId)) },
             )
         }

@@ -27,6 +27,7 @@ class SettingsRepositoryImpl(
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+        val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -43,6 +44,7 @@ class SettingsRepositoryImpl(
                 volumeKeyPagingEnabled = prefs[Keys.VOLUME_KEY_PAGING_ENABLED]
                     ?: defaults.volumeKeyPagingEnabled,
                 keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
+                bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
             )
         }
 
@@ -72,5 +74,9 @@ class SettingsRepositoryImpl(
 
     override suspend fun setKeepScreenOn(enabled: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.KEEP_SCREEN_ON] = enabled }
+    }
+
+    override suspend fun setBookshelfGridView(gridView: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.BOOKSHELF_GRID_VIEW] = gridView }
     }
 }

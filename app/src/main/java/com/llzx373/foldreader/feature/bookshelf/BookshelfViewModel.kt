@@ -7,13 +7,15 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
-import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,11 +34,19 @@ sealed interface ImportUiState {
 
 class BookshelfViewModel(
     private val importBook: ImportBookUseCase,
-    bookshelfRepository: BookshelfRepository,
+    private val bookshelfRepository: BookshelfRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
-    val books: StateFlow<List<BookEntity>> = bookshelfRepository.observeBookshelf()
+    val books: StateFlow<List<BookWithProgress>> = bookshelfRepository.observeBookshelfWithProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val gridView: StateFlow<Boolean> = settingsRepository.preferences
+        .map { it.bookshelfGridView }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
 
     private val _importState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     val importState: StateFlow<ImportUiState> = _importState.asStateFlow()
@@ -62,9 +72,38 @@ class BookshelfViewModel(
         _importState.value = ImportUiState.Idle
     }
 
+    fun toggleViewMode() {
+        viewModelScope.launch { settingsRepository.setBookshelfGridView(!gridView.value) }
+    }
+
+    fun toggleSelection(bookId: Long) {
+        _selectedIds.value = _selectedIds.value.let { ids ->
+            if (bookId in ids) ids - bookId else ids + bookId
+        }
+    }
+
+    fun clearSelection() {
+        _selectedIds.value = emptySet()
+    }
+
+    fun deleteSelected() {
+        val ids = _selectedIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            bookshelfRepository.deleteBooks(ids)
+            _selectedIds.value = emptySet()
+        }
+    }
+
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
-            initializer { BookshelfViewModel(container.importBookUseCase, container.bookshelfRepository) }
+            initializer {
+                BookshelfViewModel(
+                    importBook = container.importBookUseCase,
+                    bookshelfRepository = container.bookshelfRepository,
+                    settingsRepository = container.settingsRepository,
+                )
+            }
         }
     }
 }

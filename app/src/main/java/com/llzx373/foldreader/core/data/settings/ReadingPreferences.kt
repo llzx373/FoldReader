@@ -12,6 +12,7 @@ data class ReadingPreferences(
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,
     val keepScreenOn: Boolean = false,
+    val bookshelfGridView: Boolean = true,
 )
 
 internal inline fun <reified T : Enum<T>> enumOrDefault(name: String?, default: T): T =

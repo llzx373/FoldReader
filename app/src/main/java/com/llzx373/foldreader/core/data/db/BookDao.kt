@@ -1,17 +1,32 @@
 package com.llzx373.foldreader.core.data.db
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+data class BookWithProgress(
+    @Embedded val book: BookEntity,
+    val charOffset: Long?,
+)
+
 @Dao
 interface BookDao {
 
     @Query("SELECT * FROM books ORDER BY COALESCE(lastReadAt, importedAt) DESC")
     fun observeBookshelf(): Flow<List<BookEntity>>
+
+    @Query(
+        """
+        SELECT books.*, reading_progress.charOffset AS charOffset
+        FROM books LEFT JOIN reading_progress ON reading_progress.bookId = books.id
+        ORDER BY COALESCE(books.lastReadAt, books.importedAt) DESC
+        """,
+    )
+    fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>>
 
     @Query("SELECT * FROM books WHERE id = :bookId")
     suspend fun getById(bookId: Long): BookEntity?
