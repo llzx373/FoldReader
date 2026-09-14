@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
+import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.Chapter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,11 +83,21 @@ fun ReaderMenuPanel(
     onOpenCatalog: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
     onSetBrightness: (Float) -> Unit,
+    onSetFontSize: (Float) -> Unit,
+    onSetLineSpacing: (Float) -> Unit,
+    onSetMarginLevel: (Int) -> Unit,
+    onSelectTheme: (ReadingTheme) -> Unit,
+    onPickCustomBackground: (Int) -> Unit,
+    onPickCustomText: (Int) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showBrightness by remember { mutableStateOf(false) }
+    var showLayout by remember { mutableStateOf(false) }
+    var showTheme by remember { mutableStateOf(false) }
     var sliderFraction by remember { mutableStateOf(progressFraction) }
+    var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
+    var lineSpacingDraft by remember { mutableStateOf<Float?>(null) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = colors.background,
@@ -105,6 +116,68 @@ fun ReaderMenuPanel(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.align(Alignment.End),
             )
+            if (showLayout) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("字号", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = fontSizeDraft ?: prefs.fontSizeSp,
+                        onValueChange = { fontSizeDraft = it },
+                        onValueChangeFinished = {
+                            fontSizeDraft?.let(onSetFontSize)
+                            fontSizeDraft = null
+                        },
+                        valueRange = 12f..32f,
+                        steps = 9,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = "%.0f".format(fontSizeDraft ?: prefs.fontSizeSp),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("行距", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = lineSpacingDraft ?: prefs.lineSpacingMultiplier,
+                        onValueChange = { lineSpacingDraft = it },
+                        onValueChangeFinished = {
+                            lineSpacingDraft?.let(onSetLineSpacing)
+                            lineSpacingDraft = null
+                        },
+                        valueRange = 1.0f..2.2f,
+                        steps = 11,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = "%.1f".format(lineSpacingDraft ?: prefs.lineSpacingMultiplier),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("边距", style = MaterialTheme.typography.labelMedium)
+                    Row(modifier = Modifier.padding(start = 12.dp)) {
+                        listOf("小", "中", "大").forEachIndexed { level, label ->
+                            TextButton(
+                                onClick = { onSetMarginLevel(level) },
+                                enabled = prefs.marginLevel != level,
+                            ) { Text(label) }
+                        }
+                    }
+                }
+            }
+            if (showTheme) {
+                ThemePicker(
+                    prefs = prefs,
+                    onSelectTheme = onSelectTheme,
+                    onPickCustomBackground = onPickCustomBackground,
+                    onPickCustomText = onPickCustomText,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
             if (showBrightness) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("亮度", style = MaterialTheme.typography.labelMedium)
@@ -124,7 +197,26 @@ fun ReaderMenuPanel(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 TextButton(onClick = onOpenCatalog) { Text("目录") }
-                TextButton(onClick = { showBrightness = !showBrightness }) { Text("亮度") }
+                TextButton(onClick = {
+                    showLayout = !showLayout
+                    showBrightness = false
+                    showTheme = false
+                }) { Text("版式") }
+                TextButton(onClick = {
+                    showTheme = !showTheme
+                    showBrightness = false
+                    showLayout = false
+                }) { Text("主题") }
+                TextButton(onClick = {
+                    showBrightness = !showBrightness
+                    showLayout = false
+                    showTheme = false
+                }) { Text("亮度") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
                 TextButton(onClick = onCyclePageTurnMode) {
                     Text("翻页：${pageTurnModeLabel(prefs.pageTurnMode)}")
                 }

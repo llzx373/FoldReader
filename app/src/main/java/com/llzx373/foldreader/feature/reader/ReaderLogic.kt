@@ -22,3 +22,9 @@ fun progressPercentOf(offset: Long, totalChars: Long): Float =
 
 fun formatPercent(fraction: Float): String =
     "%.1f%%".format(fraction.coerceIn(0f, 1f) * 100f)
+
+fun marginDpFor(level: Int): Pair<Float, Float> = when (level.coerceIn(0, 2)) {
+    0 -> 8f to 12f
+    2 -> 24f to 36f
+    else -> 16f to 24f
+}

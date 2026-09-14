@@ -10,10 +10,12 @@ import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
+import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.BookParser
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.core.reader.LayoutConfig
 import com.llzx373.foldreader.core.reader.Page
 import com.llzx373.foldreader.core.reader.Paginator
@@ -62,6 +64,7 @@ class ReaderViewModel(
     private val bookshelfRepository: BookshelfRepository,
     private val settingsRepository: SettingsRepository,
     private val parser: BookParser,
+    private val fontManager: FontManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -137,13 +140,23 @@ class ReaderViewModel(
             viewport.filterNotNull(),
             settingsRepository.preferences
                 .distinctUntilChanged { a, b ->
-                    a.fontSizeSp == b.fontSizeSp && a.lineSpacingMultiplier == b.lineSpacingMultiplier
+                    a.fontSizeSp == b.fontSizeSp &&
+                        a.lineSpacingMultiplier == b.lineSpacingMultiplier &&
+                        a.marginLevel == b.marginLevel &&
+                        a.fontKey == b.fontKey
                 },
         ) { v, p -> v to p }.collectLatest { (v, p) ->
             val source = content ?: return@collectLatest
+            val (marginH, marginV) = marginDpFor(p.marginLevel)
             val config = LayoutConfig(
                 fontSizeSp = p.fontSizeSp,
                 lineSpacingMultiplier = p.lineSpacingMultiplier,
+                marginLeftDp = marginH,
+                marginRightDp = marginH,
+                marginTopDp = marginV,
+                marginBottomDp = marginV,
+                fontKey = p.fontKey,
+                typeface = fontManager.resolve(p.fontKey),
             )
             val newPaginator = Paginator(
                 content = source,
@@ -241,6 +254,26 @@ class ReaderViewModel(
         viewModelScope.launch { settingsRepository.setReaderBrightness(brightness) }
     }
 
+    fun setFontSize(sizeSp: Float) {
+        viewModelScope.launch { settingsRepository.setFontSize(sizeSp) }
+    }
+
+    fun setLineSpacing(multiplier: Float) {
+        viewModelScope.launch { settingsRepository.setLineSpacing(multiplier) }
+    }
+
+    fun setMarginLevel(level: Int) {
+        viewModelScope.launch { settingsRepository.setMarginLevel(level) }
+    }
+
+    fun setTheme(theme: ReadingTheme) {
+        viewModelScope.launch { settingsRepository.setTheme(theme) }
+    }
+
+    fun setCustomColors(backgroundArgb: Int?, textArgb: Int?) {
+        viewModelScope.launch { settingsRepository.setCustomColors(backgroundArgb, textArgb) }
+    }
+
     fun setReadingActive(active: Boolean) {
         val now = System.currentTimeMillis()
         if (active) timer.start(now) else timer.stop(now)
@@ -292,6 +325,7 @@ class ReaderViewModel(
                     bookshelfRepository = container.bookshelfRepository,
                     settingsRepository = container.settingsRepository,
                     parser = container.txtBookParser,
+                    fontManager = container.fontManager,
                 )
             }
         }

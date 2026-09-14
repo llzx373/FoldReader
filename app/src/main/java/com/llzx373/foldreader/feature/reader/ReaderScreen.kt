@@ -77,7 +77,7 @@ fun ReaderScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.preferences.collectAsState()
-    val colors = readerColors(prefs.themeId)
+    val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
 
     var menuVisible by remember { mutableStateOf(false) }
@@ -282,6 +282,16 @@ fun ReaderScreen(
                     viewModel.setPageTurnMode(nextPageTurnMode(prefs.pageTurnMode))
                 },
                 onSetBrightness = viewModel::setReaderBrightness,
+                onSetFontSize = viewModel::setFontSize,
+                onSetLineSpacing = viewModel::setLineSpacing,
+                onSetMarginLevel = viewModel::setMarginLevel,
+                onSelectTheme = viewModel::setTheme,
+                onPickCustomBackground = { argb ->
+                    viewModel.setCustomColors(argb, prefs.customTextArgb)
+                },
+                onPickCustomText = { argb ->
+                    viewModel.setCustomColors(prefs.customBackgroundArgb, argb)
+                },
                 onOpenSettings = onOpenSettings,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

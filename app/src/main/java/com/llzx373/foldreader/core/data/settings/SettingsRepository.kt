@@ -7,7 +7,11 @@ interface SettingsRepository {
 
     suspend fun setFontSize(sizeSp: Float)
     suspend fun setLineSpacing(multiplier: Float)
+    suspend fun setMarginLevel(level: Int)
     suspend fun setTheme(theme: ReadingTheme)
+    suspend fun setCustomColors(backgroundArgb: Int?, textArgb: Int?)
+    suspend fun setDarkThemeOption(option: DarkThemeOption)
+    suspend fun setFontKey(fontKey: String)
     suspend fun setPageTurnMode(mode: PageTurnMode)
     suspend fun setPageTurnHotspotRatio(ratio: Float)
     suspend fun setVolumeKeyPagingEnabled(enabled: Boolean)

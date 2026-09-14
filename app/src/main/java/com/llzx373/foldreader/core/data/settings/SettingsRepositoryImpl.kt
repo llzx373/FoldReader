@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -22,7 +23,12 @@ class SettingsRepositoryImpl(
     private object Keys {
         val FONT_SIZE_SP = floatPreferencesKey("font_size_sp")
         val LINE_SPACING_MULTIPLIER = floatPreferencesKey("line_spacing_multiplier")
+        val MARGIN_LEVEL = intPreferencesKey("margin_level")
         val THEME_ID = stringPreferencesKey("theme_id")
+        val CUSTOM_BACKGROUND_ARGB = intPreferencesKey("custom_background_argb")
+        val CUSTOM_TEXT_ARGB = intPreferencesKey("custom_text_argb")
+        val DARK_THEME_OPTION = stringPreferencesKey("dark_theme_option")
+        val FONT_KEY = stringPreferencesKey("font_key")
         val PAGE_TURN_MODE = stringPreferencesKey("page_turn_mode")
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
@@ -42,7 +48,12 @@ class SettingsRepositoryImpl(
                 fontSizeSp = prefs[Keys.FONT_SIZE_SP] ?: defaults.fontSizeSp,
                 lineSpacingMultiplier = prefs[Keys.LINE_SPACING_MULTIPLIER]
                     ?: defaults.lineSpacingMultiplier,
+                marginLevel = prefs[Keys.MARGIN_LEVEL] ?: defaults.marginLevel,
                 themeId = enumOrDefault(prefs[Keys.THEME_ID], defaults.themeId),
+                customBackgroundArgb = prefs[Keys.CUSTOM_BACKGROUND_ARGB],
+                customTextArgb = prefs[Keys.CUSTOM_TEXT_ARGB],
+                darkThemeOption = enumOrDefault(prefs[Keys.DARK_THEME_OPTION], defaults.darkThemeOption),
+                fontKey = prefs[Keys.FONT_KEY] ?: defaults.fontKey,
                 pageTurnMode = enumOrDefault(prefs[Keys.PAGE_TURN_MODE], defaults.pageTurnMode),
                 pageTurnHotspotRatio = prefs[Keys.PAGE_TURN_HOTSPOT_RATIO]
                     ?: defaults.pageTurnHotspotRatio,
@@ -64,6 +75,27 @@ class SettingsRepositoryImpl(
 
     override suspend fun setLineSpacing(multiplier: Float) {
         context.readingPreferencesStore.edit { it[Keys.LINE_SPACING_MULTIPLIER] = multiplier }
+    }
+
+    override suspend fun setMarginLevel(level: Int) {
+        context.readingPreferencesStore.edit { it[Keys.MARGIN_LEVEL] = level.coerceIn(0, 2) }
+    }
+
+    override suspend fun setCustomColors(backgroundArgb: Int?, textArgb: Int?) {
+        context.readingPreferencesStore.edit { prefs ->
+            if (backgroundArgb == null) prefs.remove(Keys.CUSTOM_BACKGROUND_ARGB)
+            else prefs[Keys.CUSTOM_BACKGROUND_ARGB] = backgroundArgb
+            if (textArgb == null) prefs.remove(Keys.CUSTOM_TEXT_ARGB)
+            else prefs[Keys.CUSTOM_TEXT_ARGB] = textArgb
+        }
+    }
+
+    override suspend fun setDarkThemeOption(option: DarkThemeOption) {
+        context.readingPreferencesStore.edit { it[Keys.DARK_THEME_OPTION] = option.name }
+    }
+
+    override suspend fun setFontKey(fontKey: String) {
+        context.readingPreferencesStore.edit { it[Keys.FONT_KEY] = fontKey }
     }
 
     override suspend fun setTheme(theme: ReadingTheme) {

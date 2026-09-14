@@ -4,10 +4,17 @@ enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, AMOLED, CUSTOM }
 
 enum class PageTurnMode { SIMULATION, COVER, NONE, SCROLL }
 
+enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
+
 data class ReadingPreferences(
     val fontSizeSp: Float = 18f,
     val lineSpacingMultiplier: Float = 1.5f,
+    val marginLevel: Int = 1,
     val themeId: ReadingTheme = ReadingTheme.GREEN,
+    val customBackgroundArgb: Int? = null,
+    val customTextArgb: Int? = null,
+    val darkThemeOption: DarkThemeOption = DarkThemeOption.SYSTEM,
+    val fontKey: String = "default",
     val pageTurnMode: PageTurnMode = PageTurnMode.COVER,
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,

@@ -52,6 +52,23 @@ class ReaderLogicTest {
     }
 
     @Test
+    fun `margin levels map to dp pairs`() {
+        assertEquals(8f to 12f, marginDpFor(0))
+        assertEquals(16f to 24f, marginDpFor(1))
+        assertEquals(24f to 36f, marginDpFor(2))
+        assertEquals(8f to 12f, marginDpFor(-1))
+        assertEquals(24f to 36f, marginDpFor(99))
+    }
+
+    @Test
+    fun `font key display names`() {
+        assertEquals("默认", com.llzx373.foldreader.core.reader.FontManager.displayNameOf("default"))
+        assertEquals("衬线", com.llzx373.foldreader.core.reader.FontManager.displayNameOf("serif"))
+        assertEquals("等宽", com.llzx373.foldreader.core.reader.FontManager.displayNameOf("monospace"))
+        assertEquals("MyFont", com.llzx373.foldreader.core.reader.FontManager.displayNameOf("file:MyFont.otf"))
+    }
+
+    @Test
     fun `page turn mode cycling skips simulation`() {
         assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.NONE,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER))

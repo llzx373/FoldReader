@@ -9,7 +9,11 @@ data class ReaderColors(
     val accent: Color,
 )
 
-fun readerColors(theme: ReadingTheme): ReaderColors = when (theme) {
+fun readerColors(
+    theme: ReadingTheme,
+    customBackgroundArgb: Int? = null,
+    customTextArgb: Int? = null,
+): ReaderColors = when (theme) {
     ReadingTheme.GREEN -> ReaderColors(
         background = Color(0xFFCCE8CF),
         text = Color(0xFF1B2A1B),
@@ -35,5 +39,10 @@ fun readerColors(theme: ReadingTheme): ReaderColors = when (theme) {
         text = Color(0xFFB0B0B0),
         accent = Color(0xFF90CAF9),
     )
-    ReadingTheme.CUSTOM -> readerColors(ReadingTheme.GRAY_WHITE)
+    ReadingTheme.CUSTOM -> ReaderColors(
+        background = customBackgroundArgb?.let { Color(it) } ?: Color(0xFFF5F5F5),
+        text = customTextArgb?.let { Color(it) } ?: Color(0xFF212121),
+        accent = Color(0xFF616161),
+    )
 }
+

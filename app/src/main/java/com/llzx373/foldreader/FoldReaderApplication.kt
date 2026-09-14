@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 class AppContainer(context: Context) {
     val pendingImportUri = MutableStateFlow<Uri?>(null)
+    val appContext: Context = context.applicationContext
     val foldableStateProvider = FoldableStateProvider(
         context = context,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -32,6 +33,7 @@ class AppContainer(context: Context) {
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val txtBookParser = TxtBookParser(context)
+    val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
     val importBookUseCase = ImportBookUseCase(
         context = context,
         parser = txtBookParser,
