@@ -103,6 +103,17 @@ class TxtBookContentTest {
     }
 
     @Test
+    fun `多字节字符跨 256KB 读块边界不死循环不错字`() = runBlocking {
+        // 262143 个单字节 + 一个双字节字符，使其两字节恰好落在 256KB 读块边界两侧
+        val text = "a".repeat(262143) + "床" + "b".repeat(1000)
+        val content = createContent(text, gbk)
+
+        assertEquals(text.length.toLong(), content.charCount)
+        assertEquals(text, content.read(0L..text.length - 1L))
+        assertEquals("床", content.read(262143L..262143L))
+    }
+
+    @Test
     fun `索引快照可恢复且读取一致`() = runBlocking {
         val text = "第二章 快照恢复测试。".repeat(60)
         val file = File.createTempFile("foldreader-snapshot", ".txt")

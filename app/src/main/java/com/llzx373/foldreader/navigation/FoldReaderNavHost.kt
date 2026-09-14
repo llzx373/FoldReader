@@ -49,11 +49,20 @@ fun FoldReaderNavHost(
             BookshelfScreen(
                 foldableUiState = foldableUiState,
                 onOpenBook = { bookId -> navController.navigate(Routes.reader(bookId)) },
+                onOpenBookAt = { bookId, anchor ->
+                    navController.navigate(Routes.reader(bookId, anchor))
+                },
             )
         }
         composable(
             route = Routes.READER,
-            arguments = listOf(navArgument("bookId") { type = NavType.LongType }),
+            arguments = listOf(
+                navArgument("bookId") { type = NavType.LongType },
+                navArgument("anchor") {
+                    type = NavType.LongType
+                    defaultValue = -1L
+                },
+            ),
             // 阅读器：自右推入 + 淡入；返回时向右滑出
             enterTransition = {
                 slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(TRANSITION_MS)) +
@@ -71,6 +80,7 @@ fun FoldReaderNavHost(
         ) { backStackEntry ->
             ReaderScreen(
                 bookId = backStackEntry.arguments?.getLong("bookId") ?: 0L,
+                initialAnchor = backStackEntry.arguments?.getLong("anchor") ?: -1L,
                 onBack = { navController.popBackStack() },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 foldableUiState = foldableUiState,

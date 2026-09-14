@@ -27,11 +27,13 @@ interface BookshelfRepository {
     suspend fun saveChapters(bookId: Long, chapters: List<Chapter>)
 
     fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>>
+    fun observeAllBookmarks(): Flow<List<BookmarkEntity>>
     suspend fun addBookmark(bookmark: BookmarkEntity): Long
     suspend fun renameBookmark(bookmark: BookmarkEntity)
     suspend fun deleteBookmark(id: Long)
 
     fun observeAnnotations(bookId: Long): Flow<List<AnnotationEntity>>
+    fun observeAllAnnotations(): Flow<List<AnnotationEntity>>
     suspend fun addAnnotation(annotation: AnnotationEntity): Long
     suspend fun updateAnnotation(annotation: AnnotationEntity)
     suspend fun deleteAnnotation(id: Long)

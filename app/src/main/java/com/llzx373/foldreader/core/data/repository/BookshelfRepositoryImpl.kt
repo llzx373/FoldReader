@@ -75,6 +75,8 @@ class BookshelfRepositoryImpl(
     override fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>> =
         bookmarkDao.observeByBook(bookId)
 
+    override fun observeAllBookmarks(): Flow<List<BookmarkEntity>> = bookmarkDao.observeAll()
+
     override suspend fun addBookmark(bookmark: BookmarkEntity): Long = bookmarkDao.insert(bookmark)
 
     override suspend fun renameBookmark(bookmark: BookmarkEntity) = bookmarkDao.update(bookmark)
@@ -83,6 +85,8 @@ class BookshelfRepositoryImpl(
 
     override fun observeAnnotations(bookId: Long): Flow<List<AnnotationEntity>> =
         annotationDao.observeByBook(bookId)
+
+    override fun observeAllAnnotations(): Flow<List<AnnotationEntity>> = annotationDao.observeAll()
 
     override suspend fun addAnnotation(annotation: AnnotationEntity): Long =
         annotationDao.insert(annotation)

@@ -103,12 +103,13 @@ fun ReaderScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     foldableUiState: FoldableUiState,
+    initialAnchor: Long = -1L,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as FoldReaderApplication
     val viewModel: ReaderViewModel = viewModel(
         key = "reader-$bookId",
-        factory = ReaderViewModel.factory(app.container, bookId),
+        factory = ReaderViewModel.factory(app.container, bookId, initialAnchor),
     )
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.preferences.collectAsState()

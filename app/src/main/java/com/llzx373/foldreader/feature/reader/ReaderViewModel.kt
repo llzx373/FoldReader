@@ -78,6 +78,7 @@ class ReaderViewModel(
     private val settingsRepository: SettingsRepository,
     private val parser: BookParser,
     private val fontManager: FontManager,
+    private val initialAnchor: Long = -1L,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -324,7 +325,10 @@ class ReaderViewModel(
                 val progress = bookshelfRepository.getProgress(bookId)
                 baseReadingMillis = progress?.totalReadingMillis ?: 0L
                 firstReadAtMs = progress?.firstReadAt ?: 0L
-                anchorOffset.value = progress?.charOffset ?: 0L
+                anchorOffset.value = when {
+                    initialAnchor >= 0L -> initialAnchor.coerceAtMost(opened.first.charCount)
+                    else -> progress?.charOffset ?: 0L
+                }
                 _uiState.update {
                     it.copy(bookTitle = book.title, totalChars = opened.first.charCount)
                 }
@@ -746,7 +750,11 @@ class ReaderViewModel(
     }
 
     companion object {
-        fun factory(container: AppContainer, bookId: Long): ViewModelProvider.Factory = viewModelFactory {
+        fun factory(
+            container: AppContainer,
+            bookId: Long,
+            initialAnchor: Long = -1L,
+        ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 ReaderViewModel(
                     bookId = bookId,
@@ -754,6 +762,7 @@ class ReaderViewModel(
                     settingsRepository = container.settingsRepository,
                     parser = container.txtBookParser,
                     fontManager = container.fontManager,
+                    initialAnchor = initialAnchor,
                 )
             }
         }

@@ -37,6 +37,11 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val txtBookParser = TxtBookParser(context)
     val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
+    val backupManager = com.llzx373.foldreader.core.backup.BackupManager(
+        context = appContext,
+        bookshelfRepository = bookshelfRepository,
+        settingsRepository = settingsRepository,
+    )
     val importBookUseCase = ImportBookUseCase(
         context = context,
         parser = txtBookParser,

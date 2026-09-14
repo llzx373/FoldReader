@@ -49,21 +49,29 @@ object TxtIndexer {
 
         while (true) {
             if (!endOfInputSent) {
-                if (!inBuf.hasRemaining()) {
-                    if (eof) {
-                        decoder.decode(inBuf, outBuf, true)
-                        endOfInputSent = true
-                    } else {
-                        inBuf.clear()
-                        val n = channel.read(inBuf)
-                        inBuf.flip()
-                        if (n < 0) eof = true else totalRead += n
-                        continue
-                    }
+                if (eof) {
+                    // 文件尾：尾部不完整字节按 REPLACE 收尾
+                    decoder.decode(inBuf, outBuf, true)
+                    endOfInputSent = true
+                } else if (!inBuf.hasRemaining()) {
+                    inBuf.clear()
+                    val n = channel.read(inBuf)
+                    inBuf.flip()
+                    if (n < 0) eof = true else totalRead += n
+                    continue
                 } else {
+                    val positionBefore = inBuf.position()
                     val result = decoder.decode(inBuf, outBuf, false)
                     if (result.isOverflow && outBuf.position() < blockChars) {
                         emitBlock()
+                        continue
+                    }
+                    if (result.isUnderflow && inBuf.position() == positionBefore) {
+                        // inBuf 尾部是不完整的多字节字符：压实并补读下一块
+                        inBuf.compact()
+                        val n = channel.read(inBuf)
+                        inBuf.flip()
+                        if (n < 0) eof = true else totalRead += n
                         continue
                     }
                 }

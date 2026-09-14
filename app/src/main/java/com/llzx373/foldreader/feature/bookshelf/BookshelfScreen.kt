@@ -96,6 +96,7 @@ import kotlinx.coroutines.launch
 fun BookshelfScreen(
     foldableUiState: FoldableUiState,
     onOpenBook: (Long) -> Unit,
+    onOpenBookAt: (bookId: Long, anchor: Long) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as FoldReaderApplication
@@ -105,6 +106,8 @@ fun BookshelfScreen(
     val gridView by viewModel.gridView.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
+    val allBookmarks by viewModel.allBookmarks.collectAsState()
+    val allAnnotations by viewModel.allAnnotations.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
@@ -112,6 +115,7 @@ fun BookshelfScreen(
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var detailBookId by rememberSaveable { mutableStateOf(0L) }
+    var showBookmarkOverview by rememberSaveable { mutableStateOf(false) }
     val selectionMode = selectedIds.isNotEmpty()
     val displayBooks = remember(books, searchQuery) {
         val q = searchQuery.trim()
@@ -218,6 +222,9 @@ fun BookshelfScreen(
                 LargeTopAppBar(
                     title = { Text("书架") },
                     actions = {
+                        IconButton(onClick = { showBookmarkOverview = true }) {
+                            BookmarkOverviewIcon(contentDescription = "书签与标注")
+                        }
                         IconButton(onClick = { searchActive = true }) {
                             Icon(Icons.Filled.Search, contentDescription = "搜索书架")
                         }
@@ -354,6 +361,19 @@ fun BookshelfScreen(
                 detailBookId = 0L
                 viewModel.clearSelection()
             },
+        )
+    }
+
+    if (showBookmarkOverview) {
+        BookmarkOverviewDialog(
+            books = books,
+            bookmarks = allBookmarks,
+            annotations = allAnnotations,
+            onJump = { bookId, anchor ->
+                showBookmarkOverview = false
+                onOpenBookAt(bookId, anchor)
+            },
+            onDismiss = { showBookmarkOverview = false },
         )
     }
 

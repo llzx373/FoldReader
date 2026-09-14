@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
+import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
@@ -25,6 +26,7 @@ class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val fontManager: FontManager,
     private val bookshelfRepository: com.llzx373.foldreader.core.data.repository.BookshelfRepository,
+    private val backupManager: BackupManager,
 ) : ViewModel() {
 
     val preferences: StateFlow<ReadingPreferences> = settingsRepository.preferences
@@ -103,6 +105,21 @@ class SettingsViewModel(
         }
     }
 
+    fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
+        launch {
+            val error = runCatching { backupManager.exportTo(uri) }.exceptionOrNull()?.message
+            onResult(error)
+        }
+    }
+
+    fun importBackup(uri: Uri, onResult: (BackupManager.ImportResult?, String?) -> Unit) {
+        launch {
+            runCatching { backupManager.importFrom(uri) }
+                .onSuccess { onResult(it, null) }
+                .onFailure { onResult(null, it.message ?: "导入失败") }
+        }
+    }
+
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch { block() }
 
     companion object {
@@ -112,6 +129,7 @@ class SettingsViewModel(
                     settingsRepository = container.settingsRepository,
                     fontManager = container.fontManager,
                     bookshelfRepository = container.bookshelfRepository,
+                    backupManager = container.backupManager,
                 )
             }
         }

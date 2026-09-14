@@ -56,6 +56,14 @@ class BookshelfViewModel(
     private val _importState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     val importState: StateFlow<ImportUiState> = _importState.asStateFlow()
 
+    val allBookmarks: StateFlow<List<com.llzx373.foldreader.core.data.db.BookmarkEntity>> =
+        bookshelfRepository.observeAllBookmarks()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val allAnnotations: StateFlow<List<com.llzx373.foldreader.core.data.db.AnnotationEntity>> =
+        bookshelfRepository.observeAllAnnotations()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     fun import(uri: Uri, openAfterImport: Boolean) {
         if (_importState.value is ImportUiState.Importing) return
         _importState.value = ImportUiState.Importing

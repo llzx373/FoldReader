@@ -3,6 +3,7 @@ package com.llzx373.foldreader.feature.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
@@ -42,6 +44,9 @@ import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.feature.reader.ThemePicker
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +66,41 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             viewModel.importFont(uri, name) { ok ->
                 val message = if (ok) "字体已导入并应用" else "字体导入失败"
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportBackup(uri) { error ->
+                val message = error?.let { "导出失败：$it" } ?: "备份已导出"
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBackup(uri) { result, error ->
+                val message = when {
+                    error != null -> "导入失败：$error"
+                    result == null -> "导入失败"
+                    else -> buildString {
+                        append(
+                            "已恢复 ${result.restoredBooks} 本书" +
+                                "（书签 ${result.restoredBookmarks}、标注 ${result.restoredAnnotations}）",
+                        )
+                        if (result.missingBookTitles.isNotEmpty()) {
+                            append("；文件缺失 ${result.missingBookTitles.size} 本：")
+                            append(result.missingBookTitles.take(3).joinToString("、"))
+                            if (result.missingBookTitles.size > 3) append(" 等")
+                        }
+                    }
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -214,8 +254,45 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             ReadingStatsSection(stats = readingStats)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("备份与恢复")
+            ListItem(
+                headlineContent = { Text("导出备份") },
+                supportingContent = { Text("书架数据与阅读偏好导出为 JSON（不含书籍文件本身）") },
+                modifier = Modifier.clickable {
+                    backupExportLauncher.launch(defaultBackupFileName())
+                },
+            )
+            ListItem(
+                headlineContent = { Text("导入备份") },
+                supportingContent = { Text("按内容匹配恢复进度/书签/标注，本地缺失的书籍会列出") },
+                modifier = Modifier.clickable {
+                    backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("关于")
+            ListItem(
+                headlineContent = { Text("FoldReader") },
+                supportingContent = { Text("版本 ${BuildConfig.VERSION_NAME}") },
+            )
+            ListItem(
+                headlineContent = { Text("开源许可") },
+                supportingContent = { Text("第三方开源组件许可清单（整理中）") },
+            )
+            ListItem(
+                headlineContent = { Text("设计理念") },
+                supportingContent = { Text("为折叠屏而生的本地阅读器：展开双页如书，折起单手从容") },
+            )
         }
     }
+}
+
+private fun defaultBackupFileName(): String {
+    val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
+    return "foldreader-backup-$stamp.json"
 }
 
 @Composable

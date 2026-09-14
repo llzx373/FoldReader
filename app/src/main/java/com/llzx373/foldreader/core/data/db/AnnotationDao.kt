@@ -12,6 +12,9 @@ interface AnnotationDao {
     @Query("SELECT * FROM annotations WHERE bookId = :bookId ORDER BY startCharOffset ASC")
     fun observeByBook(bookId: Long): Flow<List<AnnotationEntity>>
 
+    @Query("SELECT * FROM annotations ORDER BY bookId ASC, startCharOffset ASC")
+    fun observeAll(): Flow<List<AnnotationEntity>>
+
     @Insert
     suspend fun insert(annotation: AnnotationEntity): Long
 
