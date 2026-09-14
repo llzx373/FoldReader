@@ -12,11 +12,11 @@
 **验收标准**：外部 App 选择 FoldReader 打开 TXT 可导入入架；书架在折叠/展开/直板机正常展示。
 
 ### 1.1 项目骨架
-- [ ] 按说明书 8.1 建立包结构：`core/format`、`core/format/txt`、`core/reader`、`core/foldable`、`core/data`、`feature/bookshelf`、`feature/reader`、`feature/importer`、`feature/settings`
-- [ ] 创建 `FoldReaderApplication`（App 级容器：DB、仓库的手动依赖装配）并注册到 Manifest
-- [ ] 配置 Navigation Compose 路由骨架：书架 `/bookshelf`、阅读器 `/reader/{bookId}`、设置 `/settings`
-- [ ] 根界面接入 `NavigationSuiteScaffold`：折叠态底部导航（书架/设置），展开态侧边导航
-- [ ] 确认 `MainActivity` 折叠/展开切换不重建（`configChanges` 已配），补 `onNewIntent` 处理外部 VIEW Intent
+- [x] 按说明书 8.1 建立包结构：`core/format`、`core/format/txt`、`core/reader`、`core/foldable`、`core/data`、`feature/bookshelf`、`feature/reader`、`feature/importer`、`feature/settings`
+- [x] 创建 `FoldReaderApplication`（App 级容器：DB、仓库的手动依赖装配）并注册到 Manifest
+- [x] 配置 Navigation Compose 路由骨架：书架 `/bookshelf`、阅读器 `/reader/{bookId}`、设置 `/settings`
+- [x] 根界面接入 `NavigationSuiteScaffold`：折叠态底部导航（书架/设置），展开态侧边导航
+- [x] 确认 `MainActivity` 折叠/展开切换不重建（`configChanges` 已配），补 `onNewIntent` 处理外部 VIEW Intent
 
 ### 1.2 折叠感知层（core/foldable）
 - [ ] 定义 `FoldingPosture` 模型：`posture(CLOSED/FLAT/HALF_OPENED)`、`hingeBounds: Rect?`、`hingeOrientation(VERTICAL/HORIZONTAL)`
