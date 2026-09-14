@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.reader
 
+import androidx.compose.ui.geometry.Rect
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.foldable.FoldingPosture
 import com.llzx373.foldreader.core.foldable.HingeOrientation
@@ -10,6 +11,41 @@ import com.llzx373.foldreader.core.format.Chapter
 enum class TapZone { PREVIOUS, MENU, NEXT }
 
 enum class PageLayoutMode { SINGLE, DUAL }
+
+data class ContentRect(
+    val left: Float,
+    val top: Float,
+    val width: Float,
+    val height: Float,
+)
+
+fun contentRectFor(
+    posture: FoldingPosture,
+    hingeLocal: Rect?,
+    widthPx: Float,
+    heightPx: Float,
+): ContentRect {
+    val full = ContentRect(0f, 0f, widthPx, heightPx)
+    if (posture.posture != Posture.HALF_OPENED || hingeLocal == null) return full
+    return when (posture.hingeOrientation) {
+        HingeOrientation.HORIZONTAL -> ContentRect(
+            left = 0f,
+            top = 0f,
+            width = widthPx,
+            height = hingeLocal.top.coerceIn(0f, heightPx),
+        )
+        HingeOrientation.VERTICAL -> {
+            val leftWidth = hingeLocal.left.coerceIn(0f, widthPx)
+            val rightWidth = (widthPx - hingeLocal.right).coerceIn(0f, widthPx)
+            if (leftWidth >= rightWidth) {
+                ContentRect(0f, 0f, leftWidth, heightPx)
+            } else {
+                ContentRect(hingeLocal.right.coerceIn(0f, widthPx), 0f, rightWidth, heightPx)
+            }
+        }
+        null -> full
+    }
+}
 
 fun resolvePageLayoutMode(
     posture: FoldingPosture,

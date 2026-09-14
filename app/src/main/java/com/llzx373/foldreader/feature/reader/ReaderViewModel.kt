@@ -177,9 +177,11 @@ class ReaderViewModel(
             } else {
                 left
             }
+            val t0 = System.nanoTime()
             val spread = withContext(Dispatchers.Default) {
                 spreadFrom(left, right, v.dual, anchorOffset.value)
             }
+            logPaginateTiming(t0)
             pageMutex.withLock {
                 paginatorLeft = left
                 paginatorRight = right
@@ -380,6 +382,48 @@ class ReaderViewModel(
                 chapterIndex = chapterIndexAt(chapters, spread.left.charStart),
                 chapterCount = chapters.size,
             )
+        }
+        schedulePrefetch(spread)
+    }
+
+    private var paginateCount = 0
+    private var paginateTotalMs = 0L
+
+    private fun logPaginateTiming(t0Nanos: Long) {
+        if (!com.llzx373.foldreader.BuildConfig.DEBUG) return
+        val ms = (System.nanoTime() - t0Nanos) / 1_000_000L
+        paginateCount++
+        paginateTotalMs += ms
+        android.util.Log.d(
+            "ReaderPerf",
+            "spread paginated in ${ms}ms (avg ${paginateTotalMs / paginateCount}ms, n=$paginateCount)",
+        )
+    }
+
+    private fun schedulePrefetch(spread: PageSpread) {
+        viewModelScope.launch {
+            val snapshot = pageMutex.withLock { Triple(paginatorLeft, paginatorRight, dualActive) }
+            val left = snapshot.first ?: return@launch
+            val right = snapshot.second ?: return@launch
+            val dual = snapshot.third
+            val total = _uiState.value.totalChars
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    if (dual) {
+                        val r = spread.right
+                        if (r != null && r.charEnd < total) {
+                            val nextLeft = left.pageAt(r.charEnd)
+                            if (nextLeft.charEnd < total) right.pageAt(nextLeft.charEnd)
+                        }
+                        left.pageBefore(spread.left.charStart)?.let { prev ->
+                            left.pageBefore(prev.charStart)
+                        }
+                    } else {
+                        if (spread.left.charEnd < total) left.pageAt(spread.left.charEnd)
+                        left.pageBefore(spread.left.charStart)
+                    }
+                }
+            }
         }
     }
 

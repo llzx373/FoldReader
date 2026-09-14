@@ -115,12 +115,18 @@ fun ReaderScreen(
     val dual = layoutMode == PageLayoutMode.DUAL && !scrollMode
 
     val hingeLocal = foldableUiState.posture.hingeBounds
-        ?.takeIf { it.width > 0f }
+        ?.takeIf { it.width > 0f || it.height > 0f }
         ?.let { Rect(it.left - windowOffsetX, it.top - windowOffsetY, it.right - windowOffsetX, it.bottom - windowOffsetY) }
     val splitLeftPx = (hingeLocal?.left ?: size.width / 2f).coerceIn(0f, size.width.toFloat())
     val splitRightPx = (hingeLocal?.right ?: size.width / 2f).coerceIn(splitLeftPx, size.width.toFloat())
+    val contentRect = contentRectFor(
+        posture = foldableUiState.posture,
+        hingeLocal = hingeLocal,
+        widthPx = size.width.toFloat(),
+        heightPx = size.height.toFloat(),
+    )
 
-    LaunchedEffect(dual, size, splitLeftPx, splitRightPx, density.density, density.fontScale) {
+    LaunchedEffect(dual, size, splitLeftPx, splitRightPx, contentRect, density.density, density.fontScale) {
         if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
         if (dual) {
             viewModel.setViewports(
@@ -132,11 +138,12 @@ fun ReaderScreen(
                 scaledDensity = density.density * density.fontScale,
             )
         } else {
+            if (contentRect.width <= 0f || contentRect.height <= 0f) return@LaunchedEffect
             viewModel.setViewports(
                 dual = false,
-                leftWidthPx = size.width,
+                leftWidthPx = contentRect.width.roundToInt(),
                 rightWidthPx = 0,
-                heightPx = size.height,
+                heightPx = contentRect.height.roundToInt(),
                 density = density.density,
                 scaledDensity = density.density * density.fontScale,
             )
@@ -263,51 +270,59 @@ fun ReaderScreen(
                 modifier = Modifier.align(Alignment.Center),
                 color = colors.text,
             )
-            scrollMode -> ScrollContent(
-                viewModel = viewModel,
-                colors = colors,
-                pageHeight = size.height,
-            )
-            else -> {
-                val spread = uiState.spread
-                if (spread != null) {
-                    SpreadContent(
-                        spread = spread,
-                        config = uiState.layoutConfig,
+            else -> Box(
+                modifier = Modifier
+                    .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
+                    .width(with(density) { contentRect.width.toDp() })
+                    .height(with(density) { contentRect.height.toDp() }),
+            ) {
+                if (scrollMode) {
+                    ScrollContent(
+                        viewModel = viewModel,
                         colors = colors,
-                        dual = dual,
-                        leftDp = leftDp,
-                        hingeDp = hingeDp,
-                        rightDp = rightDp,
-                        innerPadPx = innerPadPx,
-                        modifier = Modifier.fillMaxSize(),
+                        pageHeight = contentRect.height.roundToInt(),
                     )
-                    val overlay = animSpread
-                    if (overlay != null) {
+                } else {
+                    val spread = uiState.spread
+                    if (spread != null) {
                         SpreadContent(
-                            spread = overlay,
+                            spread = spread,
                             config = uiState.layoutConfig,
                             colors = colors,
-                            dual = dual,
+                            dual = uiState.dualPage,
                             leftDp = leftDp,
                             hingeDp = hingeDp,
                             rightDp = rightDp,
                             innerPadPx = innerPadPx,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { translationX = animX.value },
+                            modifier = Modifier.fillMaxSize(),
                         )
-                    }
-                    if (dual) {
-                        val spineCenter = (splitLeftPx + splitRightPx) / 2f
-                        SpineOverlay(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(SPINE_OVERLAY_WIDTH)
-                                .offset {
-                                    IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
-                                },
-                        )
+                        val overlay = animSpread
+                        if (overlay != null) {
+                            SpreadContent(
+                                spread = overlay,
+                                config = uiState.layoutConfig,
+                                colors = colors,
+                                dual = uiState.dualPage,
+                                leftDp = leftDp,
+                                hingeDp = hingeDp,
+                                rightDp = rightDp,
+                                innerPadPx = innerPadPx,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { translationX = animX.value },
+                            )
+                        }
+                        if (dual) {
+                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
+                            SpineOverlay(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(SPINE_OVERLAY_WIDTH)
+                                    .offset {
+                                        IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
+                                    },
+                            )
+                        }
                     }
                 }
             }
