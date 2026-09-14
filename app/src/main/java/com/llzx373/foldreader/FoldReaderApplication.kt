@@ -31,6 +31,7 @@ class AppContainer(context: Context) {
         progressDao = database.readingProgressDao(),
         chapterDao = database.chapterDao(),
         bookmarkDao = database.bookmarkDao(),
+        annotationDao = database.annotationDao(),
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val txtBookParser = TxtBookParser(context)

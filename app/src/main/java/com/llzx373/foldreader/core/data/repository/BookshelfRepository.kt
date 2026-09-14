@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.data.repository
 
+import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
@@ -28,4 +29,9 @@ interface BookshelfRepository {
     suspend fun addBookmark(bookmark: BookmarkEntity): Long
     suspend fun renameBookmark(bookmark: BookmarkEntity)
     suspend fun deleteBookmark(id: Long)
+
+    fun observeAnnotations(bookId: Long): Flow<List<AnnotationEntity>>
+    suspend fun addAnnotation(annotation: AnnotationEntity): Long
+    suspend fun updateAnnotation(annotation: AnnotationEntity)
+    suspend fun deleteAnnotation(id: Long)
 }

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -114,6 +115,78 @@ class ReaderViewModel(
         bookshelfRepository.observeBookmarks(bookId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val annotations: StateFlow<List<com.llzx373.foldreader.core.data.db.AnnotationEntity>> =
+        bookshelfRepository.observeAnnotations(bookId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 快照校对不通过的标注 id（打开书时抽样校验，标记"可能错位"，不删）。 */
+    private val _shiftedAnnotationIds = MutableStateFlow<Set<Long>>(emptySet())
+    val shiftedAnnotationIds: StateFlow<Set<Long>> = _shiftedAnnotationIds.asStateFlow()
+
+    private suspend fun verifyAnnotationSnapshots() {
+        val source = content ?: return
+        val anns = withContext(Dispatchers.IO) {
+            bookshelfRepository.observeAnnotations(bookId).first()
+        }
+        val shifted = mutableSetOf<Long>()
+        anns.forEach { ann ->
+            val end = minOf(ann.endCharOffset, source.charCount)
+            val actual = runCatching {
+                source.read(ann.startCharOffset until end)
+            }.getOrNull()
+            if (actual == null || actual != ann.selectedText) shifted += ann.id
+        }
+        _shiftedAnnotationIds.value = shifted
+    }
+
+    suspend fun selectedTextOf(start: Long, end: Long): String {
+        val source = content ?: return ""
+        val safeEnd = minOf(end, source.charCount)
+        if (safeEnd <= start) return ""
+        return withContext(Dispatchers.IO) {
+            runCatching { source.read(start until safeEnd) }.getOrDefault("")
+        }
+    }
+
+    fun addAnnotation(start: Long, end: Long, color: Long, note: String?) {
+        if (end <= start) return
+        viewModelScope.launch {
+            val snapshot = selectedTextOf(start, end)
+            bookshelfRepository.addAnnotation(
+                com.llzx373.foldreader.core.data.db.AnnotationEntity(
+                    bookId = bookId,
+                    startCharOffset = start,
+                    endCharOffset = end,
+                    selectedText = snapshot,
+                    color = color,
+                    note = note?.trim()?.takeIf { it.isNotEmpty() },
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    fun updateAnnotation(
+        annotation: com.llzx373.foldreader.core.data.db.AnnotationEntity,
+        color: Long,
+        note: String?,
+    ) {
+        viewModelScope.launch {
+            bookshelfRepository.updateAnnotation(
+                annotation.copy(
+                    color = color,
+                    note = note?.trim()?.takeIf { it.isNotEmpty() },
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    fun deleteAnnotation(id: Long) {
+        viewModelScope.launch { bookshelfRepository.deleteAnnotation(id) }
+    }
+
     /**
      * 焦点页书签 toggle：双页下 [leftPage] 选择左/右页（锚点取该页首字符），
      * 同锚点已有书签则删除，否则新增（快照取页首若干字符）。
@@ -188,6 +261,7 @@ class ReaderViewModel(
                 }
                 content = opened.first
                 chapters = opened.second
+                verifyAnnotationSnapshots()
                 val progress = bookshelfRepository.getProgress(bookId)
                 baseReadingMillis = progress?.totalReadingMillis ?: 0L
                 anchorOffset.value = progress?.charOffset ?: 0L

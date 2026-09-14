@@ -15,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +58,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.key.onKeyEvent
@@ -64,10 +66,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -111,12 +115,28 @@ fun ReaderScreen(
     val autoPageStatus by viewModel.autoPageStatus.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkedOffsets = remember(bookmarks) { bookmarks.map { it.charOffset }.toSet() }
+    val annotations by viewModel.annotations.collectAsState()
+    val shiftedAnnotationIds by viewModel.shiftedAnnotationIds.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
 
     var menuVisible by remember { mutableStateOf(false) }
     var catalogVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
+    var annotationsVisible by remember { mutableStateOf(false) }
+    // 长按选择（仅翻页模式；滚动模式降级为仅渲染标注，见 TODO 5.2 注记）
+    var selection by remember { mutableStateOf<SelectionUi?>(null) }
+    var noteDraft by remember { mutableStateOf<SelectionUi?>(null) }
+    var editingAnnotation by remember {
+        mutableStateOf<com.llzx373.foldreader.core.data.db.AnnotationEntity?>(null)
+    }
+    val leftLineBoxes = remember {
+        mutableStateOf<List<com.llzx373.foldreader.core.reader.LineBox>?>(null)
+    }
+    val rightLineBoxes = remember {
+        mutableStateOf<List<com.llzx373.foldreader.core.reader.LineBox>?>(null)
+    }
     var size by remember { mutableStateOf(IntSize.Zero) }
     var windowOffsetX by remember { mutableStateOf(0f) }
     var windowOffsetY by remember { mutableStateOf(0f) }
@@ -212,7 +232,16 @@ fun ReaderScreen(
         frameMonitor.reset()
     }
 
+    fun clearSelection() {
+        selection = null
+        noteDraft = null
+    }
+
+    fun selectionEnd(sel: SelectionUi): Long =
+        if (sel.end > sel.start) sel.end else sel.start + 1
+
     fun turn(forward: Boolean) {
+        clearSelection()
         scope.launch {
             if (animSpread != null || simTarget != null || simSettling) return@launch
             if (effectiveMode == PageTurnMode.SIMULATION && !scrollMode) {
@@ -262,12 +291,12 @@ fun ReaderScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error) {
+    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error, selection != null) {
         viewModel.setReadingActive(
             foreground && !menuVisible && !uiState.loading && uiState.error == null,
         )
         viewModel.setAutoPageUiPaused(
-            !foreground || menuVisible || uiState.loading || uiState.error != null,
+            !foreground || menuVisible || selection != null || uiState.loading || uiState.error != null,
         )
     }
 
@@ -311,6 +340,46 @@ fun ReaderScreen(
     val hingeDp = with(density) { (splitRightPx - splitLeftPx).toDp() }
     val rightDp = with(density) { (size.width - splitRightPx).toDp() }
 
+    // 触摸点 → （左/右页, 字符光标位）；dual 时按铰链分区，局部坐标扣页偏移
+    fun hitCaret(offset: Offset, constrainToLeft: Boolean? = null): Pair<Boolean, Long>? {
+        if (size.width <= 0) return null
+        val relX = offset.x - contentRect.left
+        val relY = offset.y - contentRect.top + autoScrollY
+        val leftPageRight = splitLeftPx - contentRect.left
+        val rightPageX = splitRightPx - contentRect.left
+        val isLeft: Boolean
+        var localX = relX
+        when {
+            !dual -> isLeft = true
+            constrainToLeft == true -> isLeft = true
+            constrainToLeft == false -> {
+                isLeft = false
+                localX = relX - rightPageX
+            }
+            relX < leftPageRight -> isLeft = true
+            relX > rightPageX -> {
+                isLeft = false
+                localX = relX - rightPageX
+            }
+            else -> return null // 铰链区
+        }
+        val boxes = (if (isLeft) leftLineBoxes.value else rightLineBoxes.value) ?: return null
+        val caret = com.llzx373.foldreader.core.reader.caretAt(boxes, localX, relY) ?: return null
+        return isLeft to caret
+    }
+
+    fun spansFor(page: com.llzx373.foldreader.core.reader.Page?): List<TextRangeSpan> {
+        if (page == null || annotations.isEmpty()) return emptyList()
+        return annotations.mapNotNull { ann ->
+            if (ann.endCharOffset > page.charStart && ann.startCharOffset < page.charEnd) {
+                TextRangeSpan(ann.startCharOffset, ann.endCharOffset, Color(ann.color.toInt()))
+            } else {
+                null
+            }
+        }
+    }
+
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -324,7 +393,9 @@ fun ReaderScreen(
             .focusable()
             .onKeyEvent { event ->
                 val native = event.nativeKeyEvent
-                if (!prefs.volumeKeyPagingEnabled || native.action != KeyEvent.ACTION_DOWN) {
+                if (selection != null ||
+                    !prefs.volumeKeyPagingEnabled || native.action != KeyEvent.ACTION_DOWN
+                ) {
                     return@onKeyEvent false
                 }
                 when (native.keyCode) {
@@ -336,6 +407,10 @@ fun ReaderScreen(
             .pointerInput(prefs.pageTurnHotspotRatio, scrollMode) {
                 detectTapGestures { offset ->
                     viewModel.noteManualInteraction()
+                    if (selection != null) {
+                        clearSelection()
+                        return@detectTapGestures
+                    }
                     if (menuVisible) {
                         menuVisible = false
                         return@detectTapGestures
@@ -344,6 +419,18 @@ fun ReaderScreen(
                         menuVisible = true
                         return@detectTapGestures
                     }
+                    // 点击已有划线 → 查看/编辑（先于翻页热区）
+                    val hit = hitCaret(offset)
+                    if (hit != null) {
+                        val caret = hit.second
+                        val ann = annotations.firstOrNull {
+                            caret >= it.startCharOffset && caret < it.endCharOffset
+                        }
+                        if (ann != null) {
+                            editingAnnotation = ann
+                            return@detectTapGestures
+                        }
+                    }
                     when (tapZoneOf(offset.x, size.width.toFloat(), prefs.pageTurnHotspotRatio)) {
                         TapZone.PREVIOUS -> turn(false)
                         TapZone.NEXT -> turn(true)
@@ -351,7 +438,30 @@ fun ReaderScreen(
                     }
                 }
             }
-            .pointerInput(scrollMode, effectiveMode) {
+            .pointerInput(scrollMode, dual) {
+                // 长按进入选择模式，拖动扩展选区（跨页降级为当前页内，见 TODO 5.2 注记）
+                if (scrollMode) return@pointerInput
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        if (menuVisible || simTarget != null) return@detectDragGesturesAfterLongPress
+                        val hit = hitCaret(offset) ?: return@detectDragGesturesAfterLongPress
+                        selection = SelectionUi(hit.first, hit.second, hit.second, dragging = true)
+                    },
+                    onDrag = { change, _ ->
+                        val sel = selection ?: return@detectDragGesturesAfterLongPress
+                        change.consume()
+                        val hit = hitCaret(change.position, constrainToLeft = sel.pageLeft)
+                            ?: return@detectDragGesturesAfterLongPress
+                        selection = sel.copy(caret = hit.second)
+                    },
+                    onDragEnd = {
+                        selection = selection?.copy(dragging = false)
+                    },
+                    onDragCancel = { selection = null },
+                )
+            }
+            .pointerInput(scrollMode, effectiveMode, selection != null) {
+                if (selection != null) return@pointerInput
                 var dragged = 0f
                 val samples = ArrayDeque<Pair<Long, Float>>()
                 detectHorizontalDragGestures(
@@ -548,6 +658,12 @@ fun ReaderScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer { translationY = -autoScrollY },
+                            leftHighlights = spansFor(spread.left),
+                            rightHighlights = spansFor(spread.right),
+                            selection = selection,
+                            selectionColor = colors.accent.copy(alpha = 0.32f),
+                            onLeftGeometry = { leftLineBoxes.value = it },
+                            onRightGeometry = { rightLineBoxes.value = it },
                         )
                         val overlay = animSpread
                         if (overlay != null) {
@@ -579,6 +695,72 @@ fun ReaderScreen(
                     }
                 }
             }
+        }
+
+        // 选择手柄 + 选区操作条（菜单打开时隐藏）
+        val activeSelection = selection
+        if (activeSelection != null && !menuVisible && !uiState.loading && uiState.error == null) {
+            val selBoxes =
+                if (activeSelection.pageLeft) leftLineBoxes.value else rightLineBoxes.value
+            if (selBoxes != null) {
+                val pageOriginX = if (dual && !activeSelection.pageLeft) {
+                    splitRightPx
+                } else {
+                    contentRect.left
+                }
+                SelectionHandles(
+                    boxes = selBoxes,
+                    start = activeSelection.start,
+                    end = activeSelection.end,
+                    originXPx = pageOriginX,
+                    originYPx = contentRect.top,
+                    scrollYPx = autoScrollY,
+                    accent = colors.accent,
+                    onDragHandle = { isStart, pageLocal ->
+                        val caret = com.llzx373.foldreader.core.reader.caretAt(
+                            selBoxes, pageLocal.x, pageLocal.y,
+                        )
+                        if (caret != null) {
+                            selection = if (isStart) {
+                                activeSelection.copy(anchor = caret, dragging = false)
+                            } else {
+                                activeSelection.copy(caret = caret, dragging = false)
+                            }
+                        }
+                    },
+                )
+            }
+            SelectionActionBar(
+                colors = colors,
+                onPickColor = { argb ->
+                    viewModel.addAnnotation(
+                        activeSelection.start,
+                        selectionEnd(activeSelection),
+                        argb,
+                        null,
+                    )
+                    clearSelection()
+                },
+                onNote = { noteDraft = activeSelection },
+                onCopy = {
+                    scope.launch {
+                        clipboard.setText(
+                            AnnotatedString(
+                                viewModel.selectedTextOf(
+                                    activeSelection.start,
+                                    selectionEnd(activeSelection),
+                                ),
+                            ),
+                        )
+                    }
+                    clearSelection()
+                },
+                onCancel = { clearSelection() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(16.dp),
+            )
         }
 
         if (tabletop != null && !uiState.loading && uiState.error == null) {
@@ -719,6 +901,7 @@ fun ReaderScreen(
                     }
                 },
                 onOpenCatalog = { catalogVisible = true },
+                onOpenAnnotations = { annotationsVisible = true },
                 onCyclePageTurnMode = {
                     viewModel.setPageTurnMode(nextPageTurnMode(prefs.pageTurnMode))
                 },
@@ -790,6 +973,65 @@ fun ReaderScreen(
                 onDismiss = { bookmarksVisible = false },
             )
         }
+
+        // 新建带笔记的划线（选区操作条「笔记」入口）
+        noteDraft?.let { draft ->
+            val draftEnd = selectionEnd(draft)
+            val draftText by produceState(initialValue = "", draft) {
+                value = viewModel.selectedTextOf(draft.start, draftEnd)
+            }
+            AnnotationEditDialog(
+                selectedText = draftText,
+                initialColorArgb = annotationColorPalette.first().toArgb().toLong() and 0xFFFFFFFFL,
+                initialNote = null,
+                shifted = false,
+                colors = colors,
+                onSave = { c, n ->
+                    viewModel.addAnnotation(draft.start, draftEnd, c, n)
+                    clearSelection()
+                },
+                onDelete = null,
+                onDismiss = { clearSelection() },
+            )
+        }
+
+        // 查看/编辑已有划线（点击正文划线或标注列表长按）
+        editingAnnotation?.let { ann ->
+            AnnotationEditDialog(
+                selectedText = ann.selectedText,
+                initialColorArgb = ann.color,
+                initialNote = ann.note,
+                shifted = ann.id in shiftedAnnotationIds,
+                colors = colors,
+                onSave = { c, n ->
+                    viewModel.updateAnnotation(ann, c, n)
+                    editingAnnotation = null
+                },
+                onDelete = {
+                    viewModel.deleteAnnotation(ann.id)
+                    editingAnnotation = null
+                },
+                onDismiss = { editingAnnotation = null },
+            )
+        }
+
+        if (annotationsVisible) {
+            AnnotationListDialog(
+                annotations = annotations,
+                chapters = viewModel.chapterList(),
+                shiftedIds = shiftedAnnotationIds,
+                colors = colors,
+                onJump = { ann ->
+                    annotationsVisible = false
+                    scope.launch {
+                        viewModel.seekToOffset(ann.startCharOffset)
+                        if (scrollMode) viewModel.enterScrollMode()
+                    }
+                },
+                onEdit = { ann -> editingAnnotation = ann },
+                onDismiss = { annotationsVisible = false },
+            )
+        }
     }
 }
 
@@ -804,13 +1046,26 @@ private fun SpreadContent(
     rightDp: androidx.compose.ui.unit.Dp,
     innerPadPx: Float,
     modifier: Modifier = Modifier,
+    leftHighlights: List<TextRangeSpan> = emptyList(),
+    rightHighlights: List<TextRangeSpan> = emptyList(),
+    selection: SelectionUi? = null,
+    selectionColor: Color = Color.Unspecified,
+    onLeftGeometry: (List<com.llzx373.foldreader.core.reader.LineBox>) -> Unit = {},
+    onRightGeometry: (List<com.llzx373.foldreader.core.reader.LineBox>) -> Unit = {},
 ) {
+    val selectionSpan = selection?.let { sel ->
+        val end = if (sel.end > sel.start) sel.end else sel.start + 1
+        TextRangeSpan(sel.start, end, selectionColor)
+    }
     if (!dual) {
         PageView(
             page = spread.left,
             config = config,
             colors = colors,
             modifier = modifier,
+            highlights = leftHighlights,
+            selection = selectionSpan?.takeIf { selection?.pageLeft != false },
+            onGeometry = onLeftGeometry,
         )
         return
     }
@@ -823,6 +1078,9 @@ private fun SpreadContent(
                 modifier = Modifier.fillMaxSize(),
                 innerPaddingPx = innerPadPx,
                 innerOnRight = true,
+                highlights = leftHighlights,
+                selection = selectionSpan?.takeIf { selection?.pageLeft == true },
+                onGeometry = onLeftGeometry,
             )
         }
         Box(modifier = Modifier.width(hingeDp).fillMaxHeight())
@@ -835,6 +1093,9 @@ private fun SpreadContent(
                     modifier = Modifier.fillMaxSize(),
                     innerPaddingPx = innerPadPx,
                     innerOnRight = false,
+                    highlights = rightHighlights,
+                    selection = selectionSpan?.takeIf { selection?.pageLeft == false },
+                    onGeometry = onRightGeometry,
                 )
             }
         }
@@ -869,6 +1130,7 @@ private fun ScrollContent(
     pageHeight: Int,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val annotations by viewModel.annotations.collectAsState()
     val listState = rememberLazyListState()
     var extending by remember { mutableStateOf(false) }
 
@@ -895,6 +1157,13 @@ private fun ScrollContent(
 
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         items(uiState.scrollPages, key = { it.charStart }) { page ->
+            val spans = annotations.mapNotNull { ann ->
+                if (ann.endCharOffset > page.charStart && ann.startCharOffset < page.charEnd) {
+                    TextRangeSpan(ann.startCharOffset, ann.endCharOffset, Color(ann.color.toInt()))
+                } else {
+                    null
+                }
+            }
             PageView(
                 page = page,
                 config = uiState.layoutConfig,
@@ -902,6 +1171,7 @@ private fun ScrollContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(with(LocalDensity.current) { pageHeight.toDp() }),
+                highlights = spans,
             )
         }
     }

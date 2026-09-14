@@ -188,6 +188,7 @@ fun ReaderMenuPanel(
     colors: ReaderColors,
     onSeekFraction: (Float) -> Unit,
     onOpenCatalog: () -> Unit,
+    onOpenAnnotations: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
     onCycleDualPageMode: () -> Unit,
     onSetBrightness: (Float) -> Unit,
@@ -359,6 +360,7 @@ fun ReaderMenuPanel(
                     onClick = onCycleDualPageMode,
                     label = "双页：${dualPageModeLabel(prefs.dualPageMode)}",
                     weight = 1f)
+                clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
                 clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
             }
             Row(

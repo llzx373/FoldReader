@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.data.repository
 
+import com.llzx373.foldreader.core.data.db.AnnotationDao
+import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookDao
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
@@ -17,6 +19,7 @@ class BookshelfRepositoryImpl(
     private val progressDao: ReadingProgressDao,
     private val chapterDao: ChapterDao,
     private val bookmarkDao: BookmarkDao,
+    private val annotationDao: AnnotationDao,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -74,4 +77,15 @@ class BookshelfRepositoryImpl(
     override suspend fun renameBookmark(bookmark: BookmarkEntity) = bookmarkDao.update(bookmark)
 
     override suspend fun deleteBookmark(id: Long) = bookmarkDao.deleteById(id)
+
+    override fun observeAnnotations(bookId: Long): Flow<List<AnnotationEntity>> =
+        annotationDao.observeByBook(bookId)
+
+    override suspend fun addAnnotation(annotation: AnnotationEntity): Long =
+        annotationDao.insert(annotation)
+
+    override suspend fun updateAnnotation(annotation: AnnotationEntity) =
+        annotationDao.update(annotation)
+
+    override suspend fun deleteAnnotation(id: Long) = annotationDao.deleteById(id)
 }
