@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -51,33 +52,66 @@ fun ThemePicker(
     onPickCustomText: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            themePresets.forEach { (theme, label) ->
-                val colors = readerColors(theme, prefs.customBackgroundArgb, prefs.customTextArgb)
-                ThemeCard(
-                    colors = colors,
-                    label = label,
-                    selected = prefs.themeId == theme,
-                    onClick = { onSelectTheme(theme) },
+    // 编辑器底板直接套用所选配色，选择即时可见（实时预览）
+    val previewColors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = previewColors.background,
+        contentColor = previewColors.text,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(previewColors.background)
+                    .border(1.dp, previewColors.text.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Column {
+                    Text(
+                        "纸上得来终觉浅，绝知此事要躬行。",
+                        color = previewColors.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "实时预览 · Aa · 42%",
+                        color = previewColors.accent,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(top = 10.dp),
+            ) {
+                themePresets.forEach { (theme, label) ->
+                    val colors = readerColors(theme, prefs.customBackgroundArgb, prefs.customTextArgb)
+                    ThemeCard(
+                        colors = colors,
+                        label = label,
+                        selected = prefs.themeId == theme,
+                        onClick = { onSelectTheme(theme) },
+                    )
+                }
+            }
+            if (prefs.themeId == ReadingTheme.CUSTOM) {
+                Text("背景色", style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                PaletteRow(
+                    palette = backgroundPalette,
+                    selectedArgb = prefs.customBackgroundArgb,
+                    onPick = onPickCustomBackground,
+                )
+                Text("文字色", style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                PaletteRow(
+                    palette = textPalette,
+                    selectedArgb = prefs.customTextArgb,
+                    onPick = onPickCustomText,
                 )
             }
-        }
-        if (prefs.themeId == ReadingTheme.CUSTOM) {
-            Text("背景色", style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
-            PaletteRow(
-                palette = backgroundPalette,
-                selectedArgb = prefs.customBackgroundArgb,
-                onPick = onPickCustomBackground,
-            )
-            Text("文字色", style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            PaletteRow(
-                palette = textPalette,
-                selectedArgb = prefs.customTextArgb,
-                onPick = onPickCustomText,
-            )
         }
     }
 }

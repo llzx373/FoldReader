@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -82,6 +85,7 @@ import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.foldable.WidthCategory
+import com.llzx373.foldreader.ui.EmptyState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -94,6 +98,7 @@ fun BookshelfScreen(
     val app = context.applicationContext as FoldReaderApplication
     val viewModel: BookshelfViewModel = viewModel(factory = BookshelfViewModel.factory(app.container))
     val books by viewModel.books.collectAsState()
+    val loading by viewModel.loading.collectAsState()
     val gridView by viewModel.gridView.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
@@ -229,26 +234,44 @@ fun BookshelfScreen(
                 .padding(innerPadding),
         ) {
             when {
+                loading -> LoadingIndicator(modifier = Modifier.align(Alignment.Center))
                 books.isEmpty() -> EmptyBookshelf(onImportClick = launchImport)
-                gridView -> BookGrid(
-                    books = books,
-                    selectedIds = selectedIds,
-                    selectionMode = selectionMode,
-                    minColumnWidth = when (foldableUiState.widthCategory) {
-                        WidthCategory.COMPACT -> 160.dp
-                        WidthCategory.MEDIUM -> 140.dp
-                        WidthCategory.EXPANDED -> 170.dp
-                    },
-                    onOpenBook = onOpenBook,
-                    onToggleSelection = viewModel::toggleSelection,
-                )
-                else -> BookList(
-                    books = books,
-                    selectedIds = selectedIds,
-                    selectionMode = selectionMode,
-                    onOpenBook = onOpenBook,
-                    onToggleSelection = viewModel::toggleSelection,
-                )
+                else -> {
+                    val recent = remember(books) {
+                        books.filter { it.book.lastReadAt != null }
+                            .sortedByDescending { it.book.lastReadAt }
+                            .take(10)
+                    }
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (!selectionMode && recent.isNotEmpty()) {
+                            RecentReadsCarousel(recent = recent, onOpenBook = onOpenBook)
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (gridView) {
+                                BookGrid(
+                                    books = books,
+                                    selectedIds = selectedIds,
+                                    selectionMode = selectionMode,
+                                    minColumnWidth = when (foldableUiState.widthCategory) {
+                                        WidthCategory.COMPACT -> 160.dp
+                                        WidthCategory.MEDIUM -> 140.dp
+                                        WidthCategory.EXPANDED -> 170.dp
+                                    },
+                                    onOpenBook = onOpenBook,
+                                    onToggleSelection = viewModel::toggleSelection,
+                                )
+                            } else {
+                                BookList(
+                                    books = books,
+                                    selectedIds = selectedIds,
+                                    selectionMode = selectionMode,
+                                    onOpenBook = onOpenBook,
+                                    onToggleSelection = viewModel::toggleSelection,
+                                )
+                            }
+                        }
+                    }
+                }
             }
             if (importState is ImportUiState.Importing) {
                 Surface(
@@ -307,47 +330,75 @@ fun BookshelfScreen(
 
 @Composable
 private fun EmptyBookshelf(onImportClick: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        val fillColor = MaterialTheme.colorScheme.surfaceVariant
-        val lineColor = MaterialTheme.colorScheme.outline
-        Canvas(modifier = Modifier.size(96.dp)) {
-            val w = size.width
-            val h = size.height
-            val topLeft = Offset(w * 0.2f, h * 0.05f)
-            val bookSize = Size(w * 0.6f, h * 0.9f)
-            val corner = CornerRadius(12f, 12f)
-            drawRoundRect(color = fillColor, topLeft = topLeft, size = bookSize, cornerRadius = corner)
-            drawRoundRect(
-                color = lineColor,
-                topLeft = topLeft,
-                size = bookSize,
-                cornerRadius = corner,
-                style = Stroke(width = 5f),
-            )
-            drawLine(
-                color = lineColor,
-                start = Offset(w * 0.32f, h * 0.05f),
-                end = Offset(w * 0.32f, h * 0.95f),
-                strokeWidth = 5f,
-            )
-        }
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("书架空空如也", style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(4.dp))
+    EmptyState(
+        title = "书架空空如也",
+        description = "导入 TXT 开始阅读",
+        actionLabel = "导入书籍",
+        onAction = onImportClick,
+        illustration = {
+            val fillColor = MaterialTheme.colorScheme.surfaceVariant
+            val lineColor = MaterialTheme.colorScheme.outline
+            Canvas(modifier = Modifier.size(96.dp)) {
+                val w = size.width
+                val h = size.height
+                val topLeft = Offset(w * 0.2f, h * 0.05f)
+                val bookSize = Size(w * 0.6f, h * 0.9f)
+                val corner = CornerRadius(12f, 12f)
+                drawRoundRect(color = fillColor, topLeft = topLeft, size = bookSize, cornerRadius = corner)
+                drawRoundRect(
+                    color = lineColor,
+                    topLeft = topLeft,
+                    size = bookSize,
+                    cornerRadius = corner,
+                    style = Stroke(width = 5f),
+                )
+                drawLine(
+                    color = lineColor,
+                    start = Offset(w * 0.32f, h * 0.05f),
+                    end = Offset(w * 0.32f, h * 0.95f),
+                    strokeWidth = 5f,
+                )
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecentReadsCarousel(
+    recent: List<BookWithProgress>,
+    onOpenBook: (Long) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            "导入 TXT 开始阅读",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = "最近阅读",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(horizontal = 16.dp),
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onImportClick) {
-            Icon(Icons.Filled.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("导入书籍")
+        HorizontalMultiBrowseCarousel(
+            state = rememberCarouselState { recent.size },
+            modifier = Modifier.fillMaxWidth(),
+            preferredItemWidth = 118.dp,
+            itemSpacing = 8.dp,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        ) { index ->
+            val item = recent[index]
+            Column {
+                BookCover(
+                    title = item.book.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenBook(item.book.id) },
+                )
+                Text(
+                    text = formatReadingProgress(item.charOffset, item.book.totalChars),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }

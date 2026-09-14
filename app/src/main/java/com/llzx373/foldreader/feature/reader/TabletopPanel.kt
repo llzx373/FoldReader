@@ -11,7 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -62,6 +63,7 @@ fun TabletopDivider(colors: ReaderColors, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TabletopPanel(
     prefs: ReadingPreferences,
@@ -126,15 +128,14 @@ fun TabletopPanel(
                     modifier = Modifier.padding(start = 10.dp),
                 )
             }
-            Row(
+            ButtonGroup(
+                overflowIndicator = {},
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onPrevChapter) { Text("上一章") }
-                Button(onClick = onPrevPage, modifier = Modifier.weight(1f)) { Text("上一页") }
-                Button(onClick = onNextPage, modifier = Modifier.weight(1f)) { Text("下一页") }
-                TextButton(onClick = onNextChapter) { Text("下一章") }
+                clickableItem(onClick = onPrevChapter, label = "上一章")
+                clickableItem(onClick = onPrevPage, label = "上一页", weight = 1f)
+                clickableItem(onClick = onNextPage, label = "下一页", weight = 1f)
+                clickableItem(onClick = onNextChapter, label = "下一章")
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),

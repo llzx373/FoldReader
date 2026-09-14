@@ -13,7 +13,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -75,6 +77,7 @@ fun ReaderTopBar(
     )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReaderMenuPanel(
     prefs: ReadingPreferences,
@@ -165,12 +168,16 @@ fun ReaderMenuPanel(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("边距", style = MaterialTheme.typography.labelMedium)
-                    Row(modifier = Modifier.padding(start = 12.dp)) {
+                    ButtonGroup(
+                        overflowIndicator = {},
+                        modifier = Modifier.padding(start = 12.dp),
+                    ) {
                         listOf("小", "中", "大").forEachIndexed { level, label ->
-                            TextButton(
-                                onClick = { onSetMarginLevel(level) },
-                                enabled = prefs.marginLevel != level,
-                            ) { Text(label) }
+                            toggleableItem(
+                                checked = prefs.marginLevel == level,
+                                label = label,
+                                onCheckedChange = { onSetMarginLevel(level) },
+                                weight = 1f)
                         }
                     }
                 }
@@ -198,38 +205,58 @@ fun ReaderMenuPanel(
                     TextButton(onClick = { onSetBrightness(-1f) }) { Text("跟随系统") }
                 }
             }
-            Row(
+            ButtonGroup(
+                overflowIndicator = {},
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                TextButton(onClick = onOpenCatalog) { Text("目录") }
-                TextButton(onClick = {
-                    showLayout = !showLayout
-                    showBrightness = false
-                    showTheme = false
-                }) { Text("版式") }
-                TextButton(onClick = {
-                    showTheme = !showTheme
-                    showBrightness = false
-                    showLayout = false
-                }) { Text("主题") }
-                TextButton(onClick = {
-                    showBrightness = !showBrightness
-                    showLayout = false
-                    showTheme = false
-                }) { Text("亮度") }
+                clickableItem(onClick = onOpenCatalog, label = "目录", weight = 1f)
+                toggleableItem(
+                    checked = showLayout,
+                    label = "版式",
+                    onCheckedChange = { on ->
+                        showLayout = on
+                        if (on) {
+                            showBrightness = false
+                            showTheme = false
+                        }
+                    },
+                    weight = 1f)
+                toggleableItem(
+                    checked = showTheme,
+                    label = "主题",
+                    onCheckedChange = { on ->
+                        showTheme = on
+                        if (on) {
+                            showBrightness = false
+                            showLayout = false
+                        }
+                    },
+                    weight = 1f)
+                toggleableItem(
+                    checked = showBrightness,
+                    label = "亮度",
+                    onCheckedChange = { on ->
+                        showBrightness = on
+                        if (on) {
+                            showLayout = false
+                            showTheme = false
+                        }
+                    },
+                    weight = 1f)
             }
-            Row(
+            ButtonGroup(
+                overflowIndicator = {},
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                TextButton(onClick = onCyclePageTurnMode) {
-                    Text("翻页：${pageTurnModeLabel(prefs.pageTurnMode)}")
-                }
-                TextButton(onClick = onCycleDualPageMode) {
-                    Text("双页：${dualPageModeLabel(prefs.dualPageMode)}")
-                }
-                TextButton(onClick = onOpenSettings) { Text("设置") }
+                clickableItem(
+                    onClick = onCyclePageTurnMode,
+                    label = "翻页：${pageTurnModeLabel(prefs.pageTurnMode)}",
+                    weight = 1f)
+                clickableItem(
+                    onClick = onCycleDualPageMode,
+                    label = "双页：${dualPageModeLabel(prefs.dualPageMode)}",
+                    weight = 1f)
+                clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -111,6 +111,22 @@ class ReaderViewModel(
     val nextSpread: StateFlow<PageSpread?> = _nextSpread.asStateFlow()
 
     init {
+        openBook()
+        viewModelScope.launch {
+            pendingSave.filterNotNull().debounce(500L).collect { offset ->
+                runCatching { persistProgress(offset) }
+            }
+        }
+        viewModelScope.launch { autoPageLoop() }
+    }
+
+    fun retry() {
+        if (_uiState.value.loading) return
+        openBook()
+    }
+
+    private fun openBook() {
+        _uiState.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             val book = bookshelfRepository.getBook(bookId)
             if (book == null) {
@@ -141,12 +157,6 @@ class ReaderViewModel(
                 _uiState.update { it.copy(loading = false, error = t.message ?: "打开失败") }
             }
         }
-        viewModelScope.launch {
-            pendingSave.filterNotNull().debounce(500L).collect { offset ->
-                runCatching { persistProgress(offset) }
-            }
-        }
-        viewModelScope.launch { autoPageLoop() }
     }
 
     private suspend fun autoPageLoop() {

@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,6 +80,7 @@ import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.ui.EmptyState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,6 +92,7 @@ import kotlinx.coroutines.launch
 private val INNER_SPINE_PAD = 12.dp
 private val SPINE_OVERLAY_WIDTH = 32.dp
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReaderScreen(
     bookId: Long,
@@ -435,14 +437,18 @@ fun ReaderScreen(
             },
     ) {
         when {
-            uiState.loading -> CircularProgressIndicator(
+            uiState.loading -> LoadingIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 color = colors.accent,
             )
-            uiState.error != null -> Text(
-                text = uiState.error.orEmpty(),
+            uiState.error != null -> EmptyState(
+                title = "无法打开书籍",
+                description = uiState.error,
+                actionLabel = "重试",
+                onAction = viewModel::retry,
+                secondaryActionLabel = "返回书架",
+                onSecondaryAction = onBack,
                 modifier = Modifier.align(Alignment.Center),
-                color = colors.text,
             )
             else -> Box(
                 modifier = Modifier

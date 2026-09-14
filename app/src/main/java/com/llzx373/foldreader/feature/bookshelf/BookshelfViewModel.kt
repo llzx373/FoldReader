@@ -41,6 +41,11 @@ class BookshelfViewModel(
     val books: StateFlow<List<BookWithProgress>> = bookshelfRepository.observeBookshelfWithProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // 首个书架快照到达前视为加载中，区分"加载中"与"空书架"
+    val loading: StateFlow<Boolean> = bookshelfRepository.observeBookshelfWithProgress()
+        .map { false }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val gridView: StateFlow<Boolean> = settingsRepository.preferences
         .map { it.bookshelfGridView }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
