@@ -11,10 +11,14 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.navigation.FoldReaderNavHost
 import com.llzx373.foldreader.navigation.Routes
 
@@ -26,6 +30,14 @@ fun FoldReaderApp() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+
+    val container = (LocalContext.current.applicationContext as FoldReaderApplication).container
+    val posture by container.foldableStateProvider.posture.collectAsState()
+    val adaptiveInfo = currentWindowAdaptiveInfoV2()
+    val foldableUiState = FoldableUiState(
+        posture = posture,
+        windowSizeClass = adaptiveInfo.windowSizeClass,
+    )
 
     NavigationSuiteScaffold(
         navigationSuiteItems = {
@@ -43,12 +55,12 @@ fun FoldReaderApp() {
             )
         },
         layoutType = if (currentRoute == null || currentRoute in topLevelRoutes) {
-            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfoV2())
+            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(adaptiveInfo)
         } else {
             NavigationSuiteType.None
         },
     ) {
-        FoldReaderNavHost(navController)
+        FoldReaderNavHost(navController, foldableUiState = foldableUiState)
     }
 }
 

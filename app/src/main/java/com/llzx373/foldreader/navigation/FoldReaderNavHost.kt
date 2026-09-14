@@ -7,6 +7,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.feature.bookshelf.BookshelfScreen
 import com.llzx373.foldreader.feature.reader.ReaderScreen
 import com.llzx373.foldreader.feature.settings.SettingsScreen
@@ -14,6 +15,7 @@ import com.llzx373.foldreader.feature.settings.SettingsScreen
 @Composable
 fun FoldReaderNavHost(
     navController: NavHostController,
+    foldableUiState: FoldableUiState,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -34,7 +36,7 @@ fun FoldReaderNavHost(
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen()
+            SettingsScreen(foldableUiState)
         }
     }
 }

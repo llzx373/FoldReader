@@ -1,11 +1,20 @@
 package com.llzx373.foldreader
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
+import com.llzx373.foldreader.core.foldable.FoldableStateProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 
-class AppContainer {
+class AppContainer(context: Context) {
     val pendingImportUri = MutableStateFlow<Uri?>(null)
+    val foldableStateProvider = FoldableStateProvider(
+        context = context,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
 }
 
 class FoldReaderApplication : Application() {
@@ -15,6 +24,7 @@ class FoldReaderApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container = AppContainer()
+        container = AppContainer(this)
+        registerActivityLifecycleCallbacks(container.foldableStateProvider.activityLifecycleCallbacks)
     }
 }

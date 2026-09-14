@@ -19,11 +19,11 @@
 - [x] 确认 `MainActivity` 折叠/展开切换不重建（`configChanges` 已配），补 `onNewIntent` 处理外部 VIEW Intent
 
 ### 1.2 折叠感知层（core/foldable）
-- [ ] 定义 `FoldingPosture` 模型：`posture(CLOSED/FLAT/HALF_OPENED)`、`hingeBounds: Rect?`、`hingeOrientation(VERTICAL/HORIZONTAL)`
-- [ ] 用 `WindowInfoTracker.windowLayoutInfo(activity)` Flow 封装为 `FoldableStateProvider`，输出 `StateFlow<FoldingPosture>`
-- [ ] 无折叠特征设备返回 CLOSED 且 `hingeBounds=null`（直板降级路径）
-- [ ] 组合 `calculateWindowSizeClass` 输出宽度类别，作为布局兜底输入
-- [ ] 单元测试：FoldingFeature 各组合（无铰链/垂直铰链 HALF_OPENED/水平铰链 FLAT）→ Posture 映射正确
+- [x] 定义 `FoldingPosture` 模型：`posture(CLOSED/FLAT/HALF_OPENED)`、`hingeBounds: Rect?`、`hingeOrientation(VERTICAL/HORIZONTAL)`
+- [x] 用 `WindowInfoTracker.windowLayoutInfo(activity)` Flow 封装为 `FoldableStateProvider`，输出 `StateFlow<FoldingPosture>`
+- [x] 无折叠特征设备返回 CLOSED 且 `hingeBounds=null`（直板降级路径）
+- [x] 组合 `calculateWindowSizeClass` 输出宽度类别，作为布局兜底输入
+- [x] 单元测试：FoldingFeature 各组合（无铰链/垂直铰链 HALF_OPENED/水平铰链 FLAT）→ Posture 映射正确
 
 ### 1.3 数据层（core/data）
 - [ ] Room 数据库 `FoldReaderDatabase`（导出 schema）
