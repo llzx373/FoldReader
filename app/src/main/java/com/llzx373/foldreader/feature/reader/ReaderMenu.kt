@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.reader
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -33,7 +35,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
@@ -49,6 +56,12 @@ fun ReaderTopBar(
     colors: ReaderColors,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    dualPage: Boolean = false,
+    hasRightPage: Boolean = false,
+    leftBookmarked: Boolean = false,
+    rightBookmarked: Boolean = false,
+    onToggleBookmark: (leftPage: Boolean) -> Unit = {},
+    onOpenBookmarks: () -> Unit = {},
 ) {
     TopAppBar(
         title = {
@@ -68,13 +81,103 @@ fun ReaderTopBar(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
         },
+        actions = {
+            if (dualPage && hasRightPage) {
+                // 双页：左/右页各一枚书签 toggle，锚点取对应页首字符
+                IconButton(onClick = { onToggleBookmark(true) }) {
+                    BookmarkRibbonIcon(
+                        filled = leftBookmarked,
+                        tint = colors.text,
+                        contentDescription = if (leftBookmarked) "移除左页书签" else "左页加书签",
+                    )
+                }
+                IconButton(onClick = { onToggleBookmark(false) }) {
+                    BookmarkRibbonIcon(
+                        filled = rightBookmarked,
+                        tint = colors.text,
+                        contentDescription = if (rightBookmarked) "移除右页书签" else "右页加书签",
+                    )
+                }
+            } else {
+                IconButton(onClick = { onToggleBookmark(true) }) {
+                    BookmarkRibbonIcon(
+                        filled = leftBookmarked,
+                        tint = colors.text,
+                        contentDescription = if (leftBookmarked) "移除书签" else "加书签",
+                    )
+                }
+            }
+            IconButton(onClick = onOpenBookmarks) {
+                BookmarkListIcon(
+                    tint = colors.text,
+                    contentDescription = "书签列表",
+                )
+            }
+        },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = colors.background,
             titleContentColor = colors.text,
             navigationIconContentColor = colors.text,
+            actionIconContentColor = colors.text,
         ),
         modifier = modifier,
     )
+}
+
+/** 书签缎带图标：filled 为填充态（已加书签），否则描边。 */
+@Composable
+private fun BookmarkRibbonIcon(filled: Boolean, tint: Color, contentDescription: String) {
+    Canvas(
+        modifier = Modifier
+            .size(22.dp)
+            .semantics { this.contentDescription = contentDescription },
+    ) {
+        val w = size.width
+        val h = size.height
+        val left = w * 0.22f
+        val right = w * 0.78f
+        val top = h * 0.08f
+        val bottom = h * 0.92f
+        val notch = h * 0.22f
+        val path = Path().apply {
+            moveTo(left, top)
+            lineTo(right, top)
+            lineTo(right, bottom)
+            lineTo(w / 2f, bottom - notch)
+            lineTo(left, bottom)
+            close()
+        }
+        if (filled) {
+            drawPath(path, color = tint)
+        } else {
+            drawPath(path, color = tint, style = Stroke(width = 2.2f.dp.toPx()))
+        }
+    }
+}
+
+/** 书签列表图标：缎带 + 两条列表线。 */
+@Composable
+private fun BookmarkListIcon(tint: Color, contentDescription: String) {
+    Canvas(
+        modifier = Modifier
+            .size(22.dp)
+            .semantics { this.contentDescription = contentDescription },
+    ) {
+        val w = size.width
+        val h = size.height
+        val stroke = 2.2f.dp.toPx()
+        val path = Path().apply {
+            moveTo(w * 0.10f, h * 0.10f)
+            lineTo(w * 0.42f, h * 0.10f)
+            lineTo(w * 0.42f, h * 0.72f)
+            lineTo(w * 0.26f, h * 0.56f)
+            lineTo(w * 0.10f, h * 0.72f)
+            close()
+        }
+        drawPath(path, color = tint, style = Stroke(width = stroke))
+        drawLine(tint, Offset(w * 0.56f, h * 0.26f), Offset(w * 0.92f, h * 0.26f), strokeWidth = stroke)
+        drawLine(tint, Offset(w * 0.56f, h * 0.52f), Offset(w * 0.92f, h * 0.52f), strokeWidth = stroke)
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

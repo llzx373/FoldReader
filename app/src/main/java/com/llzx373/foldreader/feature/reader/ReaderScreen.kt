@@ -109,11 +109,14 @@ fun ReaderScreen(
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.preferences.collectAsState()
     val autoPageStatus by viewModel.autoPageStatus.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
+    val bookmarkedOffsets = remember(bookmarks) { bookmarks.map { it.charOffset }.toSet() }
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
 
     var menuVisible by remember { mutableStateOf(false) }
     var catalogVisible by remember { mutableStateOf(false) }
+    var bookmarksVisible by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     var windowOffsetX by remember { mutableStateOf(0f) }
     var windowOffsetY by remember { mutableStateOf(0f) }
@@ -697,6 +700,12 @@ fun ReaderScreen(
                 chapterTitle = uiState.chapterTitle,
                 colors = colors,
                 onBack = onBack,
+                dualPage = uiState.dualPage,
+                hasRightPage = uiState.spread?.right != null,
+                leftBookmarked = uiState.spread?.left?.charStart in bookmarkedOffsets,
+                rightBookmarked = uiState.spread?.right?.charStart in bookmarkedOffsets,
+                onToggleBookmark = viewModel::toggleBookmark,
+                onOpenBookmarks = { bookmarksVisible = true },
                 modifier = Modifier.align(Alignment.TopCenter),
             )
             ReaderMenuPanel(
@@ -761,6 +770,24 @@ fun ReaderScreen(
                     }
                 },
                 onDismiss = { catalogVisible = false },
+            )
+        }
+
+        if (bookmarksVisible) {
+            BookmarkListDialog(
+                bookmarks = bookmarks,
+                chapters = viewModel.chapterList(),
+                colors = colors,
+                onJump = { bookmark ->
+                    bookmarksVisible = false
+                    scope.launch {
+                        viewModel.seekToOffset(bookmark.charOffset)
+                        if (scrollMode) viewModel.enterScrollMode()
+                    }
+                },
+                onRename = viewModel::renameBookmark,
+                onDelete = { viewModel.deleteBookmark(it.id) },
+                onDismiss = { bookmarksVisible = false },
             )
         }
     }

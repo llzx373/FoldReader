@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -23,5 +24,6 @@ data class BookmarkEntity(
     val charOffset: Long,
     val chapterIndex: Int,
     val snapshotText: String,
+    @ColumnInfo(defaultValue = "") val label: String = "",
     val createdAt: Long,
 )

@@ -110,6 +110,48 @@ class ReaderViewModel(
     private val _nextSpread = MutableStateFlow<PageSpread?>(null)
     val nextSpread: StateFlow<PageSpread?> = _nextSpread.asStateFlow()
 
+    val bookmarks: StateFlow<List<com.llzx373.foldreader.core.data.db.BookmarkEntity>> =
+        bookshelfRepository.observeBookmarks(bookId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 焦点页书签 toggle：双页下 [leftPage] 选择左/右页（锚点取该页首字符），
+     * 同锚点已有书签则删除，否则新增（快照取页首若干字符）。
+     */
+    fun toggleBookmark(leftPage: Boolean) {
+        val spread = _uiState.value.spread ?: return
+        val page = if (leftPage) spread.left else spread.right ?: spread.left
+        if (page.isEmpty) return
+        val anchor = page.charStart
+        viewModelScope.launch {
+            val existing = findBookmarkAt(bookmarks.value, anchor)
+            if (existing != null) {
+                bookshelfRepository.deleteBookmark(existing.id)
+            } else {
+                val excerpt = runCatching {
+                    content?.read(anchor until minOf(page.charEnd, anchor + 48)) ?: ""
+                }.getOrDefault("")
+                bookshelfRepository.addBookmark(
+                    com.llzx373.foldreader.core.data.db.BookmarkEntity(
+                        bookId = bookId,
+                        charOffset = anchor,
+                        chapterIndex = chapterIndexAt(chapters, anchor),
+                        snapshotText = bookmarkSnapshotOf(excerpt),
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun renameBookmark(bookmark: com.llzx373.foldreader.core.data.db.BookmarkEntity, label: String) {
+        viewModelScope.launch { bookshelfRepository.renameBookmark(bookmark.copy(label = label.trim())) }
+    }
+
+    fun deleteBookmark(id: Long) {
+        viewModelScope.launch { bookshelfRepository.deleteBookmark(id) }
+    }
+
     init {
         openBook()
         viewModelScope.launch {

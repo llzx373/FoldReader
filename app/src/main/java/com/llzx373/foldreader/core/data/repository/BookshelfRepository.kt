@@ -2,6 +2,7 @@ package com.llzx373.foldreader.core.data.repository
 
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
+import com.llzx373.foldreader.core.data.db.BookmarkEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
@@ -22,4 +23,9 @@ interface BookshelfRepository {
 
     suspend fun getChapters(bookId: Long): List<Chapter>
     suspend fun saveChapters(bookId: Long, chapters: List<Chapter>)
+
+    fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>>
+    suspend fun addBookmark(bookmark: BookmarkEntity): Long
+    suspend fun renameBookmark(bookmark: BookmarkEntity)
+    suspend fun deleteBookmark(id: Long)
 }
