@@ -8,7 +8,11 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -36,17 +40,23 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.key.onKeyEvent
@@ -73,6 +83,7 @@ import com.llzx373.foldreader.core.foldable.FoldableUiState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -108,7 +119,11 @@ fun ReaderScreen(
 
     val rawMode = prefs.pageTurnMode
     val scrollMode = rawMode == PageTurnMode.SCROLL
-    val effectiveMode = if (rawMode == PageTurnMode.SIMULATION) PageTurnMode.COVER else rawMode
+    val effectiveMode = when (rawMode) {
+        PageTurnMode.SIMULATION ->
+            if (prefs.simulationDegraded) PageTurnMode.COVER else PageTurnMode.SIMULATION
+        else -> rawMode
+    }
 
     val layoutMode = resolvePageLayoutMode(
         posture = foldableUiState.posture,
@@ -163,9 +178,56 @@ fun ReaderScreen(
     var animSpread by remember { mutableStateOf<PageSpread?>(null) }
     val animX = remember { Animatable(0f) }
 
+    val prevSpread by viewModel.prevSpread.collectAsState()
+    val nextSpread by viewModel.nextSpread.collectAsState()
+    var simTarget by remember { mutableStateOf<PageSpread?>(null) }
+    var simForward by remember { mutableStateOf(true) }
+    var simProgress by remember { mutableFloatStateOf(0f) }
+    var simSettling by remember { mutableStateOf(false) }
+    val frameMonitor = remember { FrameHealthMonitor() }
+
+    val simActive = simTarget != null
+    LaunchedEffect(simActive) {
+        if (!simActive) return@LaunchedEffect
+        frameMonitor.reset()
+        var last = 0L
+        while (true) {
+            withFrameNanos { t ->
+                if (last != 0L) frameMonitor.noteFrame((t - last) / 1_000_000f)
+                last = t
+            }
+        }
+    }
+
+    fun maybeDegradeSimulation() {
+        if (frameMonitor.shouldDegrade()) {
+            viewModel.setSimulationDegraded(true)
+            Toast.makeText(context, "已切换为流畅模式（覆盖滑动）", Toast.LENGTH_SHORT).show()
+        }
+        frameMonitor.reset()
+    }
+
     fun turn(forward: Boolean) {
         scope.launch {
-            if (animSpread != null) return@launch
+            if (animSpread != null || simTarget != null || simSettling) return@launch
+            if (effectiveMode == PageTurnMode.SIMULATION && !scrollMode) {
+                val target = (if (forward) nextSpread else prevSpread)
+                    ?: viewModel.adjacentSpread(forward) ?: return@launch
+                simTarget = target
+                simForward = forward
+                animate(
+                    0f, 1f,
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessMediumLow,
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                    ),
+                ) { v, _ -> simProgress = v }
+                viewModel.showSpread(target)
+                simTarget = null
+                simProgress = 0f
+                maybeDegradeSimulation()
+                return@launch
+            }
             val target = viewModel.adjacentSpread(forward) ?: return@launch
             if (effectiveMode == PageTurnMode.NONE || size.width <= 0) {
                 viewModel.showSpread(target)
@@ -205,9 +267,6 @@ fun ReaderScreen(
     }
 
     LaunchedEffect(rawMode) {
-        if (rawMode == PageTurnMode.SIMULATION) {
-            Toast.makeText(context, "仿真翻页将在后续版本提供，已使用覆盖滑动", Toast.LENGTH_SHORT).show()
-        }
         if (scrollMode) viewModel.enterScrollMode() else viewModel.relocate()
     }
 
@@ -287,19 +346,87 @@ fun ReaderScreen(
                     }
                 }
             }
-            .pointerInput(scrollMode) {
+            .pointerInput(scrollMode, effectiveMode) {
                 var dragged = 0f
+                val samples = ArrayDeque<Pair<Long, Float>>()
                 detectHorizontalDragGestures(
-                    onHorizontalDrag = { _, dragAmount -> dragged += dragAmount },
+                    onDragStart = {
+                        dragged = 0f
+                        samples.clear()
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        dragged += dragAmount
+                        samples.addLast(System.nanoTime() to dragged)
+                        while (samples.size > 2 &&
+                            System.nanoTime() - samples.first().first > 120_000_000L
+                        ) {
+                            samples.removeFirst()
+                        }
+                        if (effectiveMode == PageTurnMode.SIMULATION && !scrollMode &&
+                            !simSettling && size.width > 0
+                        ) {
+                            val forward = dragged < 0
+                            val target = if (forward) nextSpread else prevSpread
+                            if (target != null) {
+                                simTarget = target
+                                simForward = forward
+                                simProgress = (abs(dragged) / size.width).coerceIn(0f, 1f)
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        simTarget = null
+                        simProgress = 0f
+                        dragged = 0f
+                    },
                     onDragEnd = {
                         if (!scrollMode) {
-                            val threshold = size.width * 0.15f
-                            if (dragged < -threshold) {
-                                viewModel.noteManualInteraction()
-                                turn(true)
-                            } else if (dragged > threshold) {
-                                viewModel.noteManualInteraction()
-                                turn(false)
+                            val sim = simTarget
+                            if (effectiveMode == PageTurnMode.SIMULATION && sim != null) {
+                                val now = System.nanoTime()
+                                val velocity = if (samples.size >= 2) {
+                                    val (t0, d0) = samples.first()
+                                    (dragged - d0) / ((now - t0) / 1_000_000_000f)
+                                } else {
+                                    0f
+                                }
+                                val directed = if (simForward) -velocity else velocity
+                                val outcome = decideTurnOutcome(simProgress, directed)
+                                simSettling = true
+                                scope.launch {
+                                    if (outcome == TurnOutcome.COMPLETE) {
+                                        animate(
+                                            simProgress, 1f,
+                                            animationSpec = spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            ),
+                                        ) { v, _ -> simProgress = v }
+                                        viewModel.noteManualInteraction()
+                                        viewModel.showSpread(sim)
+                                    } else {
+                                        animate(
+                                            simProgress, 0f,
+                                            animationSpec = spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            ),
+                                        ) { v, _ -> simProgress = v }
+                                    }
+                                    simTarget = null
+                                    simProgress = 0f
+                                    simSettling = false
+                                    maybeDegradeSimulation()
+                                }
+                            } else if (effectiveMode != PageTurnMode.SIMULATION) {
+                                val threshold = size.width * 0.15f
+                                if (dragged < -threshold) {
+                                    viewModel.noteManualInteraction()
+                                    turn(true)
+                                } else if (dragged > threshold) {
+                                    viewModel.noteManualInteraction()
+                                    turn(false)
+                                }
                             }
                         }
                         dragged = 0f
@@ -332,7 +459,74 @@ fun ReaderScreen(
                     )
                 } else {
                     val spread = uiState.spread
-                    if (spread != null) {
+                    val sim = simTarget
+                    if (spread != null && sim != null) {
+                        SpreadContent(
+                            spread = sim,
+                            config = uiState.layoutConfig,
+                            colors = colors,
+                            dual = uiState.dualPage,
+                            leftDp = leftDp,
+                            hingeDp = hingeDp,
+                            rightDp = rightDp,
+                            innerPadPx = innerPadPx,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = 0.7f + 0.3f * simProgress },
+                        )
+                        SpreadContent(
+                            spread = spread,
+                            config = uiState.layoutConfig,
+                            colors = colors,
+                            dual = uiState.dualPage,
+                            leftDp = leftDp,
+                            hingeDp = hingeDp,
+                            rightDp = rightDp,
+                            innerPadPx = innerPadPx,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = if (simForward) {
+                                        -simProgress * size.width
+                                    } else {
+                                        simProgress * size.width
+                                    }
+                                    scaleY = curlScaleY(simProgress)
+                                },
+                        )
+                        val canvasWidthPx = size.width.toFloat()
+                        val canvasHeightPx = size.height.toFloat()
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val edgeX = if (simForward) {
+                                canvasWidthPx * (1f - simProgress)
+                            } else {
+                                canvasWidthPx * simProgress
+                            }
+                            val band = 40.dp.toPx()
+                            val shadow = Color.Black.copy(alpha = curlShadowAlpha(simProgress))
+                            if (simForward) {
+                                drawRect(
+                                    brush = Brush.horizontalGradient(
+                                        listOf(shadow, Color.Transparent),
+                                        startX = edgeX,
+                                        endX = edgeX + band,
+                                    ),
+                                    topLeft = Offset(edgeX, 0f),
+                                    size = Size(band, canvasHeightPx),
+                                )
+                            } else {
+                                drawRect(
+                                    brush = Brush.horizontalGradient(
+                                        listOf(Color.Transparent, shadow),
+                                        startX = edgeX - band,
+                                        endX = edgeX,
+                                    ),
+                                    topLeft = Offset(edgeX - band, 0f),
+                                    size = Size(band, canvasHeightPx),
+                                )
+                            }
+                        }
+                    } else if (spread != null) {
                         SpreadContent(
                             spread = spread,
                             config = uiState.layoutConfig,

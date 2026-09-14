@@ -153,17 +153,19 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             )
             SegmentedSetting(
                 label = "翻页方式",
-                options = listOf("覆盖", "无动画", "上下滚动"),
+                options = listOf("覆盖", "无动画", "上下滚动", "仿真"),
                 selectedIndex = when (prefs.pageTurnMode) {
-                    PageTurnMode.COVER, PageTurnMode.SIMULATION -> 0
+                    PageTurnMode.COVER -> 0
                     PageTurnMode.NONE -> 1
                     PageTurnMode.SCROLL -> 2
+                    PageTurnMode.SIMULATION -> 3
                 },
                 onSelect = { index ->
                     viewModel.updatePageTurnMode(
                         when (index) {
                             1 -> PageTurnMode.NONE
                             2 -> PageTurnMode.SCROLL
+                            3 -> PageTurnMode.SIMULATION
                             else -> PageTurnMode.COVER
                         },
                     )

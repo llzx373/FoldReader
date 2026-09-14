@@ -26,6 +26,7 @@ interface SettingsRepository {
     suspend fun setAutoPageMode(mode: AutoPageMode)
     suspend fun setAutoPageIntervalSec(seconds: Int)
     suspend fun setAutoPageSpeedPx(pxPerSecond: Float)
+    suspend fun setSimulationDegraded(degraded: Boolean)
     suspend fun setPanelScreenOff(enabled: Boolean)
     suspend fun setBookshelfGridView(gridView: Boolean)
 }

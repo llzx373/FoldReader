@@ -43,7 +43,10 @@ class SettingsViewModel(
     fun updateDarkThemeOption(option: DarkThemeOption) =
         launch { settingsRepository.setDarkThemeOption(option) }
     fun updateFontKey(fontKey: String) = launch { settingsRepository.setFontKey(fontKey) }
-    fun updatePageTurnMode(mode: PageTurnMode) = launch { settingsRepository.setPageTurnMode(mode) }
+    fun updatePageTurnMode(mode: PageTurnMode) = launch {
+        if (mode == PageTurnMode.SIMULATION) settingsRepository.setSimulationDegraded(false)
+        settingsRepository.setPageTurnMode(mode)
+    }
     fun updateDualPageMode(mode: DualPageMode) = launch { settingsRepository.setDualPageMode(mode) }
     fun updateHotspotRatio(ratio: Float) = launch { settingsRepository.setPageTurnHotspotRatio(ratio) }
     fun updateVolumeKeyPaging(enabled: Boolean) =

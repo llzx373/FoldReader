@@ -105,6 +105,11 @@ class ReaderViewModel(
 
     val autoScrollTicks = kotlinx.coroutines.flow.MutableSharedFlow<Float>(extraBufferCapacity = 8)
 
+    private val _prevSpread = MutableStateFlow<PageSpread?>(null)
+    val prevSpread: StateFlow<PageSpread?> = _prevSpread.asStateFlow()
+    private val _nextSpread = MutableStateFlow<PageSpread?>(null)
+    val nextSpread: StateFlow<PageSpread?> = _nextSpread.asStateFlow()
+
     init {
         viewModelScope.launch {
             val book = bookshelfRepository.getBook(bookId)
@@ -394,7 +399,14 @@ class ReaderViewModel(
     fun chapterList(): List<Chapter> = chapters
 
     fun setPageTurnMode(mode: PageTurnMode) {
-        viewModelScope.launch { settingsRepository.setPageTurnMode(mode) }
+        viewModelScope.launch {
+            if (mode == PageTurnMode.SIMULATION) settingsRepository.setSimulationDegraded(false)
+            settingsRepository.setPageTurnMode(mode)
+        }
+    }
+
+    fun setSimulationDegraded(degraded: Boolean) {
+        viewModelScope.launch { settingsRepository.setSimulationDegraded(degraded) }
     }
 
     fun setDualPageMode(mode: DualPageMode) {
@@ -488,22 +500,32 @@ class ReaderViewModel(
             val right = snapshot.second ?: return@launch
             val dual = snapshot.third
             val total = _uiState.value.totalChars
+            var next: PageSpread? = null
+            var prev: PageSpread? = null
             withContext(Dispatchers.Default) {
                 runCatching {
                     if (dual) {
                         val r = spread.right
                         if (r != null && r.charEnd < total) {
-                            val nextLeft = left.pageAt(r.charEnd)
-                            if (nextLeft.charEnd < total) right.pageAt(nextLeft.charEnd)
+                            next = spreadFrom(left, right, true, r.charEnd)
                         }
-                        left.pageBefore(spread.left.charStart)?.let { prev ->
-                            left.pageBefore(prev.charStart)
+                        left.pageBefore(spread.left.charStart)?.let { p1 ->
+                            val p0 = left.pageBefore(p1.charStart)
+                            prev = spreadFrom(left, right, true, p0?.charStart ?: p1.charStart)
                         }
                     } else {
-                        if (spread.left.charEnd < total) left.pageAt(spread.left.charEnd)
-                        left.pageBefore(spread.left.charStart)
+                        if (spread.left.charEnd < total) {
+                            next = spreadFrom(left, right, false, spread.left.charEnd)
+                        }
+                        left.pageBefore(spread.left.charStart)?.let { p1 ->
+                            prev = spreadFrom(left, right, false, p1.charStart)
+                        }
                     }
                 }
+            }
+            if (_uiState.value.spread == spread) {
+                _nextSpread.value = next
+                _prevSpread.value = prev
             }
         }
     }

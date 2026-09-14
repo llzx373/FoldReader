@@ -43,6 +43,7 @@ class SettingsRepositoryImpl(
         val AUTO_PAGE_MODE = stringPreferencesKey("auto_page_mode")
         val AUTO_PAGE_INTERVAL_SEC = intPreferencesKey("auto_page_interval_sec")
         val AUTO_PAGE_SPEED_PX = floatPreferencesKey("auto_page_speed_px")
+        val SIMULATION_DEGRADED = booleanPreferencesKey("simulation_degraded")
         val PANEL_SCREEN_OFF = booleanPreferencesKey("panel_screen_off")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
     }
@@ -76,6 +77,7 @@ class SettingsRepositoryImpl(
                 autoPageMode = enumOrDefault(prefs[Keys.AUTO_PAGE_MODE], defaults.autoPageMode),
                 autoPageIntervalSec = prefs[Keys.AUTO_PAGE_INTERVAL_SEC] ?: defaults.autoPageIntervalSec,
                 autoPageSpeedPx = prefs[Keys.AUTO_PAGE_SPEED_PX] ?: defaults.autoPageSpeedPx,
+                simulationDegraded = prefs[Keys.SIMULATION_DEGRADED] ?: defaults.simulationDegraded,
                 panelScreenOff = prefs[Keys.PANEL_SCREEN_OFF] ?: defaults.panelScreenOff,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
             )
@@ -174,6 +176,10 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit {
             it[Keys.AUTO_PAGE_SPEED_PX] = pxPerSecond.coerceIn(10f, 300f)
         }
+    }
+
+    override suspend fun setSimulationDegraded(degraded: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.SIMULATION_DEGRADED] = degraded }
     }
 
     override suspend fun setPanelScreenOff(enabled: Boolean) {

@@ -33,6 +33,7 @@ data class ReadingPreferences(
     val autoPageMode: AutoPageMode = AutoPageMode.INTERVAL,
     val autoPageIntervalSec: Int = 10,
     val autoPageSpeedPx: Float = 60f,
+    val simulationDegraded: Boolean = false,
     val panelScreenOff: Boolean = false,
     val bookshelfGridView: Boolean = true,
 )

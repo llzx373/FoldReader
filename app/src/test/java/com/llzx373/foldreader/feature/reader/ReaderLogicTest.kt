@@ -75,12 +75,12 @@ class ReaderLogicTest {
     }
 
     @Test
-    fun `page turn mode cycling skips simulation`() {
+    fun `page turn mode cycling covers all four modes`() {
         assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.NONE,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER))
         assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.SCROLL,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.NONE))
-        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER,
+        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.SIMULATION,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SCROLL))
         assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER,
             nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SIMULATION))

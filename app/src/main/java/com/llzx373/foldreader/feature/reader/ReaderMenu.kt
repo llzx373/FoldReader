@@ -326,7 +326,7 @@ fun pageTurnModeLabel(mode: PageTurnMode): String = when (mode) {
 fun nextPageTurnMode(mode: PageTurnMode): PageTurnMode = when (mode) {
     PageTurnMode.COVER -> PageTurnMode.NONE
     PageTurnMode.NONE -> PageTurnMode.SCROLL
-    PageTurnMode.SCROLL -> PageTurnMode.COVER
+    PageTurnMode.SCROLL -> PageTurnMode.SIMULATION
     PageTurnMode.SIMULATION -> PageTurnMode.COVER
 }
 
