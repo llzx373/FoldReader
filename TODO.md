@@ -44,12 +44,12 @@
 - [x] 单元测试：GBK/UTF-8/Big5 样例文件编码检测正确；窗口读取边界不错字；章节正则对典型网文样例命中率
 
 ### 1.5 导入（feature/importer）
-- [ ] SAF 文件选择器导入（`ActivityResultContracts.OpenDocument`，filter `text/plain` + `*/*` 兜底），取持久化 Uri 权限
-- [ ] VIEW Intent 接收：冷启动经 `onCreate`、热启动经 `onNewIntent`，解析 `content://` / `file://` Uri
-- [ ] 导入流水线：编码检测 → 书名推断（文件名去扩展名，正文头部"书名/作者"启发式）→ 内容哈希（采样+长度）→ 去重 → 写库 → 自动建立章节索引（后台）
-- [ ] 去重策略：同 Uri 直接复用；不同 Uri 同哈希提示"已在书架"
-- [ ] 导入反馈：波浪形 `LoadingIndicator` + Snackbar 结果提示（Expressive 组件）
-- [ ] 外部打开的书籍导入成功后直接进入阅读界面
+- [x] SAF 文件选择器导入（`ActivityResultContracts.OpenDocument`，filter `text/plain` + `*/*` 兜底），取持久化 Uri 权限
+- [x] VIEW Intent 接收：冷启动经 `onCreate`、热启动经 `onNewIntent`，解析 `content://` / `file://` Uri
+- [x] 导入流水线：编码检测 → 书名推断（文件名去扩展名，正文头部"书名/作者"启发式）→ 内容哈希（采样+长度）→ 去重 → 写库 → 自动建立章节索引（后台）
+- [x] 去重策略：同 Uri 直接复用；不同 Uri 同哈希提示"已在书架"
+- [x] 导入反馈：波浪形 `LoadingIndicator` + Snackbar 结果提示（Expressive 组件）
+- [x] 外部打开的书籍导入成功后直接进入阅读界面
 
 ### 1.6 书架（feature/bookshelf）
 - [ ] 书架 UI：网格视图（自适应列数，展开态多列）+ 列表视图切换
