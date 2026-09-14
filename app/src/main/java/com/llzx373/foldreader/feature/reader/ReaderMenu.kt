@@ -91,6 +91,10 @@ fun ReaderMenuPanel(
     onSelectTheme: (ReadingTheme) -> Unit,
     onPickCustomBackground: (Int) -> Unit,
     onPickCustomText: (Int) -> Unit,
+    autoPageStatus: AutoPageStatus,
+    onToggleAutoPage: (Boolean) -> Unit,
+    onCycleAutoPageMode: () -> Unit,
+    onCycleAutoPageSpeed: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -226,6 +230,30 @@ fun ReaderMenuPanel(
                     Text("双页：${dualPageModeLabel(prefs.dualPageMode)}")
                 }
                 TextButton(onClick = onOpenSettings) { Text("设置") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { onToggleAutoPage(!prefs.autoPageEnabled) }) {
+                    Text("自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}")
+                }
+                if (prefs.autoPageEnabled) {
+                    TextButton(onClick = onCycleAutoPageMode) {
+                        Text(autoPageModeLabel(prefs.autoPageMode))
+                    }
+                    TextButton(onClick = onCycleAutoPageSpeed) {
+                        Text(autoPageSpeedLabel(prefs))
+                    }
+                }
+                if (autoPageStatus.enabled && autoPageStatus.paused) {
+                    Text(
+                        text = "已暂停",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.accent,
+                    )
+                }
             }
         }
     }

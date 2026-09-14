@@ -8,6 +8,8 @@ enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
 
 enum class DualPageMode { AUTO, FORCE_DUAL, FORCE_SINGLE }
 
+enum class AutoPageMode { INTERVAL, SCROLL }
+
 data class ReadingPreferences(
     val fontSizeSp: Float = 18f,
     val lineSpacingMultiplier: Float = 1.5f,
@@ -28,6 +30,9 @@ data class ReadingPreferences(
     val showTime: Boolean = true,
     val readerBrightness: Float = -1f,
     val autoPageEnabled: Boolean = false,
+    val autoPageMode: AutoPageMode = AutoPageMode.INTERVAL,
+    val autoPageIntervalSec: Int = 10,
+    val autoPageSpeedPx: Float = 60f,
     val panelScreenOff: Boolean = false,
     val bookshelfGridView: Boolean = true,
 )

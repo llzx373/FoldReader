@@ -24,6 +24,7 @@ import com.llzx373.foldreader.core.reader.Paginator
 import com.llzx373.foldreader.core.reader.StaticLayoutTextMeasurer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -96,6 +97,13 @@ class ReaderViewModel(
     private val pendingSave = MutableStateFlow<Long?>(null)
     private val timer = ReadingTimer()
     private val speedTracker = ReadingSpeedTracker()
+    private val autoPageClock = AutoPageClock()
+    private val autoPageUiPaused = MutableStateFlow(false)
+
+    private val _autoPageStatus = MutableStateFlow(AutoPageStatus())
+    val autoPageStatus: StateFlow<AutoPageStatus> = _autoPageStatus.asStateFlow()
+
+    val autoScrollTicks = kotlinx.coroutines.flow.MutableSharedFlow<Float>(extraBufferCapacity = 8)
 
     init {
         viewModelScope.launch {
@@ -133,6 +141,65 @@ class ReaderViewModel(
                 runCatching { persistProgress(offset) }
             }
         }
+        viewModelScope.launch { autoPageLoop() }
+    }
+
+    private suspend fun autoPageLoop() {
+        var lastTick = System.nanoTime()
+        while (true) {
+            val p = preferences.value
+            val now = System.currentTimeMillis()
+            val uiPaused = autoPageUiPaused.value
+            val manualPaused = autoPageClock.isManualPaused(now)
+            _autoPageStatus.value = AutoPageStatus(
+                enabled = p.autoPageEnabled,
+                paused = p.autoPageEnabled && (uiPaused || manualPaused),
+            )
+            if (!autoPageClock.shouldRun(p.autoPageEnabled, uiPaused, now)) {
+                lastTick = System.nanoTime()
+                delay(300L)
+                continue
+            }
+            when (p.autoPageMode) {
+                com.llzx373.foldreader.core.data.settings.AutoPageMode.INTERVAL -> {
+                    delay(p.autoPageIntervalSec.coerceIn(3, 30) * 1000L)
+                    val recheck = System.currentTimeMillis()
+                    if (autoPageClock.shouldRun(
+                            preferences.value.autoPageEnabled, autoPageUiPaused.value, recheck,
+                        )
+                    ) {
+                        adjacentSpread(forward = true)?.let { showSpread(it) }
+                    }
+                }
+                com.llzx373.foldreader.core.data.settings.AutoPageMode.SCROLL -> {
+                    delay(16L)
+                    val t = System.nanoTime()
+                    val dt = ((t - lastTick) / 1_000_000_000.0).toFloat().coerceAtMost(0.1f)
+                    lastTick = t
+                    autoScrollTicks.tryEmit(p.autoPageSpeedPx * dt)
+                }
+            }
+        }
+    }
+
+    fun noteManualInteraction() {
+        autoPageClock.noteManualInteraction(System.currentTimeMillis())
+    }
+
+    fun setAutoPageUiPaused(paused: Boolean) {
+        autoPageUiPaused.value = paused
+    }
+
+    fun setAutoPageMode(mode: com.llzx373.foldreader.core.data.settings.AutoPageMode) {
+        viewModelScope.launch { settingsRepository.setAutoPageMode(mode) }
+    }
+
+    fun setAutoPageIntervalSec(seconds: Int) {
+        viewModelScope.launch { settingsRepository.setAutoPageIntervalSec(seconds) }
+    }
+
+    fun setAutoPageSpeedPx(pxPerSecond: Float) {
+        viewModelScope.launch { settingsRepository.setAutoPageSpeedPx(pxPerSecond) }
     }
 
     private fun buildProgress(offset: Long, nowMs: Long) = ReadingProgressEntity(

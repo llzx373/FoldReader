@@ -40,6 +40,9 @@ class SettingsRepositoryImpl(
         val SHOW_TIME = booleanPreferencesKey("show_time")
         val READER_BRIGHTNESS = floatPreferencesKey("reader_brightness")
         val AUTO_PAGE_ENABLED = booleanPreferencesKey("auto_page_enabled")
+        val AUTO_PAGE_MODE = stringPreferencesKey("auto_page_mode")
+        val AUTO_PAGE_INTERVAL_SEC = intPreferencesKey("auto_page_interval_sec")
+        val AUTO_PAGE_SPEED_PX = floatPreferencesKey("auto_page_speed_px")
         val PANEL_SCREEN_OFF = booleanPreferencesKey("panel_screen_off")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
     }
@@ -70,6 +73,9 @@ class SettingsRepositoryImpl(
                 showTime = prefs[Keys.SHOW_TIME] ?: defaults.showTime,
                 readerBrightness = prefs[Keys.READER_BRIGHTNESS] ?: defaults.readerBrightness,
                 autoPageEnabled = prefs[Keys.AUTO_PAGE_ENABLED] ?: defaults.autoPageEnabled,
+                autoPageMode = enumOrDefault(prefs[Keys.AUTO_PAGE_MODE], defaults.autoPageMode),
+                autoPageIntervalSec = prefs[Keys.AUTO_PAGE_INTERVAL_SEC] ?: defaults.autoPageIntervalSec,
+                autoPageSpeedPx = prefs[Keys.AUTO_PAGE_SPEED_PX] ?: defaults.autoPageSpeedPx,
                 panelScreenOff = prefs[Keys.PANEL_SCREEN_OFF] ?: defaults.panelScreenOff,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
             )
@@ -152,6 +158,22 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAutoPageEnabled(enabled: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AUTO_PAGE_ENABLED] = enabled }
+    }
+
+    override suspend fun setAutoPageMode(mode: AutoPageMode) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_PAGE_MODE] = mode.name }
+    }
+
+    override suspend fun setAutoPageIntervalSec(seconds: Int) {
+        context.readingPreferencesStore.edit {
+            it[Keys.AUTO_PAGE_INTERVAL_SEC] = seconds.coerceIn(3, 30)
+        }
+    }
+
+    override suspend fun setAutoPageSpeedPx(pxPerSecond: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.AUTO_PAGE_SPEED_PX] = pxPerSecond.coerceIn(10f, 300f)
+        }
     }
 
     override suspend fun setPanelScreenOff(enabled: Boolean) {

@@ -67,6 +67,7 @@ fun TabletopPanel(
     prefs: ReadingPreferences,
     progressFraction: Float,
     colors: ReaderColors,
+    autoPageStatus: AutoPageStatus,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
     onSeekFraction: (Float) -> Unit,
@@ -75,6 +76,8 @@ fun TabletopPanel(
     onSetBrightness: (Float) -> Unit,
     onFontSizeDelta: (Float) -> Unit,
     onToggleAutoPage: (Boolean) -> Unit,
+    onCycleAutoPageMode: () -> Unit,
+    onCycleAutoPageSpeed: () -> Unit,
     onTogglePanelOff: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -166,6 +169,14 @@ fun TabletopPanel(
                         onCheckedChange = onToggleAutoPage,
                         modifier = Modifier.padding(start = 8.dp),
                     )
+                    if (autoPageStatus.enabled) {
+                        Text(
+                            text = if (autoPageStatus.paused) "已暂停" else "运行中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.accent,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("面板熄屏", style = MaterialTheme.typography.labelMedium)
@@ -174,6 +185,19 @@ fun TabletopPanel(
                         onCheckedChange = onTogglePanelOff,
                         modifier = Modifier.padding(start = 8.dp),
                     )
+                }
+            }
+            if (prefs.autoPageEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    TextButton(onClick = onCycleAutoPageMode) {
+                        Text("模式：${autoPageModeLabel(prefs.autoPageMode)}")
+                    }
+                    TextButton(onClick = onCycleAutoPageSpeed) {
+                        Text("速度：${autoPageSpeedLabel(prefs)}")
+                    }
                 }
             }
         }

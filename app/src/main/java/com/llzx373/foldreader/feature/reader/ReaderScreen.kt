@@ -48,6 +48,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
@@ -66,6 +67,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import java.text.SimpleDateFormat
@@ -93,6 +95,7 @@ fun ReaderScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.preferences.collectAsState()
+    val autoPageStatus by viewModel.autoPageStatus.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
 
@@ -196,6 +199,9 @@ fun ReaderScreen(
         viewModel.setReadingActive(
             foreground && !menuVisible && !uiState.loading && uiState.error == null,
         )
+        viewModel.setAutoPageUiPaused(
+            !foreground || menuVisible || uiState.loading || uiState.error != null,
+        )
     }
 
     LaunchedEffect(rawMode) {
@@ -208,11 +214,30 @@ fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    LaunchedEffect(prefs.autoPageEnabled, scrollMode) {
-        if (!prefs.autoPageEnabled) return@LaunchedEffect
-        while (true) {
-            delay(5_000L)
-            if (!scrollMode) turn(true)
+    var autoScrollY by remember { mutableStateOf(0f) }
+    LaunchedEffect(uiState.spread) { autoScrollY = 0f }
+    LaunchedEffect(scrollMode, uiState.layoutConfig, size.height) {
+        if (scrollMode) return@LaunchedEffect
+        viewModel.autoScrollTicks.collect { delta ->
+            val spread = uiState.spread ?: return@collect
+            val config = uiState.layoutConfig
+            val scaledDensity = density.density * density.fontScale
+            val fontSizePx = config.fontSizeSp * scaledDensity
+            val breaks = spread.left.lines.count { it.isParagraphStart } - 1
+            val maxScroll = maxAutoScrollPx(
+                lineCount = spread.left.lines.size,
+                paragraphBreaks = breaks.coerceAtLeast(0),
+                lineHeightPx = fontSizePx * config.lineSpacingMultiplier,
+                paragraphSpacingPx = fontSizePx * config.paragraphSpacingEm,
+                marginTopPx = config.marginTopDp * density.density,
+                marginBottomPx = config.marginBottomDp * density.density,
+                viewportHeightPx = size.height,
+            )
+            autoScrollY += delta
+            if (autoScrollY >= maxScroll) {
+                autoScrollY = 0f
+                turn(true)
+            }
         }
     }
 
@@ -246,6 +271,7 @@ fun ReaderScreen(
             }
             .pointerInput(prefs.pageTurnHotspotRatio, scrollMode) {
                 detectTapGestures { offset ->
+                    viewModel.noteManualInteraction()
                     if (menuVisible) {
                         menuVisible = false
                         return@detectTapGestures
@@ -268,7 +294,13 @@ fun ReaderScreen(
                     onDragEnd = {
                         if (!scrollMode) {
                             val threshold = size.width * 0.15f
-                            if (dragged < -threshold) turn(true) else if (dragged > threshold) turn(false)
+                            if (dragged < -threshold) {
+                                viewModel.noteManualInteraction()
+                                turn(true)
+                            } else if (dragged > threshold) {
+                                viewModel.noteManualInteraction()
+                                turn(false)
+                            }
                         }
                         dragged = 0f
                     },
@@ -289,7 +321,8 @@ fun ReaderScreen(
                 modifier = Modifier
                     .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
                     .width(with(density) { contentRect.width.toDp() })
-                    .height(with(density) { contentRect.height.toDp() }),
+                    .height(with(density) { contentRect.height.toDp() })
+                    .clipToBounds(),
             ) {
                 if (scrollMode) {
                     ScrollContent(
@@ -309,7 +342,9 @@ fun ReaderScreen(
                             hingeDp = hingeDp,
                             rightDp = rightDp,
                             innerPadPx = innerPadPx,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { translationY = -autoScrollY },
                         )
                         val overlay = animSpread
                         if (overlay != null) {
@@ -354,8 +389,9 @@ fun ReaderScreen(
                 prefs = prefs,
                 progressFraction = uiState.progressFraction,
                 colors = colors,
-                onPrevPage = { turn(false) },
-                onNextPage = { turn(true) },
+                autoPageStatus = autoPageStatus,
+                onPrevPage = { viewModel.noteManualInteraction(); turn(false) },
+                onNextPage = { viewModel.noteManualInteraction(); turn(true) },
                 onSeekFraction = { f -> scope.launch { viewModel.seekToFraction(f) } },
                 onPrevChapter = { scope.launch { viewModel.seekChapter(-1) } },
                 onNextChapter = { scope.launch { viewModel.seekChapter(1) } },
@@ -364,6 +400,17 @@ fun ReaderScreen(
                     viewModel.setFontSize((prefs.fontSizeSp + delta).coerceIn(12f, 32f))
                 },
                 onToggleAutoPage = viewModel::setAutoPageEnabled,
+                onCycleAutoPageMode = {
+                    viewModel.setAutoPageMode(nextAutoPageMode(prefs.autoPageMode))
+                },
+                onCycleAutoPageSpeed = {
+                    when (prefs.autoPageMode) {
+                        AutoPageMode.INTERVAL ->
+                            viewModel.setAutoPageIntervalSec(nextAutoPageIntervalSec(prefs.autoPageIntervalSec))
+                        AutoPageMode.SCROLL ->
+                            viewModel.setAutoPageSpeedPx(nextAutoPageSpeedPx(prefs.autoPageSpeedPx))
+                    }
+                },
                 onTogglePanelOff = viewModel::setPanelScreenOff,
                 modifier = Modifier
                     .offset { IntOffset(0, tabletop.panel.top.roundToInt()) }
@@ -479,6 +526,19 @@ fun ReaderScreen(
                 },
                 onPickCustomText = { argb ->
                     viewModel.setCustomColors(prefs.customBackgroundArgb, argb)
+                },
+                autoPageStatus = autoPageStatus,
+                onToggleAutoPage = viewModel::setAutoPageEnabled,
+                onCycleAutoPageMode = {
+                    viewModel.setAutoPageMode(nextAutoPageMode(prefs.autoPageMode))
+                },
+                onCycleAutoPageSpeed = {
+                    when (prefs.autoPageMode) {
+                        AutoPageMode.INTERVAL ->
+                            viewModel.setAutoPageIntervalSec(nextAutoPageIntervalSec(prefs.autoPageIntervalSec))
+                        AutoPageMode.SCROLL ->
+                            viewModel.setAutoPageSpeedPx(nextAutoPageSpeedPx(prefs.autoPageSpeedPx))
+                    }
                 },
                 onOpenSettings = onOpenSettings,
                 modifier = Modifier
@@ -600,6 +660,10 @@ private fun ScrollContent(
                 }
             }
         }
+    }
+
+    LaunchedEffect(listState) {
+        viewModel.autoScrollTicks.collect { delta -> listState.scroll { scrollBy(delta) } }
     }
 
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
