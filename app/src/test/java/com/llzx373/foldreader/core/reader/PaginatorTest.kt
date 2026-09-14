@@ -1,0 +1,193 @@
+package com.llzx373.foldreader.core.reader
+
+import android.graphics.Typeface
+import com.llzx373.foldreader.core.format.BookContent
+import com.llzx373.foldreader.core.format.ChapterScanner
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+private class StringBookContent(private val text: String) : BookContent {
+    override val charCount: Long get() = text.length.toLong()
+    override suspend fun read(range: LongRange): String {
+        val from = range.first.coerceIn(0, text.length.toLong()).toInt()
+        val to = (range.last + 1).coerceIn(0, text.length.toLong()).toInt()
+        return text.substring(from, maxOf(from, to))
+    }
+}
+
+private class FixedWidthMeasurer(private val charWidthPx: Int = 10) : TextMeasurer {
+    override fun measureLineBreaks(
+        text: CharSequence,
+        widthPx: Int,
+        indentPx: Int,
+        fontSizePx: Float,
+        letterSpacingEm: Float,
+        typeface: Typeface?,
+    ): IntArray {
+        if (text.isEmpty()) return IntArray(0)
+        val first = maxOf(1, (widthPx - indentPx) / charWidthPx)
+        val rest = maxOf(1, widthPx / charWidthPx)
+        val out = ArrayList<Int>()
+        var end = minOf(first, text.length)
+        out += end
+        while (end < text.length) {
+            end = minOf(end + rest, text.length)
+            out += end
+        }
+        return out.toIntArray()
+    }
+}
+
+class PaginatorTest {
+
+    private fun paginator(
+        text: String,
+        fontSizeSp: Float = 10f,
+        widthPx: Int = 200,
+        heightPx: Int = 100,
+        maxLineChars: Int = 40,
+    ) = Paginator(
+        content = StringBookContent(text),
+        config = LayoutConfig(
+            fontSizeSp = fontSizeSp,
+            lineSpacingMultiplier = 1f,
+            paragraphSpacingEm = 0.4f,
+            marginLeftDp = 0f,
+            marginTopDp = 0f,
+            marginRightDp = 0f,
+            marginBottomDp = 0f,
+            firstLineIndentChars = 0,
+            maxLineChars = maxLineChars,
+        ),
+        measurer = FixedWidthMeasurer(),
+        widthPx = widthPx,
+        heightPx = heightPx,
+        density = 1f,
+        scaledDensity = 1f,
+    )
+
+    private fun paginateAll(p: Paginator, charCount: Long): List<Page> = runBlocking {
+        val pages = mutableListOf<Page>()
+        var page = p.pageAt(0)
+        pages += page
+        while (page.charEnd < charCount) {
+            page = p.pageAt(page.charEnd)
+            pages += page
+        }
+        pages
+    }
+
+    private fun mixedText(): String = buildString {
+        repeat(30) { i ->
+            append("第${i}段内容".repeat((i % 5) + 3))
+            append("with some english words mixed in")
+            append('\n')
+            if (i % 7 == 3) append('\n')
+        }
+    }
+
+    @Test
+    fun `full pass loses and duplicates no characters`() = runBlocking {
+        val text = mixedText()
+        val pages = paginateAll(paginator(text), text.length.toLong())
+        assertTrue(pages.size > 1)
+        for (i in 1 until pages.size) {
+            assertEquals(pages[i - 1].charEnd, pages[i].charStart)
+        }
+        assertEquals(0L, pages.first().charStart)
+        assertEquals(text.length.toLong(), pages.last().charEnd)
+        for (page in pages) {
+            assertEquals(page.charStart, page.lines.first().charStart)
+            assertEquals(page.charEnd, page.lines.last().charEnd)
+            for (i in 1 until page.lines.size) {
+                assertEquals(page.lines[i - 1].charEnd, page.lines[i].charStart)
+            }
+            val source = text.substring(page.charStart.toInt(), page.charEnd.toInt())
+                .replace("\r", "").replace("\n", "")
+            assertEquals(source, page.lines.joinToString("") { it.text })
+        }
+        Unit
+    }
+
+    @Test
+    fun `line-start forbidden punctuation hangs on previous line`() = runBlocking {
+        val text = "一".repeat(20) + "。" + "续".repeat(30)
+        val page = paginator(text).pageAt(0)
+        assertEquals(21, page.lines[0].text.length)
+        assertTrue(page.lines[0].text.endsWith("。"))
+    }
+
+    @Test
+    fun `line-end forbidden bracket moves to next line`() = runBlocking {
+        val text = "字".repeat(19) + "（" + "内".repeat(30)
+        val page = paginator(text).pageAt(0)
+        assertEquals(19, page.lines[0].text.length)
+        assertTrue(page.lines[1].text.startsWith("（"))
+    }
+
+    @Test
+    fun `larger font yields more pages`() = runBlocking {
+        val text = mixedText()
+        val small = paginateAll(paginator(text, fontSizeSp = 10f), text.length.toLong())
+        val large = paginateAll(paginator(text, fontSizeSp = 20f), text.length.toLong())
+        assertTrue(large.size > small.size)
+    }
+
+    @Test
+    fun `forward then backward round trip returns identical pages`() = runBlocking {
+        val text = mixedText()
+        val p = paginator(text)
+        val forward = mutableListOf<Page>()
+        var page = p.pageAt(0)
+        repeat(8) {
+            forward += page
+            page = p.pageAt(page.charEnd)
+        }
+        assertNull(p.pageBefore(0))
+        for (i in forward.indices.reversed().drop(1)) {
+            val back = p.pageBefore(forward[i + 1].charStart)
+            assertEquals(forward[i], back)
+        }
+    }
+
+    @Test
+    fun `max line chars caps line length and centers text`() = runBlocking {
+        val text = "天地玄黄宇宙洪荒日月盈昃辰宿列张".repeat(30)
+        val p = paginator(text, widthPx = 2000, maxLineChars = 10)
+        val pages = paginateAll(p, text.length.toLong())
+        for (page in pages) {
+            assertEquals(950f, page.paddingLeft)
+            assertEquals(950f, page.paddingRight)
+            for (line in page.lines) {
+                assertTrue(line.text.length <= 10)
+            }
+        }
+    }
+
+    @Test
+    fun `chapter starts align with paragraph-start lines`() = runBlocking {
+        val text = buildString {
+            for (c in 1..5) {
+                append("第${c}章 标题\n")
+                append("正文内容".repeat(30))
+                append("\n\n")
+            }
+        }
+        val scanner = ChapterScanner()
+        scanner.feed(text)
+        val chapters = scanner.finish()
+        assertTrue(chapters.size >= 5)
+        val p = paginator(text)
+        val paraStarts = paginateAll(p, text.length.toLong())
+            .flatMap { it.lines }
+            .filter { it.isParagraphStart }
+            .map { it.charStart }
+            .toSet()
+        for (chapter in chapters) {
+            assertTrue("chapter '${chapter.title}' at ${chapter.charStart}", chapter.charStart in paraStarts)
+        }
+    }
+}
