@@ -26,14 +26,14 @@
 - [x] 单元测试：FoldingFeature 各组合（无铰链/垂直铰链 HALF_OPENED/水平铰链 FLAT）→ Posture 映射正确
 
 ### 1.3 数据层（core/data）
-- [ ] Room 数据库 `FoldReaderDatabase`（导出 schema）
-- [ ] 实体 `BookEntity`：id、书名、作者(可空)、文件 Uri、内容哈希、格式(TXT)、总字符数、编码、导入时间、最后阅读时间
-- [ ] 实体 `ReadingProgressEntity`：bookId、字符偏移锚点、章节索引、阅读总时长、更新时间
-- [ ] 实体 `BookmarkEntity`：id、bookId、字符偏移、章节索引、页内快照文本、创建时间
-- [ ] 实体 `AnnotationEntity`（划线标注）：id、bookId、起止字符偏移、所选文本、颜色、笔记内容、创建/修改时间
-- [ ] DAO：书架查询（按最近阅读排序 Flow）、进度读写、书签/标注 CRUD（按 bookId 查询 Flow）
-- [ ] DataStore Preferences：全局默认阅读偏好（字号/行距/主题/翻页方式/翻页热区/音量键开关）
-- [ ] Repository：`BookshelfRepository`、`SettingsRepository`（ViewModel 面向接口编程）
+- [x] Room 数据库 `FoldReaderDatabase`（导出 schema）
+- [x] 实体 `BookEntity`：id、书名、作者(可空)、文件 Uri、内容哈希、格式(TXT)、总字符数、编码、导入时间、最后阅读时间
+- [x] 实体 `ReadingProgressEntity`：bookId、字符偏移锚点、章节索引、阅读总时长、更新时间
+- [x] 实体 `BookmarkEntity`：id、bookId、字符偏移、章节索引、页内快照文本、创建时间
+- [x] 实体 `AnnotationEntity`（划线标注）：id、bookId、起止字符偏移、所选文本、颜色、笔记内容、创建/修改时间
+- [x] DAO：书架查询（按最近阅读排序 Flow）、进度读写、书签/标注 CRUD（按 bookId 查询 Flow）
+- [x] DataStore Preferences：全局默认阅读偏好（字号/行距/主题/翻页方式/翻页热区/音量键开关）
+- [x] Repository：`BookshelfRepository`、`SettingsRepository`（ViewModel 面向接口编程）
 
 ### 1.4 TXT 解析基础（core/format）
 - [ ] 定义格式引擎接口 `BookParser` / `BookMeta` / `Chapter` / `BookContent`（按说明书 8.2，为 EPUB 预留）

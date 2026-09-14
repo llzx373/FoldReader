@@ -3,6 +3,12 @@ package com.llzx373.foldreader
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import androidx.room.Room
+import com.llzx373.foldreader.core.data.db.FoldReaderDatabase
+import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.data.repository.BookshelfRepositoryImpl
+import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.SettingsRepositoryImpl
 import com.llzx373.foldreader.core.foldable.FoldableStateProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +21,13 @@ class AppContainer(context: Context) {
         context = context,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    val database: FoldReaderDatabase =
+        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db").build()
+    val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
+        bookDao = database.bookDao(),
+        progressDao = database.readingProgressDao(),
+    )
+    val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
 }
 
 class FoldReaderApplication : Application() {
