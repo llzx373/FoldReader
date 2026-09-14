@@ -36,6 +36,7 @@ fun FoldReaderNavHost(
             ReaderScreen(
                 bookId = backStackEntry.arguments?.getLong("bookId") ?: 0L,
                 onBack = { navController.popBackStack() },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
         composable(Routes.SETTINGS) {

@@ -12,6 +12,11 @@ data class ReadingPreferences(
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,
     val keepScreenOn: Boolean = false,
+    val showChapterTitle: Boolean = true,
+    val showPageProgress: Boolean = true,
+    val showBattery: Boolean = true,
+    val showTime: Boolean = true,
+    val readerBrightness: Float = -1f,
     val bookshelfGridView: Boolean = true,
 )
 

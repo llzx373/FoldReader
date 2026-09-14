@@ -12,5 +12,10 @@ interface SettingsRepository {
     suspend fun setPageTurnHotspotRatio(ratio: Float)
     suspend fun setVolumeKeyPagingEnabled(enabled: Boolean)
     suspend fun setKeepScreenOn(enabled: Boolean)
+    suspend fun setShowChapterTitle(enabled: Boolean)
+    suspend fun setShowPageProgress(enabled: Boolean)
+    suspend fun setShowBattery(enabled: Boolean)
+    suspend fun setShowTime(enabled: Boolean)
+    suspend fun setReaderBrightness(brightness: Float)
     suspend fun setBookshelfGridView(gridView: Boolean)
 }

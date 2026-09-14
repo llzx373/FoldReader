@@ -27,6 +27,11 @@ class SettingsRepositoryImpl(
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+        val SHOW_CHAPTER_TITLE = booleanPreferencesKey("show_chapter_title")
+        val SHOW_PAGE_PROGRESS = booleanPreferencesKey("show_page_progress")
+        val SHOW_BATTERY = booleanPreferencesKey("show_battery")
+        val SHOW_TIME = booleanPreferencesKey("show_time")
+        val READER_BRIGHTNESS = floatPreferencesKey("reader_brightness")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
     }
 
@@ -44,6 +49,11 @@ class SettingsRepositoryImpl(
                 volumeKeyPagingEnabled = prefs[Keys.VOLUME_KEY_PAGING_ENABLED]
                     ?: defaults.volumeKeyPagingEnabled,
                 keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
+                showChapterTitle = prefs[Keys.SHOW_CHAPTER_TITLE] ?: defaults.showChapterTitle,
+                showPageProgress = prefs[Keys.SHOW_PAGE_PROGRESS] ?: defaults.showPageProgress,
+                showBattery = prefs[Keys.SHOW_BATTERY] ?: defaults.showBattery,
+                showTime = prefs[Keys.SHOW_TIME] ?: defaults.showTime,
+                readerBrightness = prefs[Keys.READER_BRIGHTNESS] ?: defaults.readerBrightness,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
             )
         }
@@ -74,6 +84,28 @@ class SettingsRepositoryImpl(
 
     override suspend fun setKeepScreenOn(enabled: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.KEEP_SCREEN_ON] = enabled }
+    }
+
+    override suspend fun setShowChapterTitle(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.SHOW_CHAPTER_TITLE] = enabled }
+    }
+
+    override suspend fun setShowPageProgress(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.SHOW_PAGE_PROGRESS] = enabled }
+    }
+
+    override suspend fun setShowBattery(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.SHOW_BATTERY] = enabled }
+    }
+
+    override suspend fun setShowTime(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.SHOW_TIME] = enabled }
+    }
+
+    override suspend fun setReaderBrightness(brightness: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.READER_BRIGHTNESS] = brightness.coerceIn(-1f, 1f)
+        }
     }
 
     override suspend fun setBookshelfGridView(gridView: Boolean) {
