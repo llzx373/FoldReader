@@ -36,12 +36,12 @@
 - [x] Repository：`BookshelfRepository`、`SettingsRepository`（ViewModel 面向接口编程）
 
 ### 1.4 TXT 解析基础（core/format）
-- [ ] 定义格式引擎接口 `BookParser` / `BookMeta` / `Chapter` / `BookContent`（按说明书 8.2，为 EPUB 预留）
-- [ ] 编码检测器：采样头部字节，识别 UTF-8(BOM/无 BOM)/UTF-16 LE/BE/GBK/GB18030/Big5，输出编码 + 置信度
-- [ ] `TxtBookContent` 实现：基于 RandomAccessFile/InputStream 的**窗口化读取**（按字符偏移读 ±N KB 窗口），不整文件载入内存
-- [ ] 字节偏移 ↔ 字符偏移映射索引建立（后台协程，进度可查询）
-- [ ] 章节识别器：内置规则库（"第X章/卷/回/节"、Chapter N、纯数字分卷等），输出章节列表；识别失败降级为"纯进度模式"（无目录不阻断阅读）
-- [ ] 单元测试：GBK/UTF-8/Big5 样例文件编码检测正确；窗口读取边界不错字；章节正则对典型网文样例命中率
+- [x] 定义格式引擎接口 `BookParser` / `BookMeta` / `Chapter` / `BookContent`（按说明书 8.2，为 EPUB 预留）
+- [x] 编码检测器：采样头部字节，识别 UTF-8(BOM/无 BOM)/UTF-16 LE/BE/GBK/GB18030/Big5，输出编码 + 置信度
+- [x] `TxtBookContent` 实现：基于 RandomAccessFile/InputStream 的**窗口化读取**（按字符偏移读 ±N KB 窗口），不整文件载入内存
+- [x] 字节偏移 ↔ 字符偏移映射索引建立（后台协程，进度可查询）
+- [x] 章节识别器：内置规则库（"第X章/卷/回/节"、Chapter N、纯数字分卷等），输出章节列表；识别失败降级为"纯进度模式"（无目录不阻断阅读）
+- [x] 单元测试：GBK/UTF-8/Big5 样例文件编码检测正确；窗口读取边界不错字；章节正则对典型网文样例命中率
 
 ### 1.5 导入（feature/importer）
 - [ ] SAF 文件选择器导入（`ActivityResultContracts.OpenDocument`，filter `text/plain` + `*/*` 兜底），取持久化 Uri 权限

@@ -10,6 +10,8 @@ import com.llzx373.foldreader.core.data.repository.BookshelfRepositoryImpl
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.SettingsRepositoryImpl
 import com.llzx373.foldreader.core.foldable.FoldableStateProvider
+import com.llzx373.foldreader.core.format.BookParser
+import com.llzx373.foldreader.core.format.txt.TxtBookParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +30,7 @@ class AppContainer(context: Context) {
         progressDao = database.readingProgressDao(),
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
+    val txtBookParser: BookParser = TxtBookParser(context)
 }
 
 class FoldReaderApplication : Application() {
