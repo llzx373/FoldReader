@@ -89,6 +89,8 @@ class ReaderViewModel(
     private var content: BookContent? = null
     private var chapters: List<Chapter> = emptyList()
     private var baseReadingMillis = 0L
+    private var firstReadAtMs = 0L
+    private var lastSessionFlushTotalMs = 0L
     private var paginatorLeft: Paginator? = null
     private var paginatorRight: Paginator? = null
     private var dualActive = false
@@ -321,6 +323,7 @@ class ReaderViewModel(
                 verifyAnnotationSnapshots()
                 val progress = bookshelfRepository.getProgress(bookId)
                 baseReadingMillis = progress?.totalReadingMillis ?: 0L
+                firstReadAtMs = progress?.firstReadAt ?: 0L
                 anchorOffset.value = progress?.charOffset ?: 0L
                 _uiState.update {
                     it.copy(bookTitle = book.title, totalChars = opened.first.charCount)
@@ -395,12 +398,30 @@ class ReaderViewModel(
         charOffset = offset,
         chapterIndex = chapterIndexAt(chapters, offset),
         totalReadingMillis = baseReadingMillis + timer.totalMs(nowMs),
+        firstReadAt = if (firstReadAtMs > 0L) firstReadAtMs else nowMs,
         updatedAt = nowMs,
     )
 
     private suspend fun persistProgress(offset: Long) {
-        bookshelfRepository.saveProgress(buildProgress(offset, System.currentTimeMillis()))
+        val nowMs = System.currentTimeMillis()
+        bookshelfRepository.saveProgress(buildProgress(offset, nowMs))
         bookshelfRepository.touchLastRead(bookId)
+        flushReadingSession(nowMs)
+    }
+
+    /** 阅读时长按天分桶：本次打开累计的增量 upsert 到当天。 */
+    private suspend fun flushReadingSession(nowMs: Long) {
+        val total = timer.totalMs(nowMs)
+        val delta = total - lastSessionFlushTotalMs
+        if (delta <= 0L) return
+        lastSessionFlushTotalMs = total
+        runCatching {
+            bookshelfRepository.addReadingSession(
+                bookId,
+                com.llzx373.foldreader.core.reader.dayStartMs(nowMs, java.time.ZoneId.systemDefault()),
+                delta,
+            )
+        }
     }
 
     private suspend fun collectViewport() {

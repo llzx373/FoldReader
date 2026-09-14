@@ -11,6 +11,8 @@ import com.llzx373.foldreader.core.data.db.ChapterDao
 import com.llzx373.foldreader.core.data.db.ChapterEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
+import com.llzx373.foldreader.core.data.db.ReadingSessionDao
+import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
 
@@ -20,6 +22,7 @@ class BookshelfRepositoryImpl(
     private val chapterDao: ChapterDao,
     private val bookmarkDao: BookmarkDao,
     private val annotationDao: AnnotationDao,
+    private val sessionDao: ReadingSessionDao,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -88,4 +91,19 @@ class BookshelfRepositoryImpl(
         annotationDao.update(annotation)
 
     override suspend fun deleteAnnotation(id: Long) = annotationDao.deleteById(id)
+
+    override suspend fun addReadingSession(bookId: Long, dayStartMs: Long, deltaMs: Long) {
+        if (deltaMs <= 0L) return
+        val existing = sessionDao.get(bookId, dayStartMs)
+        sessionDao.upsert(
+            ReadingSessionEntity(
+                bookId = bookId,
+                dayStartMs = dayStartMs,
+                durationMs = (existing?.durationMs ?: 0L) + deltaMs,
+            ),
+        )
+    }
+
+    override suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =
+        sessionDao.getBetween(startMs, endMs)
 }

@@ -11,9 +11,14 @@ import androidx.room.RoomDatabase
         BookmarkEntity::class,
         AnnotationEntity::class,
         ChapterEntity::class,
+        ReadingSessionEntity::class,
     ],
-    version = 3,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    version = 4,
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4),
+    ],
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {
@@ -22,4 +27,5 @@ abstract class FoldReaderDatabase : RoomDatabase() {
     abstract fun bookmarkDao(): BookmarkDao
     abstract fun annotationDao(): AnnotationDao
     abstract fun chapterDao(): ChapterDao
+    abstract fun readingSessionDao(): ReadingSessionDao
 }

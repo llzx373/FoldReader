@@ -5,6 +5,7 @@ import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
+import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
 
@@ -34,4 +35,8 @@ interface BookshelfRepository {
     suspend fun addAnnotation(annotation: AnnotationEntity): Long
     suspend fun updateAnnotation(annotation: AnnotationEntity)
     suspend fun deleteAnnotation(id: Long)
+
+    /** 按天分桶累加阅读时长（增量 [deltaMs]）。 */
+    suspend fun addReadingSession(bookId: Long, dayStartMs: Long, deltaMs: Long)
+    suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity>
 }

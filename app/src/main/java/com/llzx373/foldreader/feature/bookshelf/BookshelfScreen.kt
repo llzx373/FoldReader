@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -110,6 +111,7 @@ fun BookshelfScreen(
     var fabMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var detailBookId by rememberSaveable { mutableStateOf(0L) }
     val selectionMode = selectedIds.isNotEmpty()
     val displayBooks = remember(books, searchQuery) {
         val q = searchQuery.trim()
@@ -182,6 +184,11 @@ fun BookshelfScreen(
                         }
                     },
                     actions = {
+                        if (selectedIds.size == 1) {
+                            IconButton(onClick = { detailBookId = selectedIds.first() }) {
+                                Icon(Icons.Filled.Info, contentDescription = "书籍详情")
+                            }
+                        }
                         IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Filled.Delete, contentDescription = "删除")
                         }
@@ -337,6 +344,17 @@ fun BookshelfScreen(
                 }
             }
         }
+    }
+
+    if (detailBookId != 0L) {
+        BookDetailDialog(
+            bookId = detailBookId,
+            viewModel = viewModel,
+            onDismiss = {
+                detailBookId = 0L
+                viewModel.clearSelection()
+            },
+        )
     }
 
     if (showDeleteDialog) {

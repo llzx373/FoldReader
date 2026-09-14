@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val fontManager: FontManager,
+    private val bookshelfRepository: com.llzx373.foldreader.core.data.repository.BookshelfRepository,
 ) : ViewModel() {
 
     val preferences: StateFlow<ReadingPreferences> = settingsRepository.preferences
@@ -31,6 +32,36 @@ class SettingsViewModel(
 
     private val _importedFonts = MutableStateFlow(fontManager.listImported())
     val importedFonts: StateFlow<List<String>> = _importedFonts.asStateFlow()
+
+    data class ReadingStatsUi(
+        val weekMillis: Long = 0,
+        val monthMillis: Long = 0,
+        val last7Days: List<Pair<Long, Long>> = emptyList(),
+    )
+
+    private val _readingStats = MutableStateFlow(ReadingStatsUi())
+    val readingStats: StateFlow<ReadingStatsUi> = _readingStats.asStateFlow()
+
+    init {
+        refreshReadingStats()
+    }
+
+    fun refreshReadingStats() = launch {
+        val zone = java.time.ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
+        val monthStart = com.llzx373.foldreader.core.reader.monthStartMs(now, zone)
+        val sessions = bookshelfRepository.getReadingSessionsBetween(monthStart, now)
+            .map { it.dayStartMs to it.durationMs }
+        _readingStats.value = ReadingStatsUi(
+            weekMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
+                sessions, com.llzx373.foldreader.core.reader.weekStartMs(now, zone), now,
+            ),
+            monthMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
+                sessions, monthStart, now,
+            ),
+            last7Days = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 7, zone),
+        )
+    }
 
     fun updateFontSize(sizeSp: Float) = launch { settingsRepository.setFontSize(sizeSp) }
     fun updateLineSpacing(multiplier: Float) = launch { settingsRepository.setLineSpacing(multiplier) }
@@ -80,6 +111,7 @@ class SettingsViewModel(
                 SettingsViewModel(
                     settingsRepository = container.settingsRepository,
                     fontManager = container.fontManager,
+                    bookshelfRepository = container.bookshelfRepository,
                 )
             }
         }

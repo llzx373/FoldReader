@@ -51,6 +51,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(app.container))
     val prefs by viewModel.preferences.collectAsState()
     val importedFonts by viewModel.importedFonts.collectAsState()
+    val readingStats by viewModel.readingStats.collectAsState()
 
     val fontPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -210,6 +211,9 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 },
             )
             SwitchSetting("书架网格视图", prefs.bookshelfGridView, viewModel::updateBookshelfGridView)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            ReadingStatsSection(stats = readingStats)
         }
     }
 }

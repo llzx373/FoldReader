@@ -91,6 +91,9 @@ class BookshelfViewModel(
         _selectedIds.value = emptySet()
     }
 
+    suspend fun bookDetail(bookId: Long): Pair<com.llzx373.foldreader.core.data.db.BookEntity?, com.llzx373.foldreader.core.data.db.ReadingProgressEntity?> =
+        bookshelfRepository.getBook(bookId) to bookshelfRepository.getProgress(bookId)
+
     fun deleteSelected() {
         val ids = _selectedIds.value.toList()
         if (ids.isEmpty()) return
