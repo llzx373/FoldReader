@@ -318,6 +318,12 @@ class ReaderViewModel(
 
     suspend fun chapterAt(index: Int): Chapter? = chapters.getOrNull(index)
 
+    suspend fun seekChapter(delta: Int) {
+        if (chapters.isEmpty()) return
+        val idx = (_uiState.value.chapterIndex + delta).coerceIn(0, chapters.lastIndex)
+        chapters.getOrNull(idx)?.let { seekToOffset(it.charStart) }
+    }
+
     fun chapterList(): List<Chapter> = chapters
 
     fun setPageTurnMode(mode: PageTurnMode) {
@@ -330,6 +336,14 @@ class ReaderViewModel(
 
     fun setReaderBrightness(brightness: Float) {
         viewModelScope.launch { settingsRepository.setReaderBrightness(brightness) }
+    }
+
+    fun setAutoPageEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setAutoPageEnabled(enabled) }
+    }
+
+    fun setPanelScreenOff(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setPanelScreenOff(enabled) }
     }
 
     fun setFontSize(sizeSp: Float) {

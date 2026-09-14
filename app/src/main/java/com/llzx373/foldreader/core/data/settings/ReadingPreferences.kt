@@ -27,6 +27,8 @@ data class ReadingPreferences(
     val showBattery: Boolean = true,
     val showTime: Boolean = true,
     val readerBrightness: Float = -1f,
+    val autoPageEnabled: Boolean = false,
+    val panelScreenOff: Boolean = false,
     val bookshelfGridView: Boolean = true,
 )
 

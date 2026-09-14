@@ -19,6 +19,32 @@ data class ContentRect(
     val height: Float,
 )
 
+data class TabletopLayout(
+    val content: ContentRect,
+    val panel: ContentRect,
+)
+
+fun resolveTabletopLayout(
+    posture: FoldingPosture,
+    hingeLocal: Rect?,
+    widthPx: Float,
+    heightPx: Float,
+): TabletopLayout? {
+    if (posture.posture != Posture.HALF_OPENED ||
+        posture.hingeOrientation != HingeOrientation.HORIZONTAL ||
+        hingeLocal == null
+    ) {
+        return null
+    }
+    val contentBottom = hingeLocal.top.coerceIn(0f, heightPx)
+    val panelTop = hingeLocal.bottom.coerceIn(contentBottom, heightPx)
+    if (contentBottom <= 0f || heightPx - panelTop <= 0f) return null
+    return TabletopLayout(
+        content = ContentRect(0f, 0f, widthPx, contentBottom),
+        panel = ContentRect(0f, panelTop, widthPx, heightPx - panelTop),
+    )
+}
+
 fun contentRectFor(
     posture: FoldingPosture,
     hingeLocal: Rect?,

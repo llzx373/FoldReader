@@ -112,14 +112,21 @@ fun ReaderScreen(
         widthCategory = foldableUiState.widthCategory,
         pref = prefs.dualPageMode,
     )
-    val dual = layoutMode == PageLayoutMode.DUAL && !scrollMode
 
     val hingeLocal = foldableUiState.posture.hingeBounds
         ?.takeIf { it.width > 0f || it.height > 0f }
         ?.let { Rect(it.left - windowOffsetX, it.top - windowOffsetY, it.right - windowOffsetX, it.bottom - windowOffsetY) }
+    val tabletop = resolveTabletopLayout(
+        posture = foldableUiState.posture,
+        hingeLocal = hingeLocal,
+        widthPx = size.width.toFloat(),
+        heightPx = size.height.toFloat(),
+    )
+    val dual = layoutMode == PageLayoutMode.DUAL && !scrollMode && tabletop == null
+
     val splitLeftPx = (hingeLocal?.left ?: size.width / 2f).coerceIn(0f, size.width.toFloat())
     val splitRightPx = (hingeLocal?.right ?: size.width / 2f).coerceIn(splitLeftPx, size.width.toFloat())
-    val contentRect = contentRectFor(
+    val contentRect = tabletop?.content ?: contentRectFor(
         posture = foldableUiState.posture,
         hingeLocal = hingeLocal,
         widthPx = size.width.toFloat(),
@@ -200,6 +207,14 @@ fun ReaderScreen(
 
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    LaunchedEffect(prefs.autoPageEnabled, scrollMode) {
+        if (!prefs.autoPageEnabled) return@LaunchedEffect
+        while (true) {
+            delay(5_000L)
+            if (!scrollMode) turn(true)
+        }
+    }
 
     val innerPadPx = with(density) { INNER_SPINE_PAD.toPx() }
     val spineOverlayPx = with(density) { SPINE_OVERLAY_WIDTH.toPx() }
@@ -326,6 +341,35 @@ fun ReaderScreen(
                     }
                 }
             }
+        }
+
+        if (tabletop != null && !uiState.loading && uiState.error == null) {
+            TabletopDivider(
+                colors = colors,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset { IntOffset(0, tabletop.content.height.roundToInt()) },
+            )
+            TabletopPanel(
+                prefs = prefs,
+                progressFraction = uiState.progressFraction,
+                colors = colors,
+                onPrevPage = { turn(false) },
+                onNextPage = { turn(true) },
+                onSeekFraction = { f -> scope.launch { viewModel.seekToFraction(f) } },
+                onPrevChapter = { scope.launch { viewModel.seekChapter(-1) } },
+                onNextChapter = { scope.launch { viewModel.seekChapter(1) } },
+                onSetBrightness = viewModel::setReaderBrightness,
+                onFontSizeDelta = { delta ->
+                    viewModel.setFontSize((prefs.fontSizeSp + delta).coerceIn(12f, 32f))
+                },
+                onToggleAutoPage = viewModel::setAutoPageEnabled,
+                onTogglePanelOff = viewModel::setPanelScreenOff,
+                modifier = Modifier
+                    .offset { IntOffset(0, tabletop.panel.top.roundToInt()) }
+                    .fillMaxWidth()
+                    .height(with(density) { tabletop.panel.height.toDp() }),
+            )
         }
 
         if (!uiState.loading && uiState.error == null) {

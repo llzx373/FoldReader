@@ -39,6 +39,8 @@ class SettingsRepositoryImpl(
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
         val SHOW_TIME = booleanPreferencesKey("show_time")
         val READER_BRIGHTNESS = floatPreferencesKey("reader_brightness")
+        val AUTO_PAGE_ENABLED = booleanPreferencesKey("auto_page_enabled")
+        val PANEL_SCREEN_OFF = booleanPreferencesKey("panel_screen_off")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
     }
 
@@ -67,6 +69,8 @@ class SettingsRepositoryImpl(
                 showBattery = prefs[Keys.SHOW_BATTERY] ?: defaults.showBattery,
                 showTime = prefs[Keys.SHOW_TIME] ?: defaults.showTime,
                 readerBrightness = prefs[Keys.READER_BRIGHTNESS] ?: defaults.readerBrightness,
+                autoPageEnabled = prefs[Keys.AUTO_PAGE_ENABLED] ?: defaults.autoPageEnabled,
+                panelScreenOff = prefs[Keys.PANEL_SCREEN_OFF] ?: defaults.panelScreenOff,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
             )
         }
@@ -144,6 +148,14 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit {
             it[Keys.READER_BRIGHTNESS] = brightness.coerceIn(-1f, 1f)
         }
+    }
+
+    override suspend fun setAutoPageEnabled(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_PAGE_ENABLED] = enabled }
+    }
+
+    override suspend fun setPanelScreenOff(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.PANEL_SCREEN_OFF] = enabled }
     }
 
     override suspend fun setBookshelfGridView(gridView: Boolean) {
