@@ -15,7 +15,7 @@ fun decideTurnOutcome(
 }
 
 class FrameHealthMonitor(
-    private val badFrameMs: Float = 34f,
+    private val badFrameMs: Float = 24f,
     private val windowSize: Int = 30,
     private val warmupFrames: Int = 5,
 ) {

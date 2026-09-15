@@ -47,4 +47,15 @@ class SimulationTurnTest {
         repeat(40) { monitor.noteFrame(30f) }
         assertFalse(monitor.shouldDegrade())
     }
+
+    @Test
+    fun `default threshold flags 30ms frames as bad`() {
+        // 默认阈值 24ms：持续 30ms（约 33fps）即判定掉帧并降级
+        val monitor = FrameHealthMonitor()
+        repeat(40) { monitor.noteFrame(30f) }
+        assertTrue(monitor.shouldDegrade())
+        monitor.reset()
+        repeat(40) { monitor.noteFrame(16f) }
+        assertFalse(monitor.shouldDegrade())
+    }
 }

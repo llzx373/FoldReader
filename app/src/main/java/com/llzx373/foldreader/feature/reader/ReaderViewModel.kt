@@ -142,7 +142,7 @@ class ReaderViewModel(
     private val _nextSpread = MutableStateFlow<PageSpread?>(null)
     val nextSpread: StateFlow<PageSpread?> = _nextSpread.asStateFlow()
 
-    private val curlBitmapCache = SpreadBitmapCache()
+    private val curlBitmapCache = SpreadBitmapCache<Bitmap>()
 
     @Volatile
     private var curlContext: CurlRenderContext? = null
@@ -892,6 +892,9 @@ class ReaderViewModel(
             bookPrefsRepository.update(bookId) { it.copy(simulationDegraded = degraded) }
         }
     }
+
+    /** 系统内存紧张（onTrimMemory）时清空翻页位图缓存，后续翻页现场重渲染。 */
+    fun clearCurlBitmaps() = curlBitmapCache.clear()
 
     fun setDualPageMode(mode: DualPageMode) {
         viewModelScope.launch {
