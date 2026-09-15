@@ -12,6 +12,7 @@ import android.os.BatteryManager
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -35,6 +36,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +44,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -110,7 +113,9 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val INNER_SPINE_PAD = 12.dp
 private val SPINE_OVERLAY_WIDTH = 32.dp
@@ -489,12 +494,38 @@ fun ReaderScreen(
         turn(forward, tapOffset)
     }
 
-    // 退出过渡开始（popExit）即恢复系统栏：书架在转场第一帧组合时就拿到真实
-    // 状态栏 inset，避免转场期间按 inset=0 布局、结束后突变回落的上下跳变
-    val readerExiting = animatedVisibilityScope
-        ?.let { it.transition.targetState != EnterExitState.Visible } == true
+    // 系统栏统一策略：任何转场期间（进/出阅读、去往设置）系统栏保持可见且不变，
+    // 对侧页面（书架/设置）在转场每一帧拿到的 inset 都是最终值——inset 落地是异步的，
+    // 若在转场中途才切换系统栏，对侧会先按 inset=0 布局再突变（上/下/横向跳变）。
+    // 仅当阅读页完全站稳（转场结束）且菜单关闭时才隐藏系统栏进入沉浸阅读。
+    val readerTransition = animatedVisibilityScope?.transition
+    val readerExiting = readerTransition != null &&
+        readerTransition.targetState != EnterExitState.Visible
+    val readerSettled = readerTransition == null ||
+        (readerTransition.currentState == EnterExitState.Visible &&
+            readerTransition.targetState == EnterExitState.Visible &&
+            !readerTransition.isRunning)
+
+    var barsRestoreRequested by remember { mutableStateOf(false) }
+    val statusBarInsets = WindowInsets.statusBars
+
+    // 离开阅读页（返回书架/去设置）前：先恢复系统栏，等 inset 真正下发再导航，
+    // 目标页组合的第一帧即最终布局；200ms 超时兜底（极少数设备状态栏 inset 恒为 0）
+    fun leaveReader(navigate: () -> Unit) {
+        if (barsRestoreRequested) return
+        barsRestoreRequested = true
+        scope.launch {
+            withTimeoutOrNull(200L) {
+                snapshotFlow { statusBarInsets.getTop(density) > 0 }.first { it }
+            }
+            navigate()
+        }
+    }
+
+    BackHandler { leaveReader(onBack) }
+
     SystemBarEffects(
-        menuVisible = menuVisible || readerExiting,
+        menuVisible = menuVisible || readerExiting || !readerSettled || barsRestoreRequested,
         keepScreenOn = prefs.keepScreenOn,
     )
     BrightnessEffect(prefs.readerBrightness)
@@ -1118,7 +1149,7 @@ fun ReaderScreen(
                 actionLabel = "重试",
                 onAction = viewModel::retry,
                 secondaryActionLabel = "返回书架",
-                onSecondaryAction = onBack,
+                onSecondaryAction = { leaveReader(onBack) },
                 modifier = Modifier.align(Alignment.Center),
             )
             else -> Box(
@@ -1561,7 +1592,7 @@ fun ReaderScreen(
                 bookTitle = uiState.bookTitle,
                 chapterTitle = uiState.chapterTitle,
                 colors = colors,
-                onBack = onBack,
+                onBack = { leaveReader(onBack) },
                 dualPage = uiState.dualPage,
                 hasRightPage = uiState.spread?.right != null,
                 leftBookmarked = uiState.spread?.left?.charStart in bookmarkedOffsets,
@@ -1624,7 +1655,7 @@ fun ReaderScreen(
                             viewModel.setAutoPageSpeedPx(nextAutoPageSpeedPx(prefs.autoPageSpeedPx))
                     }
                 },
-                onOpenSettings = onOpenSettings,
+                onOpenSettings = { leaveReader(onOpenSettings) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding(),
