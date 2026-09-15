@@ -107,4 +107,29 @@ class ChapterScannerTest {
         assertTrue(chapters.none { it.title.startsWith("第三章") })
         assertEquals("第一章 短标题", chapters.last().title)
     }
+
+    @Test
+    fun `自定义规则命中默认规则不识别的标题`() {
+        val rules = ChapterRules.merge(listOf("^【.+】$"))
+        val scanner = ChapterScanner(rules)
+        scanner.feed("引言行。\n【第一回 风起云涌】\n正文。\n【第二回 再战】\n结尾。")
+        val chapters = scanner.finish()
+
+        assertEquals(listOf("卷首", "【第一回 风起云涌】", "【第二回 再战】"), chapters.map { it.title })
+    }
+
+    @Test
+    fun `自定义规则排在默认规则之前`() {
+        val merged = ChapterRules.merge(listOf("^【.+】$", "^卷 \\d+"))
+
+        assertEquals(ChapterRules.DEFAULT.size + 2, merged.size)
+        assertEquals("^【.+】$", merged[0].pattern)
+        assertEquals("^卷 \\d+", merged[1].pattern)
+        assertEquals(ChapterRules.DEFAULT, merged.drop(2))
+    }
+
+    @Test
+    fun `非法自定义正则被跳过`() {
+        assertEquals(ChapterRules.DEFAULT, ChapterRules.merge(listOf("(", "[")))
+    }
 }

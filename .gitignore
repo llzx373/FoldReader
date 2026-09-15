@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 测试截图（658MB，不入库）
+/f30/

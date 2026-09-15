@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.importer
 
+import com.llzx373.foldreader.core.format.ContentHasher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test

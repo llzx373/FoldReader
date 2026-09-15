@@ -31,7 +31,7 @@ import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.SearchHit
 import kotlinx.coroutines.delay
 
-/** 书内搜索面板：输入防抖自动搜索，波浪进度，结果流式追加，关键词高亮。 */
+/** 书内搜索面板：输入防抖自动搜索，波浪进度，结果按章节分组流式渲染，关键词高亮。 */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReaderSearchDialog(
@@ -90,22 +90,35 @@ fun ReaderSearchDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(vertical = 16.dp),
                     )
-                    else -> LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(360.dp)
-                            .padding(top = 8.dp),
-                    ) {
-                        items(state.hits, key = { it.offset }) { hit ->
-                            SearchHitRow(
-                                hit = hit,
-                                chapterTitle = chapters
-                                    .indexOfLast { hit.offset >= it.charStart }
-                                    .coerceAtLeast(0)
-                                    .let { chapters.getOrNull(it)?.title.orEmpty() },
-                                colors = colors,
-                                onClick = { onJump(hit) },
-                            )
+                    else -> {
+                        val groups = remember(state.hits, chapters) {
+                            groupSearchHits(state.hits, chapters)
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(360.dp)
+                                .padding(top = 8.dp),
+                        ) {
+                            groups.forEach { group ->
+                                item(key = "header-${group.chapterIndex}") {
+                                    Text(
+                                        text = group.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = colors.accent,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                                    )
+                                }
+                                items(group.hits, key = { it.offset }) { hit ->
+                                    SearchHitRow(
+                                        hit = hit,
+                                        colors = colors,
+                                        onClick = { onJump(hit) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -117,7 +130,6 @@ fun ReaderSearchDialog(
 @Composable
 private fun SearchHitRow(
     hit: SearchHit,
-    chapterTitle: String,
     colors: ReaderColors,
     onClick: () -> Unit,
 ) {
@@ -142,14 +154,5 @@ private fun SearchHitRow(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        if (chapterTitle.isNotEmpty()) {
-            Text(
-                text = chapterTitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }

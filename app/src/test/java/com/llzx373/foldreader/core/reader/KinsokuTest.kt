@@ -27,6 +27,21 @@ class KinsokuTest {
     }
 
     @Test
+    fun `forbidden chain crosses following raw break`() {
+        // 甲0..辛7 。8 》9 续10 集11：断点 8 处的链 "。》" 需越过下一原始断点 9
+        val text = "甲乙丙丁戊己庚辛。》续集"
+        val out = Kinsoku.adjust(text, intArrayOf(8, 9, 12))
+        assertArrayEquals(intArrayOf(10, 10, 12), out)
+        var prev = 0
+        for (b in out) {
+            if (b > prev) {
+                org.junit.Assert.assertFalse(text[prev] == '。' || text[prev] == '》')
+            }
+            prev = b
+        }
+    }
+
+    @Test
     fun `last break never moves`() {
         val text = "（一二三四"
         val out = Kinsoku.adjust(text, intArrayOf(5))

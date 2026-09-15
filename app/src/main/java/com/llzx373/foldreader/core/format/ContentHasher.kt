@@ -1,4 +1,4 @@
-package com.llzx373.foldreader.feature.importer
+package com.llzx373.foldreader.core.format
 
 import java.nio.ByteBuffer
 import java.security.MessageDigest

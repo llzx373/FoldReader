@@ -1,6 +1,13 @@
 package com.llzx373.foldreader.feature.reader
 
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -52,6 +59,34 @@ class AutoPageEngineTest {
     fun `mode toggles`() {
         assertEquals(AutoPageMode.SCROLL, nextAutoPageMode(AutoPageMode.INTERVAL))
         assertEquals(AutoPageMode.INTERVAL, nextAutoPageMode(AutoPageMode.SCROLL))
+    }
+
+    @Test
+    fun `turn requests emit and drop when buffer full`() {
+        val requests = AutoPageTurnRequests()
+        val received = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val job = scope.launch {
+            requests.requests.collect {
+                received += it
+                delay(Long.MAX_VALUE) // 慢消费者：占住订阅观察缓冲行为
+            }
+        }
+        runBlocking {
+            withTimeoutOrNull(1_000L) {
+                requests.subscriptionCount.first { it > 0 }
+            }
+        }
+        assertTrue(requests.request(forward = true))
+        runBlocking {
+            withTimeoutOrNull(1_000L) {
+                while (received.isEmpty()) delay(5L)
+            }
+        }
+        assertTrue(requests.request(forward = true)) // 消费者占住，进入缓冲（容量 1）
+        assertFalse(requests.request(forward = true)) // 缓冲已满，丢弃
+        job.cancel()
+        assertEquals(listOf(true), received)
     }
 
     @Test

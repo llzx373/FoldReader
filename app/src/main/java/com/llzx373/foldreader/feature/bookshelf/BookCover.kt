@@ -1,5 +1,8 @@
 package com.llzx373.foldreader.feature.bookshelf
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,10 +53,28 @@ fun formatReadingProgress(charOffset: Long?, totalChars: Long): String =
 fun formatLastRead(timestamp: Long?): String? =
     timestamp?.let { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(it)) }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun BookCover(title: String, modifier: Modifier = Modifier) {
+fun BookCover(
+    title: String,
+    modifier: Modifier = Modifier,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    bookId: Long = 0L,
+) {
+    val sharedModifier =
+        if (sharedTransitionScope != null && animatedVisibilityScope != null && bookId != 0L) {
+            with(sharedTransitionScope) {
+                Modifier.sharedElement(
+                    sharedContentState = rememberSharedContentState(key = "cover-$bookId"),
+                    animatedVisibilityScope = animatedVisibilityScope,
+                )
+            }
+        } else {
+            Modifier
+        }
     Surface(
-        modifier = modifier.aspectRatio(3f / 4f),
+        modifier = sharedModifier.then(modifier).aspectRatio(3f / 4f),
         shape = MaterialTheme.shapes.largeIncreased,
         color = BookCoverPalette.colorFor(title),
     ) {

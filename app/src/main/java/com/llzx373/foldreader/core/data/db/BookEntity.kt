@@ -21,4 +21,6 @@ data class BookEntity(
     val encoding: String,
     val importedAt: Long,
     val lastReadAt: Long?,
+    val groupName: String? = null,
+    val cleanedFilePath: String? = null,
 )

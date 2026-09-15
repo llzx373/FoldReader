@@ -16,12 +16,31 @@ fun averageCharsPerMinute(charsRead: Long, totalMillis: Long): Int {
     return (charsRead * 60_000L / totalMillis).toInt()
 }
 
-/** 阅读天数：首次~最后阅读的日期跨度（含首尾两天）；任一时间为 0 返回 0。 */
-fun readingDaysSpan(firstReadAt: Long, lastReadAt: Long, zone: ZoneId): Long {
-    if (firstReadAt <= 0L || lastReadAt < firstReadAt) return 0
-    val firstDay = dayStartMs(firstReadAt, zone)
-    val lastDay = dayStartMs(lastReadAt, zone)
-    return (lastDay - firstDay) / 86_400_000L + 1
+/** 实际阅读天数：有阅读记录的日期（dayStartMs 列表）去重计数。 */
+fun readingDayCount(dayStartMsList: List<Long>): Int = dayStartMsList.toSet().size
+
+/** 会话落库增量：本次累计 − 上次落库累计；0 表示无需写入。 */
+fun sessionFlushDelta(totalMs: Long, lastFlushedTotalMs: Long): Long =
+    (totalMs - lastFlushedTotalMs).coerceAtLeast(0L)
+
+/**
+ * 已读字符累计器：advance（翻页/滚动推进）按 |锚点增量| 累计（正反向都计），
+ * jump（跳章/进度条/书签等跳转）只重置基线不计入，消除跳读虚高。
+ */
+class CharsReadTracker {
+    private var baseline = -1L
+    var total = 0L
+        private set
+
+    fun jump(anchor: Long) {
+        baseline = anchor
+    }
+
+    fun advance(anchor: Long) {
+        val prev = baseline
+        baseline = anchor
+        if (prev >= 0L) total += kotlin.math.abs(anchor - prev)
+    }
 }
 
 /**

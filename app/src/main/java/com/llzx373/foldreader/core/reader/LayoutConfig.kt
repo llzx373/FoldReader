@@ -14,8 +14,13 @@ data class LayoutConfig(
     val marginRightDp: Float = 16f,
     val marginBottomDp: Float = 24f,
     val firstLineIndentChars: Int = 2,
+    val autoIndentEnabled: Boolean = true,
     val maxLineChars: Int = 40,
     val alignment: PageTextAlignment = PageTextAlignment.JUSTIFY,
     val fontKey: String? = null,
     val typeface: Typeface? = null,
 )
+
+/** 段首是否已带空白缩进（半角/全角空格、制表符）。测量与渲染两侧共用，保证断行与绘制一致。 */
+internal fun hasLeadingIndent(text: CharSequence): Boolean =
+    text.isNotEmpty() && (text[0] == ' ' || text[0] == '\t' || text[0] == '　')

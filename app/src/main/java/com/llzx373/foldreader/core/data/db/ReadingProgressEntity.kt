@@ -12,7 +12,7 @@ import androidx.room.PrimaryKey
             entity = BookEntity::class,
             parentColumns = ["id"],
             childColumns = ["bookId"],
-            onDelete = ForeignKey.CASCADE,
+            onDelete = ForeignKey.NO_ACTION,
         ),
     ],
 )
@@ -23,5 +23,7 @@ data class ReadingProgressEntity(
     val totalReadingMillis: Long,
     /** 首次开始阅读时间（0 = 旧数据未知）。 */
     @ColumnInfo(defaultValue = "0") val firstReadAt: Long = 0,
+    /** 累计已读字符数（去重进度统计用）。 */
+    @ColumnInfo(defaultValue = "0") val charsReadTotal: Long = 0,
     val updatedAt: Long,
 )

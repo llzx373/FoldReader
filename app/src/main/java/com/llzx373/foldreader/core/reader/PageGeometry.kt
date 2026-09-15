@@ -52,7 +52,7 @@ fun buildLineBoxes(
     var yTop = topPadPx
     page.lines.forEachIndexed { index, line ->
         if (line.isParagraphStart && index > 0) yTop += paragraphSpacingPx
-        val x0 = leftPadPx + if (line.isParagraphStart) indentPx else 0f
+        val x0 = leftPadPx + if (line.isParagraphStart && !hasLeadingIndent(line.text)) indentPx else 0f
         val widths = FloatArray(line.text.length) { i -> measure(line.text[i].toString()) }
         val gap = if (justify && !line.isParagraphEnd && line.text.length > 1) {
             val natural = measure(line.text)

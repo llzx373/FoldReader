@@ -65,6 +65,17 @@ data class AutoPageStatus(
     val paused: Boolean = false,
 )
 
+/** 定时自动翻页请求：INTERVAL 模式到点发射，UI 收集后走正常翻页动画（缓冲 1，忙碌时丢弃）。 */
+class AutoPageTurnRequests {
+    private val flow = kotlinx.coroutines.flow.MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+
+    val requests: kotlinx.coroutines.flow.SharedFlow<Boolean> = flow
+
+    val subscriptionCount: kotlinx.coroutines.flow.StateFlow<Int> get() = flow.subscriptionCount
+
+    fun request(forward: Boolean): Boolean = flow.tryEmit(forward)
+}
+
 fun maxAutoScrollPx(
     lineCount: Int,
     paragraphBreaks: Int,

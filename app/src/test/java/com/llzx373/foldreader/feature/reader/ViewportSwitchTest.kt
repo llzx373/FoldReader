@@ -107,6 +107,35 @@ class ViewportSwitchTest {
     }
 
     @Test
+    fun `off-center hinge single paginator turns never overlap`() = runBlocking {
+        val pageWidth = dualPageWidthPx(700, 400)
+        assertEquals(400, pageWidth)
+        val paginator = paginator(pageWidth, 200, 10f)
+
+        var left = paginator.pageAt(0L)
+        var count = 0
+        while (count < 30) {
+            val right = paginator.pageAt(left.charEnd)
+            assertEquals(left.charEnd, right.charStart)
+            if (right.charEnd >= text.length) break
+            val nextLeft = paginator.pageAt(right.charEnd)
+            assertEquals("forward anchor must continue at right page end",
+                right.charEnd, nextLeft.charStart)
+            left = nextLeft
+            count++
+        }
+        assertTrue(count > 5)
+
+        val backOne = paginator.pageBefore(left.charStart)!!
+        val backTwo = paginator.pageBefore(backOne.charStart)
+        val backAnchor = backTwo?.charStart ?: backOne.charStart
+        val backLeft = paginator.pageAt(backAnchor)
+        assertEquals(backAnchor, backLeft.charStart)
+        val backRight = paginator.pageAt(backLeft.charEnd)
+        assertEquals(backOne.charStart, backRight.charStart)
+    }
+
+    @Test
     fun `half-opened content rect avoids hinge`() {
         val horizontal = FoldingPostureHalfOpened(HingeOrientation.HORIZONTAL)
         val rectH = contentRectFor(horizontal, Rect(0f, 800f, 1000f, 830f), 1000f, 2000f)

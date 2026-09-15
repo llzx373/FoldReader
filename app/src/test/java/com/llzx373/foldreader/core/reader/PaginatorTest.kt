@@ -41,6 +41,22 @@ private class FixedWidthMeasurer(private val charWidthPx: Int = 10) : TextMeasur
     }
 }
 
+private class LetterSpacingRecorder(private val delegate: FixedWidthMeasurer = FixedWidthMeasurer()) : TextMeasurer {
+    val seen = mutableListOf<Float>()
+
+    override fun measureLineBreaks(
+        text: CharSequence,
+        widthPx: Int,
+        indentPx: Int,
+        fontSizePx: Float,
+        letterSpacingEm: Float,
+        typeface: Typeface?,
+    ): IntArray {
+        seen += letterSpacingEm
+        return delegate.measureLineBreaks(text, widthPx, indentPx, fontSizePx, letterSpacingEm, typeface)
+    }
+}
+
 class PaginatorTest {
 
     private fun paginator(
@@ -189,5 +205,140 @@ class PaginatorTest {
         for (chapter in chapters) {
             assertTrue("chapter '${chapter.title}' at ${chapter.charStart}", chapter.charStart in paraStarts)
         }
+    }
+
+    private fun paginatorWithMargins(
+        text: String,
+        marginLeftDp: Float,
+        marginRightDp: Float,
+        widthPx: Int = 200,
+        maxLineChars: Int = 40,
+        firstLineIndentChars: Int = 0,
+        measurer: TextMeasurer = FixedWidthMeasurer(),
+        letterSpacingEm: Float = 0f,
+    ) = Paginator(
+        content = StringBookContent(text),
+        config = LayoutConfig(
+            fontSizeSp = 10f,
+            lineSpacingMultiplier = 1f,
+            letterSpacingEm = letterSpacingEm,
+            paragraphSpacingEm = 0.4f,
+            marginLeftDp = marginLeftDp,
+            marginTopDp = 0f,
+            marginRightDp = marginRightDp,
+            marginBottomDp = 0f,
+            firstLineIndentChars = firstLineIndentChars,
+            maxLineChars = maxLineChars,
+        ),
+        measurer = measurer,
+        widthPx = widthPx,
+        heightPx = 100,
+        density = 1f,
+        scaledDensity = 1f,
+    )
+
+    @Test
+    fun `independent left and right margins are not averaged`() = runBlocking {
+        val text = "天地玄黄".repeat(50)
+        val page = paginatorWithMargins(text, marginLeftDp = 10f, marginRightDp = 30f).pageAt(0)
+        assertEquals(10f, page.paddingLeft, 0.001f)
+        assertEquals(30f, page.paddingRight, 0.001f)
+    }
+
+    @Test
+    fun `line cap centers slack without touching asymmetric margins`() = runBlocking {
+        val text = "天地玄黄".repeat(50)
+        // 页宽 2000，左右边距 10/30，上限 10 字×10px=100 → 余量 (1960-100)/2=930 均分居中
+        val page = paginatorWithMargins(
+            text, marginLeftDp = 10f, marginRightDp = 30f, widthPx = 2000, maxLineChars = 10,
+        ).pageAt(0)
+        assertEquals(940f, page.paddingLeft, 0.001f)
+        assertEquals(960f, page.paddingRight, 0.001f)
+    }
+
+    @Test
+    fun `paragraph longer than scan window yields no false paragraph start`() = runBlocking {
+        val text = "字".repeat(5000)
+        val p = paginatorWithMargins(
+            text, marginLeftDp = 0f, marginRightDp = 0f, firstLineIndentChars = 2,
+        )
+        val pages = paginateAll(p, text.length.toLong())
+        assertTrue(pages.size > 1)
+        val starts = pages.flatMap { it.lines }.filter { it.isParagraphStart }
+        assertEquals(1, starts.size)
+        assertEquals(0L, starts[0].charStart)
+        val ends = pages.flatMap { it.lines }.filter { it.isParagraphEnd }
+        assertEquals(1, ends.size)
+        assertEquals(text.length.toLong(), ends[0].charEnd)
+    }
+
+    @Test
+    fun `letter spacing em reaches the measurer`() = runBlocking {
+        val recorder = LetterSpacingRecorder()
+        val text = "天地玄黄".repeat(20)
+        paginatorWithMargins(
+            text, marginLeftDp = 0f, marginRightDp = 0f,
+            measurer = recorder, letterSpacingEm = 0.15f,
+        ).pageAt(0)
+        assertTrue(recorder.seen.isNotEmpty())
+        assertEquals(0.15f, recorder.seen.first(), 0.0001f)
+    }
+
+    private class IndentRecorder(private val delegate: FixedWidthMeasurer = FixedWidthMeasurer()) : TextMeasurer {
+        val seen = mutableListOf<Int>()
+
+        override fun measureLineBreaks(
+            text: CharSequence,
+            widthPx: Int,
+            indentPx: Int,
+            fontSizePx: Float,
+            letterSpacingEm: Float,
+            typeface: Typeface?,
+        ): IntArray {
+            seen += indentPx
+            return delegate.measureLineBreaks(text, widthPx, indentPx, fontSizePx, letterSpacingEm, typeface)
+        }
+    }
+
+    private fun indentPaginator(
+        text: String,
+        autoIndentEnabled: Boolean,
+        measurer: TextMeasurer,
+    ) = Paginator(
+        content = StringBookContent(text),
+        config = LayoutConfig(
+            fontSizeSp = 10f,
+            lineSpacingMultiplier = 1f,
+            paragraphSpacingEm = 0.4f,
+            marginLeftDp = 0f,
+            marginTopDp = 0f,
+            marginRightDp = 0f,
+            marginBottomDp = 0f,
+            firstLineIndentChars = 2,
+            autoIndentEnabled = autoIndentEnabled,
+            maxLineChars = 40,
+        ),
+        measurer = measurer,
+        widthPx = 200,
+        heightPx = 100,
+        density = 1f,
+        scaledDensity = 1f,
+    )
+
+    @Test
+    fun `auto indent skips paragraphs already starting with whitespace`() = runBlocking {
+        val recorder = IndentRecorder()
+        // 第一段无缩进 → indent=20；后三段分别以全角空格/半角空格/制表符开头 → indent=0
+        val text = "正文一段\n　已有缩进\n 半角缩进\n\t制表缩进"
+        indentPaginator(text, autoIndentEnabled = true, measurer = recorder).pageAt(0)
+        assertEquals(listOf(20, 0, 0, 0), recorder.seen)
+    }
+
+    @Test
+    fun `auto indent disabled passes zero indent for all paragraphs`() = runBlocking {
+        val recorder = IndentRecorder()
+        val text = "正文一段\n另一段"
+        indentPaginator(text, autoIndentEnabled = false, measurer = recorder).pageAt(0)
+        assertEquals(listOf(0, 0), recorder.seen)
     }
 }

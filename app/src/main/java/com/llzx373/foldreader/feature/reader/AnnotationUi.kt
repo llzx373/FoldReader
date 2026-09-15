@@ -17,8 +17,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,12 +77,13 @@ private fun ColorDots(
     }
 }
 
-/** 选区操作条：多色划线（点色即存）+ 笔记 + 复制 + 取消。 */
+/** 选区操作条：多色划线（点色即存）+ 笔记 + 书签 + 复制 + 取消。 */
 @Composable
 fun SelectionActionBar(
     colors: ReaderColors,
     onPickColor: (Long) -> Unit,
     onNote: () -> Unit,
+    onBookmark: () -> Unit,
     onCopy: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -97,26 +102,30 @@ fun SelectionActionBar(
         ) {
             ColorDots(selectedArgb = -1L, onPick = onPickColor)
             TextButton(onClick = onNote) { Text("笔记") }
+            TextButton(onClick = onBookmark) { Text("书签") }
             TextButton(onClick = onCopy) { Text("复制") }
             TextButton(onClick = onCancel) { Text("取消") }
         }
     }
 }
 
-/** 新建带笔记的划线，或编辑已有划线（改色/改笔记/删除）。 */
+/** 新建带笔记的划线，或编辑已有划线（改色/改样式/改笔记/删除）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnnotationEditDialog(
     selectedText: String,
     initialColorArgb: Long,
     initialNote: String?,
+    initialStyle: String = AnnotationEntity.STYLE_HIGHLIGHT,
     shifted: Boolean,
     colors: ReaderColors,
-    onSave: (colorArgb: Long, note: String?) -> Unit,
+    onSave: (colorArgb: Long, note: String?, style: String) -> Unit,
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     var colorArgb by remember { mutableLongStateOf(initialColorArgb) }
     var note by remember { mutableStateOf(initialNote.orEmpty()) }
+    var style by remember { mutableStateOf(initialStyle) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (onDelete == null) "划线笔记" else "编辑划线") },
@@ -140,6 +149,24 @@ fun AnnotationEditDialog(
                 Spacer(modifier = Modifier.height(10.dp))
                 ColorDots(selectedArgb = colorArgb, onPick = { colorArgb = it })
                 Spacer(modifier = Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    listOf(
+                        AnnotationEntity.STYLE_HIGHLIGHT to "底色",
+                        AnnotationEntity.STYLE_UNDERLINE to "下划线",
+                    ).forEachIndexed { index, (value, label) ->
+                        SegmentedButton(
+                            selected = style == value,
+                            onClick = { style = value },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = 2,
+                            ),
+                        ) { Text(label) }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
@@ -150,7 +177,7 @@ fun AnnotationEditDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(colorArgb, note) }) { Text("保存") }
+            TextButton(onClick = { onSave(colorArgb, note, style) }) { Text("保存") }
         },
         dismissButton = {
             Row {

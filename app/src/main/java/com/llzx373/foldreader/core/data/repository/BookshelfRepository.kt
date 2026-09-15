@@ -13,11 +13,24 @@ interface BookshelfRepository {
     fun observeBookshelf(): Flow<List<BookEntity>>
     fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>>
     suspend fun getBook(bookId: Long): BookEntity?
+    fun observeBook(bookId: Long): Flow<BookEntity?>
+
+    /** [encoding] 为空串表示恢复自动检测。 */
+    suspend fun updateEncoding(bookId: Long, encoding: String)
     suspend fun findByFileUri(fileUri: String): BookEntity?
     suspend fun findByContentHash(contentHash: String): BookEntity?
     suspend fun upsertBook(book: BookEntity): Long
     suspend fun touchLastRead(bookId: Long, timestamp: Long = System.currentTimeMillis())
-    suspend fun deleteBooks(bookIds: List<Long>)
+    suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean = true)
+
+    fun observeGroupNames(): Flow<List<String>>
+    fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>>
+
+    /** 批量设置分组；[groupName] 为 null 表示移出分组。 */
+    suspend fun updateGroup(bookIds: List<Long>, groupName: String?)
+
+    /** 删除分组：把该分组下所有书移出分组。 */
+    suspend fun clearGroup(groupName: String)
 
     fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?>
     suspend fun getProgress(bookId: Long): ReadingProgressEntity?
@@ -41,4 +54,7 @@ interface BookshelfRepository {
     /** 按天分桶累加阅读时长（增量 [deltaMs]）。 */
     suspend fun addReadingSession(bookId: Long, dayStartMs: Long, deltaMs: Long)
     suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity>
+
+    /** 实际阅读天数：该书有阅读记录的日期去重计数。 */
+    suspend fun getReadingDayCount(bookId: Long): Int
 }

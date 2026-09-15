@@ -32,6 +32,11 @@ class BookshelfRepositoryImpl(
 
     override suspend fun getBook(bookId: Long): BookEntity? = bookDao.getById(bookId)
 
+    override fun observeBook(bookId: Long): Flow<BookEntity?> = bookDao.observeById(bookId)
+
+    override suspend fun updateEncoding(bookId: Long, encoding: String) =
+        bookDao.updateEncoding(bookId, encoding)
+
     override suspend fun findByFileUri(fileUri: String): BookEntity? =
         bookDao.getByFileUri(fileUri)
 
@@ -43,7 +48,29 @@ class BookshelfRepositoryImpl(
     override suspend fun touchLastRead(bookId: Long, timestamp: Long) =
         bookDao.touchLastRead(bookId, timestamp)
 
-    override suspend fun deleteBooks(bookIds: List<Long>) = bookDao.deleteByIds(bookIds)
+    override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) {
+        if (deleteLocalData) {
+            progressDao.deleteByBookIds(bookIds)
+            bookmarkDao.deleteByBookIds(bookIds)
+            annotationDao.deleteByBookIds(bookIds)
+        }
+        bookIds.forEach { id ->
+            bookDao.getById(id)?.cleanedFilePath?.let { java.io.File(it).delete() }
+        }
+        bookDao.deleteByIds(bookIds)
+    }
+
+    override fun observeGroupNames(): Flow<List<String>> = bookDao.observeGroupNames()
+
+    override fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>> =
+        bookDao.observeBookshelfWithProgressInGroup(groupName)
+
+    override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
+        if (bookIds.isEmpty()) return
+        bookDao.updateGroup(bookIds, groupName?.trim()?.takeIf { it.isNotEmpty() })
+    }
+
+    override suspend fun clearGroup(groupName: String) = bookDao.clearGroup(groupName)
 
     override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
         progressDao.observe(bookId)
@@ -110,4 +137,6 @@ class BookshelfRepositoryImpl(
 
     override suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =
         sessionDao.getBetween(startMs, endMs)
+
+    override suspend fun getReadingDayCount(bookId: Long): Int = sessionDao.countReadingDays(bookId)
 }

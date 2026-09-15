@@ -10,19 +10,31 @@ import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.format.BookParser
+import com.llzx373.foldreader.core.format.EncodingDetector
+import com.llzx373.foldreader.core.format.OffsetIndexStore
+import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 sealed interface ImportUiState {
     data object Idle : ImportUiState
-    data object Importing : ImportUiState
-    data class Imported(val bookId: Long, val title: String, val openAfter: Boolean) : ImportUiState
+
+    /** [progress] 小于 0 表示不确定进度（未启用清理）。 */
+    data class Importing(val progress: Float = -1f) : ImportUiState
+    data class Imported(
+        val bookId: Long,
+        val title: String,
+        val lowEncodingConfidence: Boolean,
+        val openAfter: Boolean,
+    ) : ImportUiState
     data class Duplicate(
         val bookId: Long,
         val title: String,
@@ -36,6 +48,8 @@ class BookshelfViewModel(
     private val importBook: ImportBookUseCase,
     private val bookshelfRepository: BookshelfRepository,
     private val settingsRepository: SettingsRepository,
+    private val parser: BookParser,
+    private val offsetIndexStore: OffsetIndexStore,
 ) : ViewModel() {
 
     val books: StateFlow<List<BookWithProgress>> = bookshelfRepository.observeBookshelfWithProgress()
@@ -49,6 +63,9 @@ class BookshelfViewModel(
     val gridView: StateFlow<Boolean> = settingsRepository.preferences
         .map { it.bookshelfGridView }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    val groups: StateFlow<List<String>> = bookshelfRepository.observeGroupNames()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
@@ -64,13 +81,38 @@ class BookshelfViewModel(
         bookshelfRepository.observeAllAnnotations()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun import(uri: Uri, openAfterImport: Boolean) {
+    fun import(
+        uri: Uri,
+        openAfterImport: Boolean,
+        removeBlankLines: Boolean = false,
+        removeAdLines: Boolean = false,
+        traditionalToSimplified: Boolean = false,
+    ) {
         if (_importState.value is ImportUiState.Importing) return
-        _importState.value = ImportUiState.Importing
         viewModelScope.launch {
-            _importState.value = when (val result = importBook.import(uri)) {
+            val adPatterns = if (removeAdLines) {
+                settingsRepository.preferences.first().adCleanRules
+                    .mapNotNull { runCatching { Regex(it) }.getOrNull() }
+            } else {
+                emptyList()
+            }
+            val options = TextCleaner.CleanOptions(
+                removeBlankLines = removeBlankLines,
+                adPatterns = adPatterns,
+                traditionalToSimplified = traditionalToSimplified,
+            )
+            _importState.value = ImportUiState.Importing(if (options.isNoop) -1f else 0f)
+            val result = importBook.import(uri, options) { progress ->
+                _importState.value = ImportUiState.Importing(progress)
+            }
+            _importState.value = when (result) {
                 is ImportBookUseCase.Result.Imported ->
-                    ImportUiState.Imported(result.bookId, result.title, openAfterImport)
+                    ImportUiState.Imported(
+                        result.bookId,
+                        result.title,
+                        lowEncodingConfidence = result.encodingConfidence < 0.5f,
+                        openAfter = openAfterImport,
+                    )
                 is ImportBookUseCase.Result.DuplicateSameUri ->
                     ImportUiState.Duplicate(result.bookId, result.title, sameFile = true, openAfter = openAfterImport)
                 is ImportBookUseCase.Result.DuplicateSameHash ->
@@ -99,15 +141,50 @@ class BookshelfViewModel(
         _selectedIds.value = emptySet()
     }
 
-    suspend fun bookDetail(bookId: Long): Pair<com.llzx373.foldreader.core.data.db.BookEntity?, com.llzx373.foldreader.core.data.db.ReadingProgressEntity?> =
-        bookshelfRepository.getBook(bookId) to bookshelfRepository.getProgress(bookId)
+    suspend fun bookDetail(bookId: Long): Triple<com.llzx373.foldreader.core.data.db.BookEntity?, com.llzx373.foldreader.core.data.db.ReadingProgressEntity?, Int> =
+        Triple(
+            bookshelfRepository.getBook(bookId),
+            bookshelfRepository.getProgress(bookId),
+            bookshelfRepository.getReadingDayCount(bookId),
+        )
 
-    fun deleteSelected() {
+    fun deleteSelected(deleteLocalData: Boolean = true) {
         val ids = _selectedIds.value.toList()
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            bookshelfRepository.deleteBooks(ids)
+            bookshelfRepository.deleteBooks(ids, deleteLocalData)
             _selectedIds.value = emptySet()
+        }
+    }
+
+    fun moveSelectedToGroup(groupName: String?) {
+        val ids = _selectedIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            bookshelfRepository.updateGroup(ids, groupName)
+            _selectedIds.value = emptySet()
+        }
+    }
+
+    fun deleteGroup(groupName: String) {
+        viewModelScope.launch { bookshelfRepository.clearGroup(groupName) }
+    }
+
+    /** [charsetName] 为 null 表示恢复自动检测（库存空串）。 */
+    fun setEncoding(bookId: Long, charsetName: String?) {
+        viewModelScope.launch { bookshelfRepository.updateEncoding(bookId, charsetName ?: "") }
+    }
+
+    fun rebuildChapters(bookId: Long) {
+        viewModelScope.launch {
+            val book = bookshelfRepository.getBook(bookId) ?: return@launch
+            offsetIndexStore.invalidate(bookId.toString())
+            bookshelfRepository.saveChapters(bookId, emptyList())
+            val override = EncodingDetector.forNameOrNull(book.encoding)
+            val scanned = runCatching {
+                parser.parseChapters(Uri.parse(book.fileUri), override)
+            }.getOrDefault(emptyList())
+            bookshelfRepository.saveChapters(bookId, scanned)
         }
     }
 
@@ -118,6 +195,8 @@ class BookshelfViewModel(
                     importBook = container.importBookUseCase,
                     bookshelfRepository = container.bookshelfRepository,
                     settingsRepository = container.settingsRepository,
+                    parser = container.txtBookParser,
+                    offsetIndexStore = container.offsetIndexStore,
                 )
             }
         }

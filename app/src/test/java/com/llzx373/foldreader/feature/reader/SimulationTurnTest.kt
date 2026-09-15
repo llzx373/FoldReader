@@ -23,30 +23,28 @@ class SimulationTurnTest {
 
     @Test
     fun `frame monitor degrades only on sustained jank`() {
-        val monitor = FrameHealthMonitor(badFrameMs = 24f, windowLimit = 10, badFrameLimit = 5)
-        // 窗口内坏帧未达上限：不降级
-        repeat(4) { monitor.noteFrame(50f) }
-        repeat(6) { monitor.noteFrame(10f) }
+        val monitor = FrameHealthMonitor(badFrameMs = 34f, windowSize = 30, warmupFrames = 5)
+        // 起始帧（动画开始几帧）不计入统计
+        repeat(5) { monitor.noteFrame(50f) }
+        assertFalse(monitor.shouldDegrade())
+        // 窗口内坏帧未过半：不降级
+        repeat(14) { monitor.noteFrame(50f) }
+        repeat(16) { monitor.noteFrame(10f) }
         assertFalse(monitor.shouldDegrade())
         // 帧数不足窗口：即使全坏也不降级
         monitor.reset()
-        repeat(9) { monitor.noteFrame(50f) }
+        repeat(25) { monitor.noteFrame(50f) }
         assertFalse(monitor.shouldDegrade())
-        // 持续掉帧：降级
-        monitor.noteFrame(50f)
+        // 持续掉帧填满窗口：降级
+        repeat(10) { monitor.noteFrame(50f) }
         assertTrue(monitor.shouldDegrade())
         // 健康帧：不降级
         monitor.reset()
-        repeat(12) { monitor.noteFrame(8f) }
+        repeat(40) { monitor.noteFrame(8f) }
         assertFalse(monitor.shouldDegrade())
-    }
-
-    @Test
-    fun `curl helpers stay in range`() {
-        assertTrue(curlShadowAlpha(0f) > curlShadowAlpha(1f))
-        assertEquals(1f, curlScaleY(0f), 0.001f)
-        assertEquals(1f, curlScaleY(1f), 0.001f)
-        assertTrue(curlScaleY(0.5f) < 1f)
-        assertTrue(curlScaleY(2f) <= 1f)
+        // 约 30fps 的帧（低于 34ms 阈值）不算坏帧
+        monitor.reset()
+        repeat(40) { monitor.noteFrame(30f) }
+        assertFalse(monitor.shouldDegrade())
     }
 }

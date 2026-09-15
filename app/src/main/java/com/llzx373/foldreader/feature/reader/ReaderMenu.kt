@@ -3,6 +3,7 @@ package com.llzx373.foldreader.feature.reader
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,15 +15,22 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,9 +38,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,14 +52,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.ui.EncodingPickerDialog
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -190,21 +206,28 @@ private fun BookmarkListIcon(tint: Color, contentDescription: String) {
 fun ReaderMenuPanel(
     prefs: ReadingPreferences,
     progressFraction: Float,
+    chapterProgress: String? = null,
+    displayPageTurnMode: PageTurnMode = prefs.pageTurnMode,
     colors: ReaderColors,
     onSeekFraction: (Float) -> Unit,
     onOpenCatalog: () -> Unit,
     onOpenAnnotations: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
+    onSelectPageTurnMode: (PageTurnMode) -> Unit,
     onCycleDualPageMode: () -> Unit,
     onSetBrightness: (Float) -> Unit,
     onSetFontSize: (Float) -> Unit,
     onSetLineSpacing: (Float) -> Unit,
     onSetMarginLevel: (Int) -> Unit,
+    onSetMaxLineChars: (Int) -> Unit = {},
+    onSetParagraphSpacing: (Float) -> Unit = {},
+    onSetLetterSpacing: (Float) -> Unit = {},
     onSelectTheme: (ReadingTheme) -> Unit,
     onPickCustomBackground: (Int) -> Unit,
     onPickCustomText: (Int) -> Unit,
     autoPageStatus: AutoPageStatus,
     onToggleAutoPage: (Boolean) -> Unit,
+    onToggleAutoIndent: (Boolean) -> Unit = {},
     onCycleAutoPageMode: () -> Unit,
     onCycleAutoPageSpeed: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -216,6 +239,9 @@ fun ReaderMenuPanel(
     var sliderFraction by remember { mutableStateOf(progressFraction) }
     var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
     var lineSpacingDraft by remember { mutableStateOf<Float?>(null) }
+    var maxLineCharsDraft by remember { mutableStateOf<Float?>(null) }
+    var paragraphSpacingDraft by remember { mutableStateOf<Float?>(null) }
+    var letterSpacingDraft by remember { mutableStateOf<Float?>(null) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = colors.background,
@@ -234,6 +260,13 @@ fun ReaderMenuPanel(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.align(Alignment.End),
             )
+            if (chapterProgress != null) {
+                Text(
+                    text = chapterProgress,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.End),
+                )
+            }
             if (showLayout) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("字号", style = MaterialTheme.typography.labelMedium)
@@ -272,6 +305,66 @@ fun ReaderMenuPanel(
                     )
                     Text(
                         text = "%.1f".format(lineSpacingDraft ?: prefs.lineSpacingMultiplier),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("行长", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = maxLineCharsDraft ?: prefs.maxLineChars.toFloat(),
+                        onValueChange = { maxLineCharsDraft = it },
+                        onValueChangeFinished = {
+                            maxLineCharsDraft?.let { onSetMaxLineChars(it.toInt()) }
+                            maxLineCharsDraft = null
+                        },
+                        valueRange = 18f..40f,
+                        steps = 21,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = "%.0f".format(maxLineCharsDraft ?: prefs.maxLineChars.toFloat()),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("段距", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = paragraphSpacingDraft ?: prefs.paragraphSpacingEm,
+                        onValueChange = { paragraphSpacingDraft = it },
+                        onValueChangeFinished = {
+                            paragraphSpacingDraft?.let(onSetParagraphSpacing)
+                            paragraphSpacingDraft = null
+                        },
+                        valueRange = 0f..1.0f,
+                        steps = 9,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = "%.1f".format(paragraphSpacingDraft ?: prefs.paragraphSpacingEm),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("字距", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = letterSpacingDraft ?: prefs.letterSpacingEm,
+                        onValueChange = { letterSpacingDraft = it },
+                        onValueChangeFinished = {
+                            letterSpacingDraft?.let(onSetLetterSpacing)
+                            letterSpacingDraft = null
+                        },
+                        valueRange = 0f..0.2f,
+                        steps = 9,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = "%.2f".format(letterSpacingDraft ?: prefs.letterSpacingEm),
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -353,14 +446,16 @@ fun ReaderMenuPanel(
                     },
                     weight = 1f)
             }
+            PageTurnModeSplitButton(
+                current = displayPageTurnMode,
+                onCycle = onCyclePageTurnMode,
+                onSelect = onSelectPageTurnMode,
+                modifier = Modifier.fillMaxWidth(),
+            )
             ButtonGroup(
                 overflowIndicator = {},
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                clickableItem(
-                    onClick = onCyclePageTurnMode,
-                    label = "翻页：${pageTurnModeLabel(prefs.pageTurnMode)}",
-                    weight = 1f)
                 clickableItem(
                     onClick = onCycleDualPageMode,
                     label = "双页：${dualPageModeLabel(prefs.dualPageMode)}",
@@ -373,6 +468,10 @@ fun ReaderMenuPanel(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                EncodingMenuEntry()
+                TextButton(onClick = { onToggleAutoIndent(!prefs.autoIndentEnabled) }) {
+                    Text("自动缩进：${if (prefs.autoIndentEnabled) "开" else "关"}")
+                }
                 TextButton(onClick = { onToggleAutoPage(!prefs.autoPageEnabled) }) {
                     Text("自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}")
                 }
@@ -453,6 +552,65 @@ fun ChapterListDialog(
     )
 }
 
+val pageTurnModes: List<PageTurnMode> = listOf(
+    PageTurnMode.SIMULATION,
+    PageTurnMode.COVER,
+    PageTurnMode.NONE,
+    PageTurnMode.SCROLL,
+)
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PageTurnModeSplitButton(
+    current: PageTurnMode,
+    onCycle: () -> Unit,
+    onSelect: (PageTurnMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        SplitButtonLayout(
+            leadingButton = {
+                SplitButtonDefaults.LeadingButton(
+                    onClick = onCycle,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("翻页：${pageTurnModeLabel(current)}")
+                }
+            },
+            trailingButton = {
+                SplitButtonDefaults.TrailingButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) {
+                            Icons.Filled.KeyboardArrowUp
+                        } else {
+                            Icons.Filled.KeyboardArrowDown
+                        },
+                        contentDescription = "展开翻页方式选项",
+                        modifier = Modifier.size(SplitButtonDefaults.TrailingIconSize),
+                    )
+                }
+            },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            pageTurnModes.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(pageTurnModeLabel(mode)) },
+                    onClick = {
+                        expanded = false
+                        onSelect(mode)
+                    },
+                    trailingIcon = if (mode == current) {
+                        { Icon(Icons.Filled.Check, contentDescription = null) }
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+    }
+}
+
 fun pageTurnModeLabel(mode: PageTurnMode): String = when (mode) {
     PageTurnMode.COVER -> "覆盖"
     PageTurnMode.NONE -> "无动画"
@@ -477,4 +635,40 @@ fun nextDualPageMode(mode: DualPageMode): DualPageMode = when (mode) {
     DualPageMode.AUTO -> DualPageMode.FORCE_DUAL
     DualPageMode.FORCE_DUAL -> DualPageMode.FORCE_SINGLE
     DualPageMode.FORCE_SINGLE -> DualPageMode.AUTO
+}
+
+/**
+ * 编码切换入口：写 BookEntity.encoding（空串=自动检测），
+ * ReaderViewModel 监听该字段变化后按当前锚点重开书籍。
+ */
+@Composable
+private fun EncodingMenuEntry() {
+    val context = LocalContext.current
+    val container = remember(context) {
+        (context.applicationContext as? FoldReaderApplication)?.container
+    } ?: return
+    val scope = rememberCoroutineScope()
+    val activeBookId by container.activeReaderBookId.collectAsState()
+    val bookId = activeBookId ?: return
+    var refreshTick by remember { mutableIntStateOf(0) }
+    val encoding by produceState<String?>(initialValue = null, bookId, refreshTick) {
+        value = container.bookshelfRepository.getBook(bookId)?.encoding
+    }
+    var showPicker by remember { mutableStateOf(false) }
+    TextButton(onClick = { showPicker = true }) {
+        Text("编码：${encoding?.takeIf { it.isNotBlank() } ?: "自动检测"}")
+    }
+    if (showPicker) {
+        EncodingPickerDialog(
+            currentEncoding = encoding.orEmpty(),
+            onSelect = { name ->
+                showPicker = false
+                scope.launch {
+                    container.bookshelfRepository.updateEncoding(bookId, name ?: "")
+                    refreshTick++
+                }
+            },
+            onDismiss = { showPicker = false },
+        )
+    }
 }

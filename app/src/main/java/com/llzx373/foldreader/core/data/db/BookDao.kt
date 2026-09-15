@@ -28,8 +28,33 @@ interface BookDao {
     )
     fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>>
 
+    @Query("SELECT DISTINCT groupName FROM books WHERE groupName IS NOT NULL ORDER BY groupName")
+    fun observeGroupNames(): Flow<List<String>>
+
+    @Query(
+        """
+        SELECT books.*, reading_progress.charOffset AS charOffset
+        FROM books LEFT JOIN reading_progress ON reading_progress.bookId = books.id
+        WHERE (:groupName IS NULL AND books.groupName IS NULL) OR books.groupName = :groupName
+        ORDER BY COALESCE(books.lastReadAt, books.importedAt) DESC
+        """,
+    )
+    fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>>
+
+    @Query("UPDATE books SET groupName = :groupName WHERE id IN (:bookIds)")
+    suspend fun updateGroup(bookIds: List<Long>, groupName: String?)
+
+    @Query("UPDATE books SET groupName = NULL WHERE groupName = :groupName")
+    suspend fun clearGroup(groupName: String)
+
     @Query("SELECT * FROM books WHERE id = :bookId")
     suspend fun getById(bookId: Long): BookEntity?
+
+    @Query("SELECT * FROM books WHERE id = :bookId")
+    fun observeById(bookId: Long): Flow<BookEntity?>
+
+    @Query("UPDATE books SET encoding = :encoding WHERE id = :bookId")
+    suspend fun updateEncoding(bookId: Long, encoding: String)
 
     @Query("SELECT * FROM books WHERE fileUri = :fileUri LIMIT 1")
     suspend fun getByFileUri(fileUri: String): BookEntity?

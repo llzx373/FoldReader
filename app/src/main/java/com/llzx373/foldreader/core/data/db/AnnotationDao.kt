@@ -23,4 +23,7 @@ interface AnnotationDao {
 
     @Query("DELETE FROM annotations WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM annotations WHERE bookId IN (:bookIds)")
+    suspend fun deleteByBookIds(bookIds: List<Long>)
 }

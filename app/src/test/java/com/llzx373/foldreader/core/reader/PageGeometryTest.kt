@@ -135,4 +135,43 @@ class PageGeometryTest {
         assertEquals(24f, bs[2].x0, 0.001f)
         assertEquals(46f, bs[2].yTop, 0.001f) // 20 + 20 + 6
     }
+
+    @Test
+    fun `paragraph starting with whitespace is not indented again`() {
+        val indentedPage = Page(
+            charStart = 0,
+            charEnd = 21,
+            lines = listOf(
+                PageLine(0, 11, "　甲乙丙丁戊己庚辛壬", isParagraphStart = true, isParagraphEnd = false),
+                PageLine(11, 21, "癸子丑寅卯辰巳午未申", isParagraphStart = false, isParagraphEnd = true),
+            ),
+            paddingLeft = 0f,
+            paddingRight = 0f,
+        )
+        val bs = buildLineBoxes(
+            page = indentedPage,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 20f,
+            topPadPx = 0f,
+            leftPadPx = 4f,
+            textWidthPx = 100f,
+            justify = false,
+            measure = measure,
+        )
+        // 段首行自带全角空格 → 不叠加缩进；indentPx=0（开关关闭）时普通段首也不缩进
+        assertEquals(4f, bs[0].x0, 0.001f)
+        val noIndent = buildLineBoxes(
+            page = page,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 0f,
+            topPadPx = 0f,
+            leftPadPx = 4f,
+            textWidthPx = 100f,
+            justify = false,
+            measure = measure,
+        )
+        assertEquals(4f, noIndent[0].x0, 0.001f)
+    }
 }

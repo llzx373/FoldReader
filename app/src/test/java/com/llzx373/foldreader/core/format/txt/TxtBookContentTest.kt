@@ -7,6 +7,7 @@ import java.nio.charset.Charset
 import java.nio.file.StandardOpenOption
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TxtBookContentTest {
@@ -32,7 +33,6 @@ class TxtBookContentTest {
             channel = RandomAccessFile(file, "r").channel,
             charset = charset,
             offsetIndex = index.offsetIndex,
-            charCount = index.charCount,
         )
     }
 
@@ -114,6 +114,55 @@ class TxtBookContentTest {
     }
 
     @Test
+    fun `含坏字节窗口读取不抛异常且与索引容错一致`() = runBlocking {
+        val prefix = "第一章 正常内容。"
+        val suffix = "第二章 后续内容。"
+        val file = File.createTempFile("foldreader-badbytes", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(
+            prefix.toByteArray(gbk) +
+                byteArrayOf(0xFF.toByte(), 0x81.toByte(), 0x30.toByte()) +
+                suffix.toByteArray(gbk),
+        )
+        val index = TxtIndexer.index(
+            channel = FileChannel.open(file.toPath(), StandardOpenOption.READ),
+            charset = gbk,
+            blockChars = 8,
+        )
+        val content = TxtBookContent(
+            channel = RandomAccessFile(file, "r").channel,
+            charset = gbk,
+            offsetIndex = index.offsetIndex,
+        )
+
+        val text = content.read(0L..content.charCount - 1)
+        assertEquals(content.charCount, text.length.toLong())
+        assertTrue(text.startsWith(prefix))
+        assertTrue(text.endsWith(suffix))
+    }
+
+    @Test
+    fun `文件末尾不完整多字节字符按替换符收尾不丢字符`() = runBlocking {
+        val text = "床前明月光，疑是地上霜。"
+        val file = File.createTempFile("foldreader-eof", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(text.toByteArray(gbk) + byteArrayOf(0x81.toByte()))
+        val index = TxtIndexer.index(
+            channel = FileChannel.open(file.toPath(), StandardOpenOption.READ),
+            charset = gbk,
+            blockChars = 4,
+        )
+        val content = TxtBookContent(
+            channel = RandomAccessFile(file, "r").channel,
+            charset = gbk,
+            offsetIndex = index.offsetIndex,
+        )
+
+        assertEquals(text.length + 1L, index.charCount)
+        assertEquals(text + "�", content.read(0L..index.charCount - 1))
+    }
+
+    @Test
     fun `索引快照可恢复且读取一致`() = runBlocking {
         val text = "第二章 快照恢复测试。".repeat(60)
         val file = File.createTempFile("foldreader-snapshot", ".txt")
@@ -131,7 +180,6 @@ class TxtBookContentTest {
             channel = RandomAccessFile(file, "r").channel,
             charset = gbk,
             offsetIndex = restored,
-            charCount = index.charCount,
         )
 
         assertEquals(text, content.read(0L..text.length - 1L))

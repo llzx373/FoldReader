@@ -10,6 +10,9 @@ object ChapterRules {
         Regex("^\\d{1,6}[、.．]\\s*\\S[^\\n]{0,34}$"),
         Regex("^(?:楔子|序章|序言|引子|前言|终章|尾声|番外篇?)[^\\n]{0,35}$"),
     )
+
+    fun merge(customPatterns: List<String>): List<Regex> =
+        customPatterns.mapNotNull { runCatching { Regex(it) }.getOrNull() } + DEFAULT
 }
 
 class ChapterScanner(

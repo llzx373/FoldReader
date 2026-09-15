@@ -20,6 +20,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,11 +116,21 @@ fun TabletopPanel(
     ) {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
             var sliderFraction by remember { mutableStateOf(progressFraction) }
+            var sliderDragging by remember { mutableStateOf(false) }
+            LaunchedEffect(progressFraction) {
+                if (!sliderDragging) sliderFraction = progressFraction
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Slider(
                     value = sliderFraction,
-                    onValueChange = { sliderFraction = it },
-                    onValueChangeFinished = { onSeekFraction(sliderFraction) },
+                    onValueChange = {
+                        sliderDragging = true
+                        sliderFraction = it
+                    },
+                    onValueChangeFinished = {
+                        sliderDragging = false
+                        onSeekFraction(sliderFraction)
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 Text(

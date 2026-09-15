@@ -10,8 +10,8 @@ object Kinsoku {
         if (n == 0) return breaks
         val out = breaks.copyOf()
         for (i in 0 until n - 1) {
-            var b = out[i]
-            while (b < text.length && b < out[i + 1] && text[b] in lineStartForbidden) {
+            var b = maxOf(out[i], out.getOrElse(i - 1) { 0 })
+            while (b < text.length && text[b] in lineStartForbidden) {
                 b++
             }
             while (b > out.getOrElse(i - 1) { 0 } + 1 && b - 1 < text.length && text[b - 1] in lineEndForbidden) {

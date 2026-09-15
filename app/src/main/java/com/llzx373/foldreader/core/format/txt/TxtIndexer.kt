@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.core.format.txt
 
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.format.ChapterRules
 import com.llzx373.foldreader.core.format.ChapterScanner
 import com.llzx373.foldreader.core.format.OffsetIndex
 import java.nio.ByteBuffer
@@ -25,7 +26,27 @@ object TxtIndexer {
         charset: Charset,
         bomLength: Int = 0,
         blockChars: Int = OffsetIndex.DEFAULT_BLOCK_CHARS,
+        chapterRules: List<Regex> = ChapterRules.DEFAULT,
     ): TxtIndex {
+        val offsets = OffsetIndex(blockChars = blockChars, initialByteOffset = bomLength.toLong())
+        val chapters = indexInto(channel, charset, offsets, bomLength, chapterRules = chapterRules)
+        return TxtIndex(
+            charset = charset,
+            charCount = offsets.totalChars,
+            offsetIndex = offsets,
+            chapters = chapters,
+        )
+    }
+
+    fun indexInto(
+        channel: SeekableByteChannel,
+        charset: Charset,
+        target: OffsetIndex,
+        bomLength: Int = 0,
+        chapterRules: List<Regex> = ChapterRules.DEFAULT,
+        onBlock: (blockIndex: Int, startByteOffset: Long, endByteOffset: Long) -> Unit = { _, _, _ -> },
+    ): List<Chapter> {
+        val blockChars = target.blockChars
         channel.position(bomLength.toLong())
         val decoder = charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPLACE)
@@ -33,25 +54,33 @@ object TxtIndexer {
         val inBuf = ByteBuffer.allocate(READ_CHUNK_BYTES)
         inBuf.limit(0)
         val outBuf = CharBuffer.allocate(blockChars)
-        val offsets = OffsetIndex(blockChars = blockChars, initialByteOffset = bomLength.toLong())
-        val scanner = ChapterScanner()
+        val scanner = ChapterScanner(chapterRules)
         var totalRead = bomLength.toLong()
+        var blockStartByteOffset = bomLength.toLong()
         var eof = false
         var endOfInputSent = false
 
         fun emitBlock() {
             val count = outBuf.position()
+            val startByteOffset = blockStartByteOffset
+            val endByteOffset = totalRead - inBuf.remaining()
+            blockStartByteOffset = endByteOffset
             outBuf.flip()
             scanner.feed(outBuf.toString())
             outBuf.clear()
-            offsets.appendBlock(count, endByteOffset = totalRead - inBuf.remaining())
+            target.appendBlock(count, endByteOffset)
+            onBlock(target.blockCount - 1, startByteOffset, endByteOffset)
         }
 
         while (true) {
             if (!endOfInputSent) {
                 if (eof) {
-                    // 文件尾：尾部不完整字节按 REPLACE 收尾
-                    decoder.decode(inBuf, outBuf, true)
+                    // 文件尾：尾部不完整字节按 REPLACE 收尾；outBuf 满时先落块再继续 EOF 解码
+                    val result = decoder.decode(inBuf, outBuf, true)
+                    if (result.isOverflow && outBuf.position() > 0) {
+                        emitBlock()
+                        continue
+                    }
                     endOfInputSent = true
                 } else if (!inBuf.hasRemaining()) {
                     inBuf.clear()
@@ -88,12 +117,7 @@ object TxtIndexer {
             }
             if (outBuf.position() == blockChars) emitBlock()
         }
-        offsets.markComplete()
-        return TxtIndex(
-            charset = charset,
-            charCount = offsets.totalChars,
-            offsetIndex = offsets,
-            chapters = scanner.finish(),
-        )
+        target.markComplete()
+        return scanner.finish()
     }
 }

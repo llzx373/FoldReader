@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
+import com.llzx373.foldreader.feature.reader.sortBookmarksByRecency
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,7 +52,7 @@ fun BookmarkOverviewDialog(
     val groups = remember(books, bookmarksByBook, annotationsByBook) {
         books.mapNotNull { item ->
             val bookBookmarks = bookmarksByBook[item.book.id].orEmpty()
-                .sortedBy { it.charOffset }
+                .let { sortBookmarksByRecency(it) }
             val bookAnnotations = annotationsByBook[item.book.id].orEmpty()
                 .sortedBy { it.startCharOffset }
             if (bookBookmarks.isEmpty() && bookAnnotations.isEmpty()) {

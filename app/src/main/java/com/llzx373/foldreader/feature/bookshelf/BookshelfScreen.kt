@@ -1,8 +1,12 @@
 package com.llzx373.foldreader.feature.bookshelf
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -25,6 +29,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
@@ -34,12 +41,12 @@ import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
@@ -77,6 +84,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -91,12 +99,18 @@ import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.ui.EmptyState
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalSharedTransitionApi::class,
+)
 @Composable
 fun BookshelfScreen(
     foldableUiState: FoldableUiState,
-    onOpenBook: (Long) -> Unit,
-    onOpenBookAt: (bookId: Long, anchor: Long) -> Unit,
+    onOpenBook: (bookId: Long, title: String) -> Unit,
+    onOpenBookAt: (bookId: Long, anchor: Long, title: String) -> Unit,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as FoldReaderApplication
@@ -106,6 +120,7 @@ fun BookshelfScreen(
     val gridView by viewModel.gridView.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
+    val groups by viewModel.groups.collectAsState()
     val allBookmarks by viewModel.allBookmarks.collectAsState()
     val allAnnotations by viewModel.allAnnotations.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -116,16 +131,19 @@ fun BookshelfScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var detailBookId by rememberSaveable { mutableStateOf(0L) }
     var showBookmarkOverview by rememberSaveable { mutableStateOf(false) }
+    var showMoveToGroupDialog by rememberSaveable { mutableStateOf(false) }
+    var importRequest by remember { mutableStateOf<Pair<Uri, Boolean>?>(null) }
+    // null = 全部；"" = 未分组；其余为分组名
+    var groupFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val selectionMode = selectedIds.isNotEmpty()
-    val displayBooks = remember(books, searchQuery) {
+    val displayBooks = remember(books, searchQuery, groupFilter) {
         val q = searchQuery.trim()
-        if (q.isEmpty()) {
-            books
-        } else {
-            books.filter {
+        val gf = groupFilter
+        books.filter {
+            (q.isEmpty() ||
                 it.book.title.contains(q, ignoreCase = true) ||
-                    it.book.author?.contains(q, ignoreCase = true) == true
-            }
+                it.book.author?.contains(q, ignoreCase = true) == true) &&
+                (gf == null || (if (gf.isEmpty()) it.book.groupName == null else it.book.groupName == gf))
         }
     }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -140,7 +158,7 @@ fun BookshelfScreen(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
-            viewModel.import(uri, openAfterImport = false)
+            importRequest = uri to false
         }
     }
     val launchImport = {
@@ -151,7 +169,7 @@ fun BookshelfScreen(
         app.container.pendingImportUri.collect { uri ->
             if (uri != null) {
                 app.container.pendingImportUri.value = null
-                viewModel.import(uri, openAfterImport = true)
+                importRequest = uri to true
             }
         }
     }
@@ -159,12 +177,18 @@ fun BookshelfScreen(
     LaunchedEffect(importState) {
         when (val state = importState) {
             is ImportUiState.Imported -> {
-                if (state.openAfter) onOpenBook(state.bookId)
-                else snackbarHostState.showSnackbar("《${state.title}》已加入书架")
+                if (state.openAfter) {
+                    onOpenBook(state.bookId, state.title)
+                } else {
+                    snackbarHostState.showSnackbar("《${state.title}》已加入书架")
+                    if (state.lowEncodingConfidence) {
+                        snackbarHostState.showSnackbar("编码识别置信度低，如乱码可在书籍详情切换编码")
+                    }
+                }
                 viewModel.consumeImportState()
             }
             is ImportUiState.Duplicate -> {
-                if (state.sameFile && state.openAfter) onOpenBook(state.bookId)
+                if (state.sameFile && state.openAfter) onOpenBook(state.bookId, state.title)
                 else snackbarHostState.showSnackbar("《${state.title}》已在书架")
                 viewModel.consumeImportState()
             }
@@ -192,6 +216,9 @@ fun BookshelfScreen(
                             IconButton(onClick = { detailBookId = selectedIds.first() }) {
                                 Icon(Icons.Filled.Info, contentDescription = "书籍详情")
                             }
+                        }
+                        IconButton(onClick = { showMoveToGroupDialog = true }) {
+                            FolderIcon(contentDescription = "移动到分组")
                         }
                         IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Filled.Delete, contentDescription = "删除")
@@ -268,14 +295,6 @@ fun BookshelfScreen(
                         icon = { Icon(Icons.Filled.Create, contentDescription = null) },
                         text = { Text("导入本地书籍") },
                     )
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            fabMenuExpanded = false
-                            scope.launch { snackbarHostState.showSnackbar("WiFi 传书敬请期待") }
-                        },
-                        icon = { Icon(Icons.Filled.Share, contentDescription = null) },
-                        text = { Text("WiFi 传书") },
-                    )
                 }
             }
         },
@@ -288,12 +307,6 @@ fun BookshelfScreen(
             when {
                 loading -> LoadingIndicator(modifier = Modifier.align(Alignment.Center))
                 books.isEmpty() -> EmptyBookshelf(onImportClick = launchImport)
-                displayBooks.isEmpty() -> Text(
-                    text = "没有匹配「$searchQuery」的书籍",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.Center),
-                )
                 else -> {
                     val recent = remember(books) {
                         books.filter { it.book.lastReadAt != null }
@@ -301,39 +314,84 @@ fun BookshelfScreen(
                             .take(10)
                     }
                     Column(modifier = Modifier.fillMaxSize()) {
-                        if (!selectionMode && searchQuery.isBlank() && recent.isNotEmpty()) {
-                            RecentReadsCarousel(recent = recent, onOpenBook = onOpenBook)
+                        if (!selectionMode) {
+                            GroupFilterChips(
+                                groups = groups,
+                                selected = groupFilter,
+                                onSelect = { groupFilter = it },
+                            )
                         }
-                        Box(modifier = Modifier.weight(1f)) {
-                            if (gridView) {
-                                BookGrid(
-                                    books = displayBooks,
-                                    selectedIds = selectedIds,
-                                    selectionMode = selectionMode,
-                                    minColumnWidth = when (foldableUiState.widthCategory) {
-                                        WidthCategory.COMPACT -> 160.dp
-                                        WidthCategory.MEDIUM -> 140.dp
-                                        WidthCategory.EXPANDED -> 170.dp
-                                    },
-                                    onOpenBook = onOpenBook,
-                                    onToggleSelection = viewModel::toggleSelection,
+                        when {
+                            displayBooks.isEmpty() && searchQuery.isNotBlank() -> Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "没有匹配「$searchQuery」的书籍",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                            } else {
-                                BookList(
-                                    books = displayBooks,
-                                    selectedIds = selectedIds,
-                                    selectionMode = selectionMode,
-                                    onOpenBook = onOpenBook,
-                                    onToggleSelection = viewModel::toggleSelection,
-                                )
+                            }
+                            displayBooks.isEmpty() -> EmptyState(
+                                title = "该分组暂无书籍",
+                                description = "长按书籍多选后可移动到分组",
+                                modifier = Modifier.weight(1f),
+                            )
+                            else -> {
+                                if (!selectionMode && searchQuery.isBlank() && groupFilter == null && recent.isNotEmpty()) {
+                                    RecentReadsCarousel(
+                                        recent = recent,
+                                        onOpenBook = onOpenBook,
+                                        sharedTransitionScope = sharedTransitionScope,
+                                        animatedVisibilityScope = animatedVisibilityScope,
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (gridView) {
+                                        BookGrid(
+                                            books = displayBooks,
+                                            selectedIds = selectedIds,
+                                            selectionMode = selectionMode,
+                                            minColumnWidth = when (foldableUiState.widthCategory) {
+                                                WidthCategory.COMPACT -> 160.dp
+                                                WidthCategory.MEDIUM -> 140.dp
+                                                WidthCategory.EXPANDED -> 170.dp
+                                            },
+                                            onOpenBook = onOpenBook,
+                                            onToggleSelection = viewModel::toggleSelection,
+                                            sharedTransitionScope = sharedTransitionScope,
+                                            animatedVisibilityScope = animatedVisibilityScope,
+                                        )
+                                    } else {
+                                        BookList(
+                                            books = displayBooks,
+                                            selectedIds = selectedIds,
+                                            selectionMode = selectionMode,
+                                            onOpenBook = onOpenBook,
+                                            onToggleSelection = viewModel::toggleSelection,
+                                            sharedTransitionScope = sharedTransitionScope,
+                                            animatedVisibilityScope = animatedVisibilityScope,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
             if (importState is ImportUiState.Importing) {
+                val progress = (importState as ImportUiState.Importing).progress
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            // 导入期间拦截一切触摸，防止误操作底层书架
+                            awaitEachGesture {
+                                awaitPointerEvent()
+                            }
+                        },
                     color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f),
                 ) {
                     Column(
@@ -343,7 +401,11 @@ fun BookshelfScreen(
                     ) {
                         LoadingIndicator()
                         Text(
-                            text = "正在导入…",
+                            text = if (progress >= 0f) {
+                                "正在导入… ${(progress * 100).toInt()}%"
+                            } else {
+                                "正在导入…"
+                            },
                             modifier = Modifier.padding(top = 16.dp),
                             style = MaterialTheme.typography.bodyLarge,
                         )
@@ -351,6 +413,22 @@ fun BookshelfScreen(
                 }
             }
         }
+    }
+
+    importRequest?.let { (uri, openAfter) ->
+        ImportOptionsDialog(
+            onConfirm = { removeBlankLines, removeAdLines, traditionalToSimplified ->
+                importRequest = null
+                viewModel.import(
+                    uri = uri,
+                    openAfterImport = openAfter,
+                    removeBlankLines = removeBlankLines,
+                    removeAdLines = removeAdLines,
+                    traditionalToSimplified = traditionalToSimplified,
+                )
+            },
+            onDismiss = { importRequest = null },
+        )
     }
 
     if (detailBookId != 0L) {
@@ -371,13 +449,27 @@ fun BookshelfScreen(
             annotations = allAnnotations,
             onJump = { bookId, anchor ->
                 showBookmarkOverview = false
-                onOpenBookAt(bookId, anchor)
+                val title = books.firstOrNull { it.book.id == bookId }?.book?.title.orEmpty()
+                onOpenBookAt(bookId, anchor, title)
             },
             onDismiss = { showBookmarkOverview = false },
         )
     }
 
+    if (showMoveToGroupDialog) {
+        MoveToGroupDialog(
+            groups = groups,
+            onMove = { name ->
+                viewModel.moveSelectedToGroup(name)
+                showMoveToGroupDialog = false
+            },
+            onDeleteGroup = viewModel::deleteGroup,
+            onDismiss = { showMoveToGroupDialog = false },
+        )
+    }
+
     if (showDeleteDialog) {
+        var deleteLocalData by remember { mutableStateOf(true) }
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("删除书籍") },
@@ -386,15 +478,18 @@ fun BookshelfScreen(
                     Text("将删除 ${selectedIds.size} 本书，此操作不可撤销。")
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = true, onCheckedChange = null, enabled = false)
-                        Text("同时删除阅读进度与标注（随书籍级联删除）")
+                        Checkbox(
+                            checked = deleteLocalData,
+                            onCheckedChange = { deleteLocalData = it },
+                        )
+                        Text("同时删除本地阅读进度与标注")
                     }
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteSelected()
+                        viewModel.deleteSelected(deleteLocalData)
                         showDeleteDialog = false
                     },
                 ) {
@@ -406,6 +501,179 @@ fun BookshelfScreen(
                     Text("取消")
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun ImportOptionsDialog(
+    onConfirm: (removeBlankLines: Boolean, removeAdLines: Boolean, traditionalToSimplified: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var removeBlankLines by remember { mutableStateOf(false) }
+    var removeAdLines by remember { mutableStateOf(false) }
+    var traditionalToSimplified by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导入选项") },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = removeBlankLines, onCheckedChange = { removeBlankLines = it })
+                    Text("去空行")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = removeAdLines, onCheckedChange = { removeAdLines = it })
+                    Text("去广告行")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = traditionalToSimplified,
+                        onCheckedChange = { traditionalToSimplified = it },
+                    )
+                    Text("繁体转简体")
+                }
+                Text(
+                    text = "勾选后清理结果保存为副本，原文件不受影响；去广告行使用「设置 → 智能清理」中的正则规则，繁简转换为单字级映射。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(removeBlankLines, removeAdLines, traditionalToSimplified) },
+            ) {
+                Text("导入")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
+private fun GroupFilterChips(
+    groups: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = selected == null,
+            onClick = { onSelect(null) },
+            label = { Text("全部") },
+        )
+        FilterChip(
+            selected = selected == "",
+            onClick = { onSelect("") },
+            label = { Text("未分组") },
+        )
+        groups.forEach { name ->
+            FilterChip(
+                selected = selected == name,
+                onClick = { onSelect(name) },
+                label = { Text(name) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MoveToGroupDialog(
+    groups: List<String>,
+    onMove: (String?) -> Unit,
+    onDeleteGroup: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newGroup by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动到分组") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = newGroup,
+                    onValueChange = { newGroup = it },
+                    label = { Text("新建分组") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (groups.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    groups.forEach { name ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onMove(name) },
+                        ) {
+                            Text(
+                                text = name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { onDeleteGroup(name) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "删除分组 $name")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = newGroup.trim().isNotEmpty(),
+                onClick = { onMove(newGroup.trim()) },
+            ) {
+                Text("新建并移动")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onMove(null) }) {
+                    Text("移出分组")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun FolderIcon(contentDescription: String) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(
+        modifier = Modifier
+            .size(24.dp)
+            .semantics { this.contentDescription = contentDescription },
+    ) {
+        val w = size.width
+        val h = size.height
+        val corner = CornerRadius(h * 0.1f, h * 0.1f)
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.08f, h * 0.2f),
+            size = Size(w * 0.42f, h * 0.18f),
+            cornerRadius = corner,
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.08f, h * 0.32f),
+            size = Size(w * 0.84f, h * 0.52f),
+            cornerRadius = corner,
         )
     }
 }
@@ -445,11 +713,13 @@ private fun EmptyBookshelf(onImportClick: () -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun RecentReadsCarousel(
     recent: List<BookWithProgress>,
-    onOpenBook: (Long) -> Unit,
+    onOpenBook: (bookId: Long, title: String) -> Unit,
+    sharedTransitionScope: SharedTransitionScope?,
+    animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -470,7 +740,10 @@ private fun RecentReadsCarousel(
                     title = item.book.title,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenBook(item.book.id) },
+                        .clickable { onOpenBook(item.book.id, item.book.title) },
+                    sharedTransitionScope = sharedTransitionScope,
+                    animatedVisibilityScope = animatedVisibilityScope,
+                    bookId = item.book.id,
                 )
                 Text(
                     text = formatReadingProgress(item.charOffset, item.book.totalChars),
@@ -509,26 +782,34 @@ private fun GridViewIcon(contentDescription: String) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun BookGridItem(
     item: BookWithProgress,
     selected: Boolean,
     selectionMode: Boolean,
-    onOpenBook: (Long) -> Unit,
+    onOpenBook: (bookId: Long, title: String) -> Unit,
     onToggleSelection: (Long) -> Unit,
+    sharedTransitionScope: SharedTransitionScope?,
+    animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     val book = item.book
     Column {
         Box(
             modifier = Modifier.combinedClickable(
                 onClick = {
-                    if (selectionMode) onToggleSelection(book.id) else onOpenBook(book.id)
+                    if (selectionMode) onToggleSelection(book.id) else onOpenBook(book.id, book.title)
                 },
                 onLongClick = { onToggleSelection(book.id) },
             ),
         ) {
-            BookCover(title = book.title, modifier = Modifier.fillMaxWidth())
+            BookCover(
+                title = book.title,
+                modifier = Modifier.fillMaxWidth(),
+                sharedTransitionScope = sharedTransitionScope,
+                animatedVisibilityScope = animatedVisibilityScope,
+                bookId = book.id,
+            )
             if (selected) {
                 Box(
                     modifier = Modifier
@@ -563,14 +844,17 @@ private fun BookGridItem(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun BookGrid(
     books: List<BookWithProgress>,
     selectedIds: Set<Long>,
     selectionMode: Boolean,
     minColumnWidth: Dp,
-    onOpenBook: (Long) -> Unit,
+    onOpenBook: (bookId: Long, title: String) -> Unit,
     onToggleSelection: (Long) -> Unit,
+    sharedTransitionScope: SharedTransitionScope?,
+    animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = minColumnWidth),
@@ -586,19 +870,23 @@ private fun BookGrid(
                 selectionMode = selectionMode,
                 onOpenBook = onOpenBook,
                 onToggleSelection = onToggleSelection,
+                sharedTransitionScope = sharedTransitionScope,
+                animatedVisibilityScope = animatedVisibilityScope,
             )
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun BookList(
     books: List<BookWithProgress>,
     selectedIds: Set<Long>,
     selectionMode: Boolean,
-    onOpenBook: (Long) -> Unit,
+    onOpenBook: (bookId: Long, title: String) -> Unit,
     onToggleSelection: (Long) -> Unit,
+    sharedTransitionScope: SharedTransitionScope?,
+    animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -615,7 +903,7 @@ private fun BookList(
                     .fillMaxWidth()
                     .combinedClickable(
                         onClick = {
-                            if (selectionMode) onToggleSelection(book.id) else onOpenBook(book.id)
+                            if (selectionMode) onToggleSelection(book.id) else onOpenBook(book.id, book.title)
                         },
                         onLongClick = { onToggleSelection(book.id) },
                     ),
@@ -624,7 +912,13 @@ private fun BookList(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BookCover(title = book.title, modifier = Modifier.width(46.dp))
+                    BookCover(
+                        title = book.title,
+                        modifier = Modifier.width(46.dp),
+                        sharedTransitionScope = sharedTransitionScope,
+                        animatedVisibilityScope = animatedVisibilityScope,
+                        bookId = book.id,
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(

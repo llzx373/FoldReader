@@ -20,4 +20,7 @@ interface ReadingProgressDao {
 
     @Query("DELETE FROM reading_progress WHERE bookId = :bookId")
     suspend fun delete(bookId: Long)
+
+    @Query("DELETE FROM reading_progress WHERE bookId IN (:bookIds)")
+    suspend fun deleteByBookIds(bookIds: List<Long>)
 }

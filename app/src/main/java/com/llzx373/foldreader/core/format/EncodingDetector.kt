@@ -11,6 +11,9 @@ object EncodingDetector {
 
     const val SAMPLE_SIZE = 64 * 1024
 
+    fun forNameOrNull(name: String): Charset? =
+        name.takeIf { it.isNotBlank() }?.let { runCatching { Charset.forName(it) }.getOrNull() }
+
     private val GBK = Charset.forName("GBK")
     private val GB18030 = Charset.forName("GB18030")
     private val BIG5 = Charset.forName("Big5")
@@ -35,13 +38,13 @@ object EncodingDetector {
                 if (i % 2 == 0) evenZeros++ else oddZeros++
             }
         }
-        if (highBytes == 0) return EncodingDetection(Charsets.UTF_8, 0.5f)
-
         val zeros = evenZeros + oddZeros
         if (zeros * 20 > n) {
-            if (evenZeros > oddZeros * 9) return EncodingDetection(Charsets.UTF_16LE, 0.8f)
-            if (oddZeros > evenZeros * 9) return EncodingDetection(Charsets.UTF_16BE, 0.8f)
+            // UTF-16LE 低字节在前：ASCII 文本的 0x00 落在奇数位；BE 相反
+            if (oddZeros > evenZeros * 9) return EncodingDetection(Charsets.UTF_16LE, 0.8f)
+            if (evenZeros > oddZeros * 9) return EncodingDetection(Charsets.UTF_16BE, 0.8f)
         }
+        if (highBytes == 0) return EncodingDetection(Charsets.UTF_8, 0.5f)
 
         if (isValidUtf8(sample, n)) return EncodingDetection(Charsets.UTF_8, 0.95f)
 

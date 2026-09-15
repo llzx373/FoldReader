@@ -81,6 +81,20 @@ class EncodingDetectorTest {
     }
 
     @Test
+    fun `UTF-16LE 无 BOM 纯 ASCII 内容识别为 UTF-16LE`() {
+        val bytes = "Chapter 1 plain ascii text only, no bom at all. 1234567890."
+            .toByteArray(Charsets.UTF_16LE)
+        assertEquals(Charsets.UTF_16LE, EncodingDetector.detect(bytes).charset)
+    }
+
+    @Test
+    fun `UTF-16BE 无 BOM 纯 ASCII 内容识别为 UTF-16BE`() {
+        val bytes = "Chapter 1 plain ascii text only, no bom at all. 1234567890."
+            .toByteArray(Charsets.UTF_16BE)
+        assertEquals(Charsets.UTF_16BE, EncodingDetector.detect(bytes).charset)
+    }
+
+    @Test
     fun `BOM 长度识别`() {
         assertEquals(3, EncodingDetector.bomLengthOf(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte(), 0x41)))
         assertEquals(2, EncodingDetector.bomLengthOf(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x41)))

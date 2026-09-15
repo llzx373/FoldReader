@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.core.format
 
 import android.net.Uri
+import java.nio.charset.Charset
 
 data class BookMeta(
     val title: String,
@@ -22,6 +23,6 @@ interface BookContent {
 
 interface BookParser {
     suspend fun parseMeta(uri: Uri): BookMeta
-    suspend fun parseChapters(uri: Uri): List<Chapter>
-    fun openContent(uri: Uri): BookContent
+    suspend fun parseChapters(uri: Uri, charsetOverride: Charset? = null): List<Chapter>
+    suspend fun openContent(uri: Uri, charsetOverride: Charset? = null): BookContent
 }

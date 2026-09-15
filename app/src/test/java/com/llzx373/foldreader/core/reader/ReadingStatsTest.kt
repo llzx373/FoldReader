@@ -30,14 +30,49 @@ class ReadingStatsTest {
     }
 
     @Test
-    fun `reading days span inclusive`() {
-        // 周一 0 点 ~ 周三 23 点（UTC）→ 3 天
-        val first = 10 * dayMs
-        val last = 12 * dayMs + 23 * 3_600_000L
-        assertEquals(3L, readingDaysSpan(first, last, utc))
-        assertEquals(1L, readingDaysSpan(first, first + 3_600_000L, utc))
-        assertEquals(0L, readingDaysSpan(0L, last, utc))
-        assertEquals(0L, readingDaysSpan(last, first, utc))
+    fun `reading day count dedups session dates`() {
+        // 同一本书同一天多条 session 只算 1 天；跨天各算 1 天
+        assertEquals(2, readingDayCount(listOf(10 * dayMs, 10 * dayMs, 12 * dayMs)))
+        assertEquals(1, readingDayCount(listOf(10 * dayMs)))
+        assertEquals(0, readingDayCount(emptyList()))
+        // 跨度大但只有两天有记录 → 2（不再按首末日期跨度虚报）
+        assertEquals(2, readingDayCount(listOf(10 * dayMs, 40 * dayMs)))
+    }
+
+    @Test
+    fun `session flush delta only writes increments`() {
+        // 退出/后台 flush：只写自上次落库后的增量；无新增则 0（调用方跳过写入）
+        assertEquals(5 * 60_000L, sessionFlushDelta(8 * 60_000L, 3 * 60_000L))
+        assertEquals(0L, sessionFlushDelta(3 * 60_000L, 3 * 60_000L))
+        assertEquals(0L, sessionFlushDelta(2 * 60_000L, 3 * 60_000L))
+    }
+
+    @Test
+    fun `chars read tracker counts page turns both directions`() {
+        val tracker = CharsReadTracker()
+        tracker.jump(1_000L) // 打开书定位基线，不计入
+        assertEquals(0L, tracker.total)
+        tracker.advance(1_500L) // 往后翻一页 500 字
+        tracker.advance(1_100L) // 往回翻也计 400
+        assertEquals(900L, tracker.total)
+    }
+
+    @Test
+    fun `chars read tracker ignores jumps`() {
+        val tracker = CharsReadTracker()
+        tracker.jump(0L)
+        tracker.advance(500L)
+        tracker.jump(200_000L) // 跳章/进度条：只重置基线不计入
+        tracker.advance(200_400L)
+        assertEquals(900L, tracker.total) // 500 + 400，跳章的 199500 不计
+    }
+
+    @Test
+    fun `average speed uses chars read so skipping does not inflate`() {
+        // 读了 5 分钟，翻页推进 2000 字（期间跳到书尾不算已读）→ 400 字/分钟
+        assertEquals(400, averageCharsPerMinute(2_000L, 5 * 60_000L))
+        // 纯跳读：charsReadTotal 为 0 → 0（旧口径按 charOffset 会虚高）
+        assertEquals(0, averageCharsPerMinute(0L, 5 * 60_000L))
     }
 
     @Test

@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 书签列表：按书内位置（charOffset）排序；点击跳转，长按重命名/删除。 */
+/** 书签列表：按创建时间倒序（新 → 旧）；点击跳转，长按重命名/删除。 */
 @Composable
 fun BookmarkListDialog(
     bookmarks: List<BookmarkEntity>,
@@ -42,7 +42,7 @@ fun BookmarkListDialog(
     onDismiss: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<BookmarkEntity?>(null) }
-    val sorted = remember(bookmarks) { bookmarks.sortedBy { it.charOffset } }
+    val sorted = remember(bookmarks) { sortBookmarksByRecency(bookmarks) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

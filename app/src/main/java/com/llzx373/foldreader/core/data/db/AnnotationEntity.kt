@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -12,7 +13,7 @@ import androidx.room.PrimaryKey
             entity = BookEntity::class,
             parentColumns = ["id"],
             childColumns = ["bookId"],
-            onDelete = ForeignKey.CASCADE,
+            onDelete = ForeignKey.NO_ACTION,
         ),
     ],
     indices = [Index("bookId")],
@@ -25,6 +26,12 @@ data class AnnotationEntity(
     val selectedText: String,
     val color: Long,
     val note: String?,
+    @ColumnInfo(defaultValue = STYLE_HIGHLIGHT) val style: String = STYLE_HIGHLIGHT,
     val createdAt: Long,
     val updatedAt: Long,
-)
+) {
+    companion object {
+        const val STYLE_HIGHLIGHT = "highlight"
+        const val STYLE_UNDERLINE = "underline"
+    }
+}

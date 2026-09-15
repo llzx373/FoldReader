@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -44,6 +47,7 @@ val textPalette: List<Color> = listOf(
     Color(0xFF4E342E), Color(0xFF880E4F), Color(0xFFB0B0B0), Color(0xFFECEFF1),
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemePicker(
     prefs: ReadingPreferences,
@@ -82,18 +86,17 @@ fun ThemePicker(
                     )
                 }
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(top = 10.dp),
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
             ) {
-                themePresets.forEach { (theme, label) ->
-                    val colors = readerColors(theme, prefs.customBackgroundArgb, prefs.customTextArgb)
-                    ThemeCard(
-                        colors = colors,
-                        label = label,
+                themePresets.forEachIndexed { index, (theme, label) ->
+                    SegmentedButton(
                         selected = prefs.themeId == theme,
                         onClick = { onSelectTheme(theme) },
-                    )
+                        shape = SegmentedButtonDefaults.itemShape(index, themePresets.size),
+                    ) { Text(label, maxLines = 1) }
                 }
             }
             if (prefs.themeId == ReadingTheme.CUSTOM) {
@@ -113,33 +116,6 @@ fun ThemePicker(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ThemeCard(
-    colors: ReaderColors,
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(colors.background)
-                .border(
-                    width = if (selected) 2.dp else 1.dp,
-                    color = if (selected) colors.accent else Color(0x33000000),
-                    shape = RoundedCornerShape(8.dp),
-                )
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("文", color = colors.text, style = MaterialTheme.typography.titleSmall)
-        }
-        Text(label, style = MaterialTheme.typography.labelSmall)
     }
 }
 

@@ -15,30 +15,25 @@ fun decideTurnOutcome(
 }
 
 class FrameHealthMonitor(
-    private val badFrameMs: Float = 24f,
-    private val windowLimit: Int = 10,
-    private val badFrameLimit: Int = 5,
+    private val badFrameMs: Float = 34f,
+    private val windowSize: Int = 30,
+    private val warmupFrames: Int = 5,
 ) {
     private var frames = 0
-    private var badFrames = 0
+    private val window = ArrayDeque<Boolean>()
 
     fun noteFrame(frameMs: Float) {
         frames++
-        if (frameMs > badFrameMs) badFrames++
+        if (frames <= warmupFrames) return
+        window.addLast(frameMs > badFrameMs)
+        if (window.size > windowSize) window.removeFirst()
     }
 
-    fun shouldDegrade(): Boolean = frames >= windowLimit && badFrames >= badFrameLimit
+    fun shouldDegrade(): Boolean =
+        window.size >= windowSize && window.count { it } * 2 > windowSize
 
     fun reset() {
         frames = 0
-        badFrames = 0
+        window.clear()
     }
-}
-
-fun curlShadowAlpha(progress: Float): Float =
-    (0.22f * (1f - progress.coerceIn(0f, 1f) * 0.5f))
-
-fun curlScaleY(progress: Float): Float {
-    val p = progress.coerceIn(0f, 1f)
-    return 1f - 0.04f * kotlin.math.sin(p * Math.PI.toFloat())
 }

@@ -29,6 +29,13 @@ internal object UriChannels {
         return buffer.array().copyOf(buffer.position())
     }
 
+    fun readAt(channel: SeekableByteChannel, offset: Long, length: Int): ByteArray {
+        channel.position(offset)
+        val buffer = ByteBuffer.allocate(length)
+        while (buffer.hasRemaining() && channel.read(buffer) >= 0) Unit
+        return buffer.array().copyOf(buffer.position())
+    }
+
     fun displayName(context: Context, uri: Uri): String? {
         if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
             runCatching {
