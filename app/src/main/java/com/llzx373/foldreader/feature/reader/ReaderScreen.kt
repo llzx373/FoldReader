@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
@@ -223,6 +224,23 @@ fun ReaderScreen(
     val leftInsetPx = (splitLeftPx - spreadPageWidthPx).coerceAtLeast(0f) / 2f
     val rightInsetPx = (size.width - splitRightPx - spreadPageWidthPx).coerceAtLeast(0f) / 2f
 
+    // 版式几何指纹：与 setViewports 入参同源，用于识别"几何已变、分页流未重排完"的窗口期
+    val currentGeom = if (pageDual) {
+        SpreadGeometry(
+            dual = true,
+            pageWidthPx = dualPageWidthPx(splitLeftPx.roundToInt(), (size.width - splitRightPx).roundToInt()),
+            heightPx = size.height,
+        )
+    } else {
+        SpreadGeometry(
+            dual = false,
+            pageWidthPx = contentRect.width.roundToInt(),
+            heightPx = contentRect.height.roundToInt(),
+        )
+    }
+    // 几何不匹配时禁止用新版式画旧 spread（正文是 Canvas 手绘，字距按绘制宽度算，会爆开/重叠）
+    val geomReady = uiState.spreadGeometry == currentGeom
+
     LaunchedEffect(prefsLoaded, pageDual, size, hingeLocal, splitLeftPx, splitRightPx, contentRect, density.density, density.fontScale) {
         if (!prefsLoaded) return@LaunchedEffect
         if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
@@ -344,6 +362,13 @@ fun ReaderScreen(
         simSettling = false
     }
 
+    // 版式几何变化：旧几何的仿真动画/位图一律作废，防止新旧版式叠画
+    LaunchedEffect(currentGeom) {
+        interruptSimAnim()
+        clearSimState()
+        animSpread = null
+    }
+
     /** 脚本翻页动画（点击翻页与松手收尾共用）：可被新手势/新翻页打断。 */
     fun launchSimAnim(
         target: PageSpread,
@@ -457,7 +482,14 @@ fun ReaderScreen(
         }
     }
 
-    SystemBarEffects(menuVisible = menuVisible, keepScreenOn = prefs.keepScreenOn)
+    // 退出过渡开始（popExit）即恢复系统栏：书架在转场第一帧组合时就拿到真实
+    // 状态栏 inset，避免转场期间按 inset=0 布局、结束后突变回落的上下跳变
+    val readerExiting = animatedVisibilityScope
+        ?.let { it.transition.targetState != EnterExitState.Visible } == true
+    SystemBarEffects(
+        menuVisible = menuVisible || readerExiting,
+        keepScreenOn = prefs.keepScreenOn,
+    )
     BrightnessEffect(prefs.readerBrightness)
 
     var foreground by remember { mutableStateOf(true) }
@@ -1089,7 +1121,7 @@ fun ReaderScreen(
                     .height(with(density) { contentRect.height.toDp() })
                     .clipToBounds(),
             ) {
-                if (scrollMode) {
+                if (scrollMode && geomReady) {
                     ScrollContent(
                         viewModel = viewModel,
                         listState = scrollListState,
@@ -1109,7 +1141,7 @@ fun ReaderScreen(
                 } else {
                     val spread = uiState.spread
                     val sim = simTarget
-                    if (spread != null && sim != null) {
+                    if (spread != null && sim != null && geomReady) {
                         val front = simFrontBitmap
                         val back = simBackBitmap
                         if (front != null && back != null) {
@@ -1149,7 +1181,8 @@ fun ReaderScreen(
                                     progress = simProgress,
                                     sheet = sheet,
                                     startY = startY,
-                                    tilt = hingeTilt(startY, curlPageSize.height),
+                                    // 单页转轴同样固定竖直，对齐页左缘
+                                    tilt = 0f,
                                     sheetFade = hingeSliverFade(simProgress),
                                     bendPx = creaseBend(
                                         Size(sheet.width, curlPageSize.height),
@@ -1199,7 +1232,7 @@ fun ReaderScreen(
                                     },
                             )
                         }
-                    } else if (spread != null) {
+                    } else if (spread != null && geomReady) {
                         SpreadContent(
                             spread = spread,
                             config = uiState.layoutConfig,

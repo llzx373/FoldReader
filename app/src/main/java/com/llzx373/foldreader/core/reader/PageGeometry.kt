@@ -56,7 +56,9 @@ fun buildLineBoxes(
         val widths = FloatArray(line.text.length) { i -> measure(line.text[i].toString()) }
         val gap = if (justify && !line.isParagraphEnd && line.text.length > 1) {
             val natural = measure(line.text)
-            ((textWidthPx - (x0 - leftPadPx) - natural) / (line.text.length - 1)).coerceAtLeast(0f)
+            // 上限防御：绘制宽度与分页宽度错配（版式切换窗口期）时字距不会爆炸
+            ((textWidthPx - (x0 - leftPadPx) - natural) / (line.text.length - 1))
+                .coerceIn(0f, lineHeightPx * 0.5f)
         } else {
             0f
         }

@@ -279,20 +279,6 @@ class PageCurlShaderTest {
     }
 
     @Test
-    fun `hinge axis tilts toward grabbed corner`() {
-        val top = hingeAxis(hingeTilt(startY = 200f, pageHeight = 2000f))
-        assertEquals(1f, top.getDistance(), 0.001f)
-        assertTrue("起手上半页时轴向 +x 倾斜（顶端页角先起）", top.x > 0f)
-
-        val bottom = hingeAxis(hingeTilt(startY = 1800f, pageHeight = 2000f))
-        assertTrue(bottom.x < 0f)
-
-        val mid = hingeAxis(hingeTilt(startY = 1000f, pageHeight = 2000f))
-        assertEquals(0f, mid.x, 0.001f)
-        assertEquals(1f, mid.y, 0.001f)
-    }
-
-    @Test
     fun `zero tilt gives vertical axis aligned with spine divider`() {
         val axis = hingeAxis(0f)
         assertEquals(0f, axis.x, 0.001f)

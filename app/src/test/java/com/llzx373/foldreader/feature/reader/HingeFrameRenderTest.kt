@@ -331,16 +331,28 @@ class HingeFrameRenderTest {
     }
 
     @Test
-    fun `render single tap turn with tilted axis`() {
-        // 单页无中缝参照，保留按起手高度倾斜的轴（捏起页角的手感）
+    fun `render single tap turn with vertical axis`() {
+        // 单页转轴固定竖直、对齐页左缘：无弯曲时不同起手高度画面必须一致
         val front = makePage(w, h, bg, ink, "P2")
         val under = makePage(w, h, bg, ink, "P3")
-        val r = renderer(front, under)
         val sheet = singleHingeSheet(w.toFloat())
-        val startY = h * 0.2f
-        val tilt = hingeTilt(startY, h.toFloat())
         for (p in listOf(0.1f, 0.25f, 0.4f)) {
-            r.setProgress(p, sheet, startY, tilt, hingeSliverFade(p))
+            val top = renderer(front, under)
+            top.setProgress(p, sheet, h * 0.2f, 0f, hingeSliverFade(p))
+            top.bend = 0f
+            val bottom = renderer(front, under)
+            bottom.setProgress(p, sheet, h * 0.8f, 0f, hingeSliverFade(p))
+            bottom.bend = 0f
+            assertTrue(
+                "p=$p 时不同起手高度的单页画面应一致（竖直轴）",
+                diffRatio(top.render(), bottom.render()) < 0.0001,
+            )
+        }
+        // 渲染几帧供目检（含弯曲，轴仍竖直）
+        val r = renderer(front, under)
+        val startY = h * 0.2f
+        for (p in listOf(0.1f, 0.25f, 0.4f)) {
+            r.setProgress(p, sheet, startY, 0f, hingeSliverFade(p))
             r.bend = bendFor(p, sheet.width)
             save(r.render(), w, h, "hinge1_tap_%02d".format((p * 100).toInt()))
         }

@@ -29,8 +29,8 @@ import kotlin.math.sin
  * 几何的逆放（p 从 0.5 落回 0），由调用方交换 page/under 纹理使纸张正面
  * 始终显示翻入的那一页。
  *
- * 坐标：铰轴上一点 spine、轴方向 axis（单位向量；双页固定竖直对准书脊中缝，
- * 单页可按起手高度倾斜模拟捏起页角）、side=±1（纸张起手一侧）。
+ * 坐标：铰轴上一点 spine、轴方向 axis（单位向量，单页/双页均固定竖直——
+ * 双页对准书脊中缝，单页对齐页左缘）、side=±1（纸张起手一侧）。
  * n = perp(axis)·side 指向纸张；片元投影 delta = dot(frag - spine, n)，
  * eta = dot(frag - spine, axis)。纸张占据平铺距离 d ∈ [sheetG, sheetG+sheetW]
  * （sheetG = 轴到纸张内缘的距离，即铰链缝半宽；单页为 0），投影后
@@ -204,11 +204,10 @@ fun hingeCatchUpAnchor(anchorX: Float, traveledInFlipDir: Float, reach: Float): 
     return anchorX * t
 }
 
-/** 铰轴倾斜系数（仅单页使用）：起手越靠近页角，轴越斜，近端页角先起。 */
-fun hingeTilt(startY: Float, pageHeight: Float): Float =
-    ((pageHeight * 0.5f - startY) / pageHeight).coerceIn(-0.5f, 0.5f) * 0.35f
-
-/** 铰轴方向（单位向量）：竖直轴按 tilt 偏转；tilt=0 即对准书脊中缝的竖直轴。 */
+/**
+ * 铰轴方向（单位向量）：竖直轴按 tilt 偏转；单页/双页均传 0——转轴固定
+ * 竖直（双页对准书脊中缝分页线，单页对齐页左缘）。
+ */
 fun hingeAxis(tilt: Float): Offset {
     val d = Offset(tilt, 1f)
     return d / d.getDistance()

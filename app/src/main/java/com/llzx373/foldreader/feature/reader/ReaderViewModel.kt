@@ -58,6 +58,13 @@ data class PageSpread(
     val right: Page?,
 )
 
+/** spread 的分页几何指纹：UI 据此判断 spread 是否与当前屏幕版式一致（不一致 = 重分页进行中）。 */
+data class SpreadGeometry(
+    val dual: Boolean,
+    val pageWidthPx: Int,
+    val heightPx: Int,
+)
+
 data class ReaderUiState(
     val loading: Boolean = true,
     val error: String? = null,
@@ -74,6 +81,7 @@ data class ReaderUiState(
     val totalPages: Int = 0,
     val pageNumber: Int = 0,
     val inChapterFraction: Float = -1f,
+    val spreadGeometry: SpreadGeometry? = null,
 )
 
 private data class SpreadViewport(
@@ -119,6 +127,10 @@ class ReaderViewModel(
     private var lastSessionFlushTotalMs = 0L
     private var paginatorLeft: Paginator? = null
     private var dualActive = false
+    // 当前分页器产出版式：showSpread 落账时用它们盖章（而不是 uiState 现值），
+    // 避免重分页竞态把"旧版式 spread + 新版式指纹"发布出去
+    private var activeConfig: LayoutConfig? = null
+    private var activeGeom: SpreadGeometry? = null
     private val paginatorStore = PaginatorStore()
     private val pageMutex = Mutex()
     private val anchorOffset = MutableStateFlow(0L)
@@ -639,17 +651,26 @@ class ReaderViewModel(
                 } else {
                     v.leftWidthPx
                 }
+                // 重分页开始：旧分页的预取目标全部作废，防止被 turn() 消费后污染 uiState
+                _prevSpread.value = null
+                _nextSpread.value = null
+                val wasScrolling = _uiState.value.scrollPages.isNotEmpty()
                 val paginator = buildPaginator(source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity)
                 val t0 = System.nanoTime()
                 val spread = withContext(Dispatchers.Default) {
                     spreadFrom(paginator, v.dual, anchorOffset.value)
                 }
                 logPaginateTiming(t0)
+                val geom = SpreadGeometry(v.dual, pageWidthPx, v.heightPx)
                 pageMutex.withLock {
                     paginatorLeft = paginator
                     dualActive = v.dual
+                    activeConfig = config
+                    activeGeom = geom
                 }
-                publish(spread, config, v.dual)
+                publish(spread, config, v.dual, geom)
+                // 滚动模式：版式变化后按当前锚点用新分页器重建滚动页流
+                if (wasScrolling) enterScrollMode()
                 buildFullBounds(paginator)
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
@@ -807,7 +828,12 @@ class ReaderViewModel(
         }
         anchorOffset.value = spread.left.charStart
         trackSpeed(spread.left.charStart)
-        publish(spread, _uiState.value.layoutConfig, _uiState.value.dualPage)
+        publish(
+            spread,
+            activeConfig ?: _uiState.value.layoutConfig,
+            activeGeom?.dual ?: _uiState.value.dualPage,
+            activeGeom,
+        )
         pendingSave.value = spread.left.charStart
     }
 
@@ -999,7 +1025,7 @@ class ReaderViewModel(
         if (timer.isRunning) speedTracker.feed(offset, System.currentTimeMillis())
     }
 
-    private fun publish(spread: PageSpread, config: LayoutConfig, dual: Boolean) {
+    private fun publish(spread: PageSpread, config: LayoutConfig, dual: Boolean, geom: SpreadGeometry?) {
         _uiState.update {
             it.copy(
                 loading = false,
@@ -1007,6 +1033,7 @@ class ReaderViewModel(
                 spread = spread,
                 dualPage = dual,
                 layoutConfig = config,
+                spreadGeometry = geom,
                 progressFraction = progressPercentOf(spread.left.charStart, it.totalChars),
                 chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, spread.left.charStart))?.title.orEmpty(),
                 chapterIndex = chapterIndexAt(chapters, spread.left.charStart),
