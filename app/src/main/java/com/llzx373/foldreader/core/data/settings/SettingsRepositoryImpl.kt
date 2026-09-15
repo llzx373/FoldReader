@@ -34,7 +34,7 @@ class SettingsRepositoryImpl(
         val FONT_KEY = stringPreferencesKey("font_key")
         val DUAL_PAGE_MODE = stringPreferencesKey("dual_page_mode")
         val WIDE_SCREEN_DUAL_PAGE = booleanPreferencesKey("wide_screen_dual_page")
-        val DUAL_RIGHT_PAGE_DROP = booleanPreferencesKey("dual_right_page_drop")
+        val AVOID_CAMERA_CUTOUT = booleanPreferencesKey("avoid_camera_cutout")
         val PAGE_TURN_MODE = stringPreferencesKey("page_turn_mode")
         val PAGE_TURN_MODE_EXPLICIT = booleanPreferencesKey("page_turn_mode_explicit")
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
@@ -79,8 +79,8 @@ class SettingsRepositoryImpl(
                 dualPageMode = enumOrDefault(prefs[Keys.DUAL_PAGE_MODE], defaults.dualPageMode),
                 wideScreenDualPage = prefs[Keys.WIDE_SCREEN_DUAL_PAGE]
                     ?: defaults.wideScreenDualPage,
-                dualRightPageDrop = prefs[Keys.DUAL_RIGHT_PAGE_DROP]
-                    ?: defaults.dualRightPageDrop,
+                avoidCameraCutout = prefs[Keys.AVOID_CAMERA_CUTOUT]
+                    ?: defaults.avoidCameraCutout,
                 pageTurnMode = enumOrDefault(prefs[Keys.PAGE_TURN_MODE], defaults.pageTurnMode),
                 pageTurnModeExplicit = prefs[Keys.PAGE_TURN_MODE_EXPLICIT]
                     ?: defaults.pageTurnModeExplicit,
@@ -164,8 +164,8 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit { it[Keys.WIDE_SCREEN_DUAL_PAGE] = enabled }
     }
 
-    override suspend fun setDualRightPageDrop(enabled: Boolean) {
-        context.readingPreferencesStore.edit { it[Keys.DUAL_RIGHT_PAGE_DROP] = enabled }
+    override suspend fun setAvoidCameraCutout(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AVOID_CAMERA_CUTOUT] = enabled }
     }
 
     override suspend fun setTheme(theme: ReadingTheme) {

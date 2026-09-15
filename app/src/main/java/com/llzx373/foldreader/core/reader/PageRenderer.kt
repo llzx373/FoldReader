@@ -17,8 +17,8 @@ data class SpreadGeom(
     val rightInsetPx: Float,
     val innerPadPx: Float,
     val pageWidthPx: Float,
-    /** 双页右栏顶端额外下移量（避让摄像头），与分页器奇数页减容同步；0 为关闭。 */
-    val rightDropPx: Float = 0f,
+    /** 双页右页顶端额外下移量（摄像头开孔规避），与分页器奇数序页减容同步；0 为关闭。 */
+    val rightTopPadPx: Float = 0f,
 )
 
 /**
@@ -177,7 +177,7 @@ fun renderSpreadToBitmap(
                 widthPx = geom.pageWidthPx,
                 innerPaddingPx = geom.innerPadPx,
                 innerOnRight = false,
-                extraTopPadPx = geom.rightDropPx,
+                extraTopPadPx = geom.rightTopPadPx,
                 highlights = rightHighlights,
             )
             canvas.restoreToCount(rightState)

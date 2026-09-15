@@ -9,9 +9,20 @@ data class PaginatorKey(
     val density: Float,
     val scaledDensity: Float,
     val config: LayoutConfig,
-    /** 双页右栏避让：奇数页（跨页右页）减容一行。参与磁盘缓存键。 */
-    val rightDrop: Boolean = false,
+    /** 摄像头开孔规避（参与磁盘缓存键）。 */
+    val avoidance: PageAvoidance = PageAvoidance(),
 )
+
+/**
+ * 摄像头开孔规避：oddTopLines = 奇数序页（跨页右页）顶部预留行数，
+ * evenBottomLines = 偶数序页（跨页左页）底部预留行数。预留行所在区域留白。
+ */
+data class PageAvoidance(
+    val oddTopLines: Int = 0,
+    val evenBottomLines: Int = 0,
+) {
+    val active: Boolean get() = oddTopLines > 0 || evenBottomLines > 0
+}
 
 class PaginatorStore(private val maxPagesPerBook: Int = 64) {
     private val caches = HashMap<PaginatorKey, PageCache<Long, Page>>()
@@ -37,8 +48,8 @@ class Paginator(
     private val cache: PageCache<Long, Page> = PageCache(64),
     private val diskCache: PageDiskCache? = null,
     private val diskKey: PaginatorKey? = null,
-    /** 双页右栏避让：奇数序页（跨页右页）可用高度减一行，配合渲染下移避开摄像头。 */
-    val rightDrop: Boolean = false,
+    /** 摄像头开孔规避：奇数序页顶部/偶数序页底部按行减容，配合渲染偏移避开开孔。 */
+    val avoidance: PageAvoidance = PageAvoidance(),
 ) {
     private val bounds = mutableListOf(0L)
     private val boundsLock = Any()
@@ -137,10 +148,15 @@ class Paginator(
         cache.get(start) ?: paginateFrom(start).also { cache.put(start, it) }
 
     private suspend fun paginateFrom(start: Long): Page {
-        // 奇数序页（双页跨页的右页）减容一行，避让摄像头；页序以 bounds 中位置为准，
-        // 边界从 0 顺序推进，奇偶对同一边界恒定
-        val pageAvailHeightPx = if (rightDrop && pageIndexOf(start) % 2 == 1) {
-            (availHeightPx - lineHeightPx).coerceAtLeast(lineHeightPx)
+        // 摄像头开孔规避：奇数序页顶部 / 偶数序页底部按预留行数减容。
+        // 页序以 bounds 中位置为准，边界从 0 顺序推进，奇偶对同一边界恒定
+        val reserveLines = if (avoidance.active) {
+            if (pageIndexOf(start) % 2 == 1) avoidance.oddTopLines else avoidance.evenBottomLines
+        } else {
+            0
+        }
+        val pageAvailHeightPx = if (reserveLines > 0) {
+            (availHeightPx - reserveLines * lineHeightPx).coerceAtLeast(lineHeightPx)
         } else {
             availHeightPx
         }

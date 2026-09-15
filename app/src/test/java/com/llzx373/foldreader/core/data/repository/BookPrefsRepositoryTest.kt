@@ -228,7 +228,7 @@ class BookPrefsRepositoryTest {
         override suspend fun setFontKey(fontKey: String) = Unit
         override suspend fun setDualPageMode(mode: DualPageMode) = Unit
         override suspend fun setWideScreenDualPage(enabled: Boolean) = Unit
-        override suspend fun setDualRightPageDrop(enabled: Boolean) = Unit
+        override suspend fun setAvoidCameraCutout(enabled: Boolean) = Unit
         override suspend fun setPageTurnMode(mode: PageTurnMode) = Unit
         override suspend fun setPageTurnModeExplicit(explicit: Boolean) = Unit
         override suspend fun setPageTurnHotspotRatio(ratio: Float) = Unit

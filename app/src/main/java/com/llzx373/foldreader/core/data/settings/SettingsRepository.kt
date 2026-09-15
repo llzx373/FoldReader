@@ -17,7 +17,7 @@ interface SettingsRepository {
     suspend fun setFontKey(fontKey: String)
     suspend fun setDualPageMode(mode: DualPageMode)
     suspend fun setWideScreenDualPage(enabled: Boolean)
-    suspend fun setDualRightPageDrop(enabled: Boolean)
+    suspend fun setAvoidCameraCutout(enabled: Boolean)
     suspend fun setPageTurnMode(mode: PageTurnMode)
     suspend fun setPageTurnModeExplicit(explicit: Boolean)
     suspend fun setPageTurnHotspotRatio(ratio: Float)

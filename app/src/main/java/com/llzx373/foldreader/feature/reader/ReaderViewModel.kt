@@ -91,6 +91,9 @@ private data class SpreadViewport(
     val heightPx: Int,
     val density: Float,
     val scaledDensity: Float,
+    /** 摄像头开孔规避（UI 侧按 displayCutout 实算；双页翻页模式外恒为空）。 */
+    val avoidance: com.llzx373.foldreader.core.reader.PageAvoidance =
+        com.llzx373.foldreader.core.reader.PageAvoidance(),
 )
 
 @OptIn(FlowPreview::class)
@@ -639,11 +642,7 @@ class ReaderViewModel(
                         a.paragraphSpacingEm == b.paragraphSpacingEm &&
                         a.letterSpacingEm == b.letterSpacingEm &&
                         a.fontKey == b.fontKey &&
-                        a.autoIndentEnabled == b.autoIndentEnabled &&
-                        // 翻页模式影响"双页右栏避让"是否生效（滚动模式不分页避让）
-                        a.pageTurnMode == b.pageTurnMode &&
-                        a.pageTurnModeExplicit == b.pageTurnModeExplicit &&
-                        a.dualRightPageDrop == b.dualRightPageDrop
+                        a.autoIndentEnabled == b.autoIndentEnabled
                 },
         ) { v, _, p -> v to p }.collectLatest { (v, p) ->
             val source = content ?: return@collectLatest
@@ -658,10 +657,9 @@ class ReaderViewModel(
                 _prevSpread.value = null
                 _nextSpread.value = null
                 val wasScrolling = _uiState.value.scrollPages.isNotEmpty()
-                // 右栏避让仅在翻页式双页生效：滚动模式内容连续滚动，避让无意义
-                val rawMode = effectivePageTurnMode(p.pageTurnMode, p.pageTurnModeExplicit, v.dual)
-                val rightDrop = p.dualRightPageDrop && v.dual && rawMode != PageTurnMode.SCROLL
-                val paginator = buildPaginator(source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity, rightDrop)
+                val paginator = buildPaginator(
+                    source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity, v.avoidance,
+                )
                 val t0 = System.nanoTime()
                 val spread = withContext(Dispatchers.Default) {
                     spreadFrom(paginator, v.dual, anchorOffset.value)
@@ -711,7 +709,8 @@ class ReaderViewModel(
         heightPx: Int,
         density: Float,
         scaledDensity: Float,
-        rightDrop: Boolean = false,
+        avoidance: com.llzx373.foldreader.core.reader.PageAvoidance =
+            com.llzx373.foldreader.core.reader.PageAvoidance(),
     ): Paginator {
         val capped = config.copy(
             maxLineChars = capMaxLineChars(
@@ -721,7 +720,7 @@ class ReaderViewModel(
                 fontSizePx = config.fontSizeSp * scaledDensity,
             ),
         )
-        val key = PaginatorKey(bookId, widthPx, heightPx, density, scaledDensity, capped, rightDrop)
+        val key = PaginatorKey(bookId, widthPx, heightPx, density, scaledDensity, capped, avoidance)
         return Paginator(
             content = source,
             config = capped,
@@ -733,7 +732,7 @@ class ReaderViewModel(
             cache = paginatorStore.getOrCreate(key),
             diskCache = pageDiskCache,
             diskKey = key,
-            rightDrop = rightDrop,
+            avoidance = avoidance,
         )
     }
 
@@ -775,9 +774,9 @@ class ReaderViewModel(
         anchor: Long,
     ): PageSpread {
         var leftPage = paginator.pageAt(anchor)
-        // 右栏避让开启时奇数页减容：跨页左页必须落在偶数序页上，否则左右页的
-        // 减容/下移会互换（跳转、进度恢复等任意锚点都可能落在奇数页）
-        if (dual && paginator.rightDrop && paginator.pageIndexOf(leftPage.charStart) % 2 == 1) {
+        // 摄像头规避开启时页容量按奇偶不对称：跨页左页必须落在偶数序页上，
+        // 否则左右页的预留会互换（跳转、进度恢复等任意锚点都可能落在奇数页）
+        if (dual && paginator.avoidance.active && paginator.pageIndexOf(leftPage.charStart) % 2 == 1) {
             paginator.pageBefore(leftPage.charStart)?.let { leftPage = it }
         }
         val total = content?.charCount ?: 0L
@@ -802,6 +801,8 @@ class ReaderViewModel(
         heightPx: Int,
         density: Float,
         scaledDensity: Float,
+        avoidance: com.llzx373.foldreader.core.reader.PageAvoidance =
+            com.llzx373.foldreader.core.reader.PageAvoidance(),
     ) {
         if (leftWidthPx <= 0 || heightPx <= 0 || (dual && rightWidthPx <= 0)) {
             android.util.Log.w(
@@ -810,7 +811,9 @@ class ReaderViewModel(
             )
             return
         }
-        viewport.value = SpreadViewport(dual, leftWidthPx, rightWidthPx, heightPx, density, scaledDensity)
+        viewport.value = SpreadViewport(
+            dual, leftWidthPx, rightWidthPx, heightPx, density, scaledDensity, avoidance,
+        )
     }
 
     suspend fun adjacentSpread(forward: Boolean): PageSpread? {

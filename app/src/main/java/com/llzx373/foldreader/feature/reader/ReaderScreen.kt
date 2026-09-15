@@ -95,6 +95,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -104,6 +105,7 @@ import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.core.reader.SpreadGeom
 import com.llzx373.foldreader.feature.bookshelf.BookCover
 import com.llzx373.foldreader.ui.EmptyState
@@ -247,15 +249,40 @@ fun ReaderScreen(
     // 几何不匹配时禁止用新版式画旧 spread（正文是 Canvas 手绘，字距按绘制宽度算，会爆开/重叠）
     val geomReady = uiState.spreadGeometry == currentGeom
 
-    // 双页右栏避让摄像头：整体下移一行（与分页器奇数页减容同步；滚动模式不适用）
-    val rightDropPx = if (spreadDual && prefs.dualRightPageDrop) {
-        val cfg = uiState.layoutConfig
-        cfg.fontSizeSp * density.density * density.fontScale * cfg.lineSpacingMultiplier
-    } else {
-        0f
+    // 摄像头开孔规避：双页翻页模式下按 WindowInsets.displayCutout 实算——开孔压住
+    // 右页顶部则右页（奇数序页）顶部让位，压住左页底部则左页（偶数序页）底部让位。
+    // 经 setViewports 触发重分页，与分页器减容严格同源；滚动/单页模式不适用
+    val avoidLineHeightPx = uiState.layoutConfig.let {
+        it.fontSizeSp * density.density * density.fontScale * it.lineSpacingMultiplier
     }
+    val view = LocalView.current
+    val cutoutRects = remember(view) {
+        ViewCompat.getRootWindowInsets(view)?.displayCutout?.boundingRects.orEmpty()
+            .map { ContentRect(it.left.toFloat(), it.top.toFloat(), (it.right - it.left).toFloat(), (it.bottom - it.top).toFloat()) }
+    }
+    val pageAvoidance = if (dual && prefs.avoidCameraCutout) {
+        cameraAvoidanceLines(
+            cutouts = cutoutRects,
+            leftPage = ContentRect(
+                left = windowOffsetX + contentRect.left + leftInsetPx,
+                top = windowOffsetY + contentRect.top,
+                width = spreadPageWidthPx,
+                height = contentRect.height,
+            ),
+            rightPage = ContentRect(
+                left = windowOffsetX + contentRect.left + splitRightPx + rightInsetPx,
+                top = windowOffsetY + contentRect.top,
+                width = spreadPageWidthPx,
+                height = contentRect.height,
+            ),
+            lineHeightPx = avoidLineHeightPx,
+        )
+    } else {
+        PageAvoidance()
+    }
+    val rightTopPadPx = pageAvoidance.oddTopLines * avoidLineHeightPx
 
-    LaunchedEffect(prefsLoaded, pageDual, size, hingeLocal, splitLeftPx, splitRightPx, contentRect, density.density, density.fontScale) {
+    LaunchedEffect(prefsLoaded, pageDual, size, hingeLocal, splitLeftPx, splitRightPx, contentRect, density.density, density.fontScale, pageAvoidance) {
         if (!prefsLoaded) return@LaunchedEffect
         if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
         if (pageDual) {
@@ -266,6 +293,7 @@ fun ReaderScreen(
                 heightPx = size.height,
                 density = density.density,
                 scaledDensity = density.density * density.fontScale,
+                avoidance = pageAvoidance,
             )
         } else {
             if (contentRect.width <= 0f || contentRect.height <= 0f) return@LaunchedEffect
@@ -679,7 +707,7 @@ fun ReaderScreen(
     LaunchedEffect(
         spreadDual, splitLeftPx, splitRightPx, leftInsetPx, rightInsetPx,
         innerPadPx, spreadPageWidthPx, contentRect, colors, uiState.layoutConfig,
-        density.density, density.fontScale, highlightVersion, rightDropPx,
+        density.density, density.fontScale, highlightVersion, rightTopPadPx,
     ) {
         val bitmapWidthPx = contentRect.width.roundToInt()
         val bitmapHeightPx = contentRect.height.roundToInt()
@@ -694,7 +722,7 @@ fun ReaderScreen(
                     rightInsetPx = rightInsetPx,
                     innerPadPx = innerPadPx,
                     pageWidthPx = spreadPageWidthPx,
-                    rightDropPx = rightDropPx,
+                    rightTopPadPx = rightTopPadPx,
                 ),
                 colors = colors,
                 density = density.density,
@@ -1232,7 +1260,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
-                                rightDropPx = rightDropPx,
+                                rightTopPadPx = rightTopPadPx,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             SpreadContent(
@@ -1245,7 +1273,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
-                                rightDropPx = rightDropPx,
+                                rightTopPadPx = rightTopPadPx,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
@@ -1268,7 +1296,7 @@ fun ReaderScreen(
                             rightDp = rightDp,
                             innerPadPx = innerPadPx,
                             pageWidthDp = pageWidthDp,
-                            rightDropPx = rightDropPx,
+                            rightTopPadPx = rightTopPadPx,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer { translationY = -autoScrollY },
@@ -1291,7 +1319,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
-                                rightDropPx = rightDropPx,
+                                rightTopPadPx = rightTopPadPx,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer { translationX = animX.value },
@@ -1785,7 +1813,7 @@ private fun SpreadContent(
     innerPadPx: Float,
     pageWidthDp: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
-    rightDropPx: Float = 0f,
+    rightTopPadPx: Float = 0f,
     leftHighlights: List<TextRangeSpan> = emptyList(),
     rightHighlights: List<TextRangeSpan> = emptyList(),
     selection: SelectionUi? = null,
@@ -1847,7 +1875,7 @@ private fun SpreadContent(
                     modifier = Modifier.width(pageWidthDp).fillMaxHeight(),
                     innerPaddingPx = innerPadPx,
                     innerOnRight = false,
-                    extraTopPadPx = rightDropPx,
+                    extraTopPadPx = rightTopPadPx,
                     highlights = rightHighlights,
                     selection = selectionSpanFor(right),
                     onGeometry = onRightGeometry,

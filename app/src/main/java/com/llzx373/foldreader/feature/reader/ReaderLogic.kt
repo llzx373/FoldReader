@@ -8,6 +8,7 @@ import com.llzx373.foldreader.core.foldable.HingeOrientation
 import com.llzx373.foldreader.core.foldable.Posture
 import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.reader.PageAvoidance
 
 enum class TapZone { PREVIOUS, MENU, NEXT }
 
@@ -33,6 +34,41 @@ data class ContentRect(
     val width: Float,
     val height: Float,
 )
+
+private fun rectsOverlap(a: ContentRect, b: ContentRect): Boolean =
+    a.left < b.left + b.width && a.left + a.width > b.left &&
+        a.top < b.top + b.height && a.top + a.height > b.top
+
+/**
+ * 摄像头开孔规避行数（双页翻页模式，全部窗口坐标）：开孔与右页上半部分相交 →
+ * 右页（奇数序页）顶部预留足够行数让开开孔；与左页下半部分相交 → 左页（偶数序页）
+ * 底部预留。行数按完整覆盖开孔计算，上限 8 行防御异常 inset 数据。
+ */
+fun cameraAvoidanceLines(
+    cutouts: List<ContentRect>,
+    leftPage: ContentRect,
+    rightPage: ContentRect,
+    lineHeightPx: Float,
+): PageAvoidance {
+    if (lineHeightPx <= 0f) return PageAvoidance()
+    var oddTop = 0
+    var evenBottom = 0
+    for (c in cutouts) {
+        val cCenterY = c.top + c.height / 2f
+        if (rectsOverlap(c, rightPage) && cCenterY < rightPage.top + rightPage.height / 2f) {
+            val lines = kotlin.math.ceil((c.top + c.height - rightPage.top) / lineHeightPx).toInt()
+            oddTop = maxOf(oddTop, lines)
+        }
+        if (rectsOverlap(c, leftPage) && cCenterY > leftPage.top + leftPage.height / 2f) {
+            val lines = kotlin.math.ceil((leftPage.top + leftPage.height - c.top) / lineHeightPx).toInt()
+            evenBottom = maxOf(evenBottom, lines)
+        }
+    }
+    return PageAvoidance(
+        oddTopLines = oddTop.coerceIn(0, 8),
+        evenBottomLines = evenBottom.coerceIn(0, 8),
+    )
+}
 
 data class TabletopLayout(
     val content: ContentRect,

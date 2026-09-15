@@ -65,7 +65,7 @@ class PaginatorTest {
         widthPx: Int = 200,
         heightPx: Int = 100,
         maxLineChars: Int = 40,
-        rightDrop: Boolean = false,
+        avoidance: PageAvoidance = PageAvoidance(),
     ) = Paginator(
         content = StringBookContent(text),
         config = LayoutConfig(
@@ -84,7 +84,7 @@ class PaginatorTest {
         heightPx = heightPx,
         density = 1f,
         scaledDensity = 1f,
-        rightDrop = rightDrop,
+        avoidance = avoidance,
     )
 
     private fun paginateAll(p: Paginator, charCount: Long): List<Page> = runBlocking {
@@ -108,10 +108,10 @@ class PaginatorTest {
     }
 
     @Test
-    fun `right drop reduces odd page capacity by one line`() = runBlocking {
-        // 单段长文：行高 10px、页高 100px → 满页 10 行；开启右栏避让后奇数页 9 行
+    fun `camera avoidance reduces odd page capacity by one line`() = runBlocking {
+        // 单段长文：行高 10px、页高 100px → 满页 10 行；奇数页顶部预留 1 行后奇数页 9 行
         val text = "字".repeat(2000)
-        val pages = paginateAll(paginator(text, rightDrop = true), text.length.toLong())
+        val pages = paginateAll(paginator(text, avoidance = PageAvoidance(oddTopLines = 1)), text.length.toLong())
         assertTrue(pages.size > 3)
         for ((i, page) in pages.withIndex()) {
             if (page.charEnd >= text.length.toLong()) continue // 末页允许不满
@@ -125,9 +125,9 @@ class PaginatorTest {
     }
 
     @Test
-    fun `right drop off keeps uniform capacity`() = runBlocking {
+    fun `no avoidance keeps uniform capacity`() = runBlocking {
         val text = "字".repeat(2000)
-        val pages = paginateAll(paginator(text, rightDrop = false), text.length.toLong())
+        val pages = paginateAll(paginator(text), text.length.toLong())
         assertTrue(pages.size > 3)
         for (page in pages) {
             if (page.charEnd >= text.length.toLong()) continue

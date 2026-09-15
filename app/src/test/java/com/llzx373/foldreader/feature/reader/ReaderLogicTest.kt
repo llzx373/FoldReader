@@ -8,6 +8,7 @@ import com.llzx373.foldreader.core.foldable.HingeOrientation
 import com.llzx373.foldreader.core.foldable.Posture
 import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.reader.PageAvoidance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -248,5 +249,48 @@ class ReaderLogicTest {
         assertEquals(9, capMaxLineChars(40, 240f, 60f, 20f))
         assertEquals(18, capMaxLineChars(18, 2000f, 0f, 20f))
         assertEquals(1, capMaxLineChars(40, 10f, 0f, 20f))
+    }
+
+    private val leftPage = ContentRect(0f, 0f, 500f, 800f)
+    private val rightPage = ContentRect(500f, 0f, 500f, 800f)
+
+    @Test
+    fun `cutout on right page top reserves odd top lines`() {
+        // 开孔底缘距页顶 45px、行高 20px → 预留 ceil(45/20)=3 行
+        val cutout = ContentRect(700f, 0f, 60f, 45f)
+        val a = cameraAvoidanceLines(listOf(cutout), leftPage, rightPage, lineHeightPx = 20f)
+        assertEquals(3, a.oddTopLines)
+        assertEquals(0, a.evenBottomLines)
+        assertTrue(a.active)
+    }
+
+    @Test
+    fun `cutout on left page bottom reserves even bottom lines`() {
+        // 开孔顶缘距页底 40px、行高 20px → 预留 2 行
+        val cutout = ContentRect(50f, 760f, 60f, 40f)
+        val a = cameraAvoidanceLines(listOf(cutout), leftPage, rightPage, lineHeightPx = 20f)
+        assertEquals(0, a.oddTopLines)
+        assertEquals(2, a.evenBottomLines)
+    }
+
+    @Test
+    fun `cutout outside pages or wrong half is ignored`() {
+        val farAway = ContentRect(2000f, 2000f, 60f, 60f)
+        val rightBottom = ContentRect(700f, 700f, 60f, 60f) // 右页下半不算顶部遮挡
+        val leftTop = ContentRect(50f, 10f, 60f, 60f) // 左页上半不算底部遮挡
+        for (cutout in listOf(farAway, rightBottom, leftTop)) {
+            val a = cameraAvoidanceLines(listOf(cutout), leftPage, rightPage, lineHeightPx = 20f)
+            assertFalse(a.active)
+            assertEquals(PageAvoidance(), a)
+        }
+    }
+
+    @Test
+    fun `avoidance lines clamp to 8 and empty on zero line height`() {
+        val huge = ContentRect(700f, 0f, 60f, 400f)
+        val a = cameraAvoidanceLines(listOf(huge), leftPage, rightPage, lineHeightPx = 20f)
+        assertEquals(8, a.oddTopLines)
+        val zero = cameraAvoidanceLines(listOf(huge), leftPage, rightPage, lineHeightPx = 0f)
+        assertEquals(PageAvoidance(), zero)
     }
 }
