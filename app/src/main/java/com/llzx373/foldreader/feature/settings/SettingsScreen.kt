@@ -222,6 +222,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 },
             )
             SwitchSetting("宽屏双页（无铰链设备）", prefs.wideScreenDualPage, viewModel::updateWideScreenDualPage)
+            SwitchSetting("双页右栏下移一行（避让摄像头）", prefs.dualRightPageDrop, viewModel::updateDualRightPageDrop)
             SegmentedSetting(
                 label = "翻页方式",
                 options = listOf("覆盖", "无动画", "上下滚动", "仿真"),

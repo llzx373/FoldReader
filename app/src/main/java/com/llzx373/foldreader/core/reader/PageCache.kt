@@ -64,6 +64,7 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
                 out.writeInt(key.heightPx)
                 out.writeFloat(key.density)
                 out.writeFloat(key.scaledDensity)
+                out.writeBoolean(key.rightDrop)
                 out.writeUTF(key.config.diskKeyString())
                 out.writeLong(charCount)
                 out.writeInt(bounds.size)
@@ -86,6 +87,7 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
             if (inp.readInt() != key.heightPx) return null
             if (inp.readFloat() != key.density) return null
             if (inp.readFloat() != key.scaledDensity) return null
+            if (inp.readBoolean() != key.rightDrop) return null
             if (inp.readUTF() != key.config.diskKeyString()) return null
             if (inp.readLong() != charCount) return null
             val count = inp.readInt()
@@ -103,6 +105,7 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
         val hash = (
             listOf(
                 key.bookId, key.widthPx, key.heightPx, key.density, key.scaledDensity,
+                key.rightDrop,
             ).joinToString("|") + "|" + key.config.diskKeyString()
             ).hashCode()
         return File(dir, "bounds_${key.bookId}_$hash.bin")
@@ -110,6 +113,6 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
 
     private companion object {
         val MAGIC = byteArrayOf('F'.code.toByte(), 'R'.code.toByte(), 'P'.code.toByte(), 'B'.code.toByte())
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

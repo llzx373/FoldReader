@@ -17,14 +17,8 @@ data class SpreadGeom(
     val rightInsetPx: Float,
     val innerPadPx: Float,
     val pageWidthPx: Float,
-)
-
-/** 页眉页脚文本（抓取时刻值；null/空串不绘制）。 */
-data class HeaderFooterTexts(
-    val topStart: String? = null,
-    val topEnd: String? = null,
-    val bottomStart: String? = null,
-    val bottomEnd: String? = null,
+    /** 双页右栏顶端额外下移量（避让摄像头），与分页器奇数页减容同步；0 为关闭。 */
+    val rightDropPx: Float = 0f,
 )
 
 /**
@@ -41,6 +35,7 @@ fun drawPageInto(
     widthPx: Float,
     innerPaddingPx: Float = 0f,
     innerOnRight: Boolean = true,
+    extraTopPadPx: Float = 0f,
     highlights: List<TextRangeSpan> = emptyList(),
     selection: TextRangeSpan? = null,
 ): List<LineBox> {
@@ -48,7 +43,7 @@ fun drawPageInto(
     val lineHeightPx = fontSizePx * config.lineSpacingMultiplier
     val paragraphSpacingPx = fontSizePx * config.paragraphSpacingEm
     val indentPx = if (config.autoIndentEnabled) config.firstLineIndentChars * fontSizePx else 0f
-    val topPx = config.marginTopDp * density
+    val topPx = config.marginTopDp * density + extraTopPadPx
     val leftPad = page.paddingLeft + if (innerOnRight) 0f else innerPaddingPx
     val rightPad = page.paddingRight + if (innerOnRight) innerPaddingPx else 0f
     val textWidthPx = widthPx - leftPad - rightPad
@@ -122,15 +117,15 @@ fun drawPageInto(
 }
 
 /**
- * 把整个对页（双页含铰链空隙与居中 inset；单页即整页）连同页眉页脚渲染成位图，
- * 供翻页动画按一张完整的纸卷曲。位图格式 RGB_565。
+ * 把整个对页（双页含铰链空隙与居中 inset；单页即整页）渲染成位图，供翻页动画
+ * 按一张完整的纸翻折。页眉页脚不烘进位图（固定悬浮层，由 Compose 叠加层绘制）。
+ * 位图格式 RGB_565。
  */
 fun renderSpreadToBitmap(
     spread: PageSpread,
     config: LayoutConfig,
     colors: ReaderColors,
     geom: SpreadGeom,
-    headerFooter: HeaderFooterTexts,
     leftHighlights: List<TextRangeSpan>,
     rightHighlights: List<TextRangeSpan>,
     density: Float,
@@ -182,47 +177,12 @@ fun renderSpreadToBitmap(
                 widthPx = geom.pageWidthPx,
                 innerPaddingPx = geom.innerPadPx,
                 innerOnRight = false,
+                extraTopPadPx = geom.rightDropPx,
                 highlights = rightHighlights,
             )
             canvas.restoreToCount(rightState)
         }
     }
 
-    drawHeaderFooter(canvas, headerFooter, colors, density, scaledDensity, widthPx, heightPx)
     return bitmap
-}
-
-/** 页眉页脚：复刻 CornerLabel/ReaderHeader/ReaderFooter 样式（labelSmall、alpha 0.55、12dp/4dp padding）。 */
-private fun drawHeaderFooter(
-    canvas: android.graphics.Canvas,
-    texts: HeaderFooterTexts,
-    colors: ReaderColors,
-    density: Float,
-    scaledDensity: Float,
-    widthPx: Int,
-    heightPx: Int,
-) {
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 11f * scaledDensity
-        color = colors.text.copy(alpha = 0.55f).toArgb()
-    }
-    val padH = 12f * density
-    val padV = 4f * density
-    val topBaseline = padV - paint.ascent()
-    val bottomBaseline = heightPx - padV - paint.descent()
-
-    fun drawStart(text: String?, baseline: Float) {
-        if (!text.isNullOrEmpty()) canvas.drawText(text, padH, baseline, paint)
-    }
-
-    fun drawEnd(text: String?, baseline: Float) {
-        if (!text.isNullOrEmpty()) {
-            canvas.drawText(text, widthPx - padH - paint.measureText(text), baseline, paint)
-        }
-    }
-
-    drawStart(texts.topStart, topBaseline)
-    drawEnd(texts.topEnd, topBaseline)
-    drawStart(texts.bottomStart, bottomBaseline)
-    drawEnd(texts.bottomEnd, bottomBaseline)
 }

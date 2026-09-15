@@ -262,6 +262,7 @@ class BackupCodec(
         .put("fontKey", p.fontKey)
         .put("dualPageMode", p.dualPageMode.name)
         .put("wideScreenDualPage", p.wideScreenDualPage)
+        .put("dualRightPageDrop", p.dualRightPageDrop)
         .put("pageTurnMode", p.pageTurnMode.name)
         .put("pageTurnModeExplicit", p.pageTurnModeExplicit)
         .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
@@ -328,6 +329,9 @@ class BackupCodec(
         }
         if (json.has("wideScreenDualPage")) {
             settingsRepository.setWideScreenDualPage(json.optBoolean("wideScreenDualPage"))
+        }
+        if (json.has("dualRightPageDrop")) {
+            settingsRepository.setDualRightPageDrop(json.optBoolean("dualRightPageDrop"))
         }
         if (json.has("pageTurnMode")) {
             settingsRepository.setPageTurnMode(

@@ -35,6 +35,7 @@ fun PageView(
     modifier: Modifier = Modifier,
     innerPaddingPx: Float = 0f,
     innerOnRight: Boolean = true,
+    extraTopPadPx: Float = 0f,
     highlights: List<TextRangeSpan> = emptyList(),
     selection: TextRangeSpan? = null,
     onGeometry: (List<LineBox>) -> Unit = {},
@@ -52,6 +53,7 @@ fun PageView(
             widthPx = size.width,
             innerPaddingPx = innerPaddingPx,
             innerOnRight = innerOnRight,
+            extraTopPadPx = extraTopPadPx,
             highlights = highlights,
             selection = selection,
         )

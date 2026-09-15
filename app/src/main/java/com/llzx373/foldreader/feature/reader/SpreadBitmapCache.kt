@@ -2,7 +2,6 @@ package com.llzx373.foldreader.feature.reader
 
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.toArgb
-import com.llzx373.foldreader.core.reader.HeaderFooterTexts
 import com.llzx373.foldreader.core.reader.LayoutConfig
 import com.llzx373.foldreader.core.reader.SpreadGeom
 
@@ -113,7 +112,7 @@ class SpreadBitmapCache<V>(
     }
 }
 
-/** UI 侧供给的渲染上下文：几何/主题/密度 + 抓取时刻的页眉页脚文本与高亮。 */
+/** UI 侧供给的渲染上下文：几何/主题/密度 + 抓取时刻的高亮。 */
 class CurlRenderContext(
     val geom: SpreadGeom,
     val colors: ReaderColors,
@@ -122,7 +121,6 @@ class CurlRenderContext(
     val widthPx: Int,
     val heightPx: Int,
     val contentVersion: Int = 0,
-    val texts: () -> HeaderFooterTexts,
     val highlights: (PageSpread) -> Pair<List<TextRangeSpan>, List<TextRangeSpan>>,
 ) {
     fun keyFor(spread: PageSpread, config: LayoutConfig): SpreadBitmapKey = SpreadBitmapKey(
@@ -138,29 +136,5 @@ class CurlRenderContext(
         density = density,
         scaledDensity = scaledDensity,
         contentVersion = contentVersion,
-    )
-}
-
-/** 页眉页脚文本装配：与静止态 Compose 叠加层同一套可见性规则。 */
-fun headerFooterTexts(
-    dual: Boolean,
-    chapterTitle: String?,
-    bookTitle: String,
-    pageNumberLabel: String?,
-    progressText: String?,
-    batteryText: String?,
-    timeText: String?,
-): HeaderFooterTexts {
-    val footerStart = listOfNotNull(pageNumberLabel, progressText)
-        .joinToString("  ")
-        .ifEmpty { null }
-    val footerEnd = listOfNotNull(batteryText, timeText)
-        .joinToString("  ")
-        .ifEmpty { null }
-    return HeaderFooterTexts(
-        topStart = chapterTitle,
-        topEnd = if (dual) bookTitle else null,
-        bottomStart = footerStart,
-        bottomEnd = footerEnd,
     )
 }

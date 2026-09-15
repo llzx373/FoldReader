@@ -91,6 +91,8 @@ class SettingsViewModel(
     fun updateDualPageMode(mode: DualPageMode) = launch { settingsRepository.setDualPageMode(mode) }
     fun updateWideScreenDualPage(enabled: Boolean) =
         launch { settingsRepository.setWideScreenDualPage(enabled) }
+    fun updateDualRightPageDrop(enabled: Boolean) =
+        launch { settingsRepository.setDualRightPageDrop(enabled) }
     fun updateHotspotRatio(ratio: Float) = launch { settingsRepository.setPageTurnHotspotRatio(ratio) }
     fun updateVolumeKeyPaging(enabled: Boolean) =
         launch { settingsRepository.setVolumeKeyPagingEnabled(enabled) }

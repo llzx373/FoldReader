@@ -9,6 +9,8 @@ data class PaginatorKey(
     val density: Float,
     val scaledDensity: Float,
     val config: LayoutConfig,
+    /** 双页右栏避让：奇数页（跨页右页）减容一行。参与磁盘缓存键。 */
+    val rightDrop: Boolean = false,
 )
 
 class PaginatorStore(private val maxPagesPerBook: Int = 64) {
@@ -35,6 +37,8 @@ class Paginator(
     private val cache: PageCache<Long, Page> = PageCache(64),
     private val diskCache: PageDiskCache? = null,
     private val diskKey: PaginatorKey? = null,
+    /** 双页右栏避让：奇数序页（跨页右页）可用高度减一行，配合渲染下移避开摄像头。 */
+    val rightDrop: Boolean = false,
 ) {
     private val bounds = mutableListOf(0L)
     private val boundsLock = Any()
@@ -133,13 +137,20 @@ class Paginator(
         cache.get(start) ?: paginateFrom(start).also { cache.put(start, it) }
 
     private suspend fun paginateFrom(start: Long): Page {
+        // 奇数序页（双页跨页的右页）减容一行，避让摄像头；页序以 bounds 中位置为准，
+        // 边界从 0 顺序推进，奇偶对同一边界恒定
+        val pageAvailHeightPx = if (rightDrop && pageIndexOf(start) % 2 == 1) {
+            (availHeightPx - lineHeightPx).coerceAtLeast(lineHeightPx)
+        } else {
+            availHeightPx
+        }
         val producer = LineProducer(start)
         val lines = mutableListOf<PageLine>()
         var used = 0f
         while (true) {
             val line = producer.next() ?: break
             val extra = if (line.isParagraphStart && lines.isNotEmpty()) paragraphSpacingPx else 0f
-            if (lines.isNotEmpty() && used + extra + lineHeightPx > availHeightPx) {
+            if (lines.isNotEmpty() && used + extra + lineHeightPx > pageAvailHeightPx) {
                 producer.pushBack(line)
                 break
             }

@@ -247,6 +247,14 @@ fun ReaderScreen(
     // 几何不匹配时禁止用新版式画旧 spread（正文是 Canvas 手绘，字距按绘制宽度算，会爆开/重叠）
     val geomReady = uiState.spreadGeometry == currentGeom
 
+    // 双页右栏避让摄像头：整体下移一行（与分页器奇数页减容同步；滚动模式不适用）
+    val rightDropPx = if (spreadDual && prefs.dualRightPageDrop) {
+        val cfg = uiState.layoutConfig
+        cfg.fontSizeSp * density.density * density.fontScale * cfg.lineSpacingMultiplier
+    } else {
+        0f
+    }
+
     LaunchedEffect(prefsLoaded, pageDual, size, hingeLocal, splitLeftPx, splitRightPx, contentRect, density.density, density.fontScale) {
         if (!prefsLoaded) return@LaunchedEffect
         if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
@@ -666,11 +674,12 @@ fun ReaderScreen(
     var highlightVersion by remember { mutableIntStateOf(0) }
     LaunchedEffect(annotations, searchHighlight) { highlightVersion++ }
 
-    // 翻页动画离屏渲染上下文：几何/主题/密度/内容版本定键，文本与高亮在抓取时刻取值
+    // 翻页动画离屏渲染上下文：几何/主题/密度/内容版本定键，高亮在抓取时刻取值；
+    // 页眉页脚不烘进位图——它们是固定悬浮层，翻页全程由 Compose 叠加层绘制
     LaunchedEffect(
         spreadDual, splitLeftPx, splitRightPx, leftInsetPx, rightInsetPx,
         innerPadPx, spreadPageWidthPx, contentRect, colors, uiState.layoutConfig,
-        density.density, density.fontScale, highlightVersion,
+        density.density, density.fontScale, highlightVersion, rightDropPx,
     ) {
         val bitmapWidthPx = contentRect.width.roundToInt()
         val bitmapHeightPx = contentRect.height.roundToInt()
@@ -685,6 +694,7 @@ fun ReaderScreen(
                     rightInsetPx = rightInsetPx,
                     innerPadPx = innerPadPx,
                     pageWidthPx = spreadPageWidthPx,
+                    rightDropPx = rightDropPx,
                 ),
                 colors = colors,
                 density = density.density,
@@ -692,31 +702,6 @@ fun ReaderScreen(
                 widthPx = bitmapWidthPx,
                 heightPx = bitmapHeightPx,
                 contentVersion = highlightVersion,
-                texts = {
-                    val s = uiState
-                    val pageNumberLabel = if (prefs.showPageNumber) {
-                        pageNumberText(
-                            leftPage = s.pageNumber,
-                            hasRightPage = spreadDual && s.spread?.right != null,
-                            totalPages = s.totalPages,
-                        )
-                    } else {
-                        null
-                    }
-                    headerFooterTexts(
-                        dual = spreadDual,
-                        chapterTitle = if (prefs.showChapterTitle) s.chapterTitle else null,
-                        bookTitle = s.bookTitle,
-                        pageNumberLabel = pageNumberLabel,
-                        progressText = if (prefs.showPageProgress) {
-                            formatPercent(s.progressFraction)
-                        } else {
-                            null
-                        },
-                        batteryText = if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
-                        timeText = if (prefs.showTime) time else null,
-                    )
-                },
                 highlights = { s -> spansFor(s.left) to spansFor(s.right) },
             ),
         )
@@ -1247,6 +1232,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
+                                rightDropPx = rightDropPx,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             SpreadContent(
@@ -1259,6 +1245,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
+                                rightDropPx = rightDropPx,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
@@ -1281,6 +1268,7 @@ fun ReaderScreen(
                             rightDp = rightDp,
                             innerPadPx = innerPadPx,
                             pageWidthDp = pageWidthDp,
+                            rightDropPx = rightDropPx,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer { translationY = -autoScrollY },
@@ -1303,6 +1291,7 @@ fun ReaderScreen(
                                 rightDp = rightDp,
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
+                                rightDropPx = rightDropPx,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer { translationX = animX.value },
@@ -1493,7 +1482,7 @@ fun ReaderScreen(
             )
         }
 
-        if (!uiState.loading && uiState.error == null && simTarget == null) {
+        if (!uiState.loading && uiState.error == null) {
             val pageNumberLabel = if (prefs.showPageNumber) {
                 pageNumberText(
                     leftPage = uiState.pageNumber,
@@ -1796,6 +1785,7 @@ private fun SpreadContent(
     innerPadPx: Float,
     pageWidthDp: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
+    rightDropPx: Float = 0f,
     leftHighlights: List<TextRangeSpan> = emptyList(),
     rightHighlights: List<TextRangeSpan> = emptyList(),
     selection: SelectionUi? = null,
@@ -1819,14 +1809,15 @@ private fun SpreadContent(
             page = spread.left,
             config = config,
             colors = colors,
-            modifier = modifier,
+            // 实心底色：COVER 滑入/滑出叠层时不得透出下层页面
+            modifier = modifier.background(colors.background),
             highlights = leftHighlights,
             selection = selectionSpanFor(spread.left),
             onGeometry = onLeftGeometry,
         )
         return
     }
-    Row(modifier = modifier) {
+    Row(modifier = modifier.background(colors.background)) {
         Box(
             modifier = Modifier.width(leftDp).fillMaxHeight(),
             contentAlignment = Alignment.Center,
@@ -1856,6 +1847,7 @@ private fun SpreadContent(
                     modifier = Modifier.width(pageWidthDp).fillMaxHeight(),
                     innerPaddingPx = innerPadPx,
                     innerOnRight = false,
+                    extraTopPadPx = rightDropPx,
                     highlights = rightHighlights,
                     selection = selectionSpanFor(right),
                     onGeometry = onRightGeometry,

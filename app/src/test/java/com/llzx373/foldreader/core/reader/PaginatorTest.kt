@@ -65,6 +65,7 @@ class PaginatorTest {
         widthPx: Int = 200,
         heightPx: Int = 100,
         maxLineChars: Int = 40,
+        rightDrop: Boolean = false,
     ) = Paginator(
         content = StringBookContent(text),
         config = LayoutConfig(
@@ -83,6 +84,7 @@ class PaginatorTest {
         heightPx = heightPx,
         density = 1f,
         scaledDensity = 1f,
+        rightDrop = rightDrop,
     )
 
     private fun paginateAll(p: Paginator, charCount: Long): List<Page> = runBlocking {
@@ -103,6 +105,35 @@ class PaginatorTest {
             append('\n')
             if (i % 7 == 3) append('\n')
         }
+    }
+
+    @Test
+    fun `right drop reduces odd page capacity by one line`() = runBlocking {
+        // 单段长文：行高 10px、页高 100px → 满页 10 行；开启右栏避让后奇数页 9 行
+        val text = "字".repeat(2000)
+        val pages = paginateAll(paginator(text, rightDrop = true), text.length.toLong())
+        assertTrue(pages.size > 3)
+        for ((i, page) in pages.withIndex()) {
+            if (page.charEnd >= text.length.toLong()) continue // 末页允许不满
+            assertEquals("page $i capacity", if (i % 2 == 1) 9 else 10, page.lines.size)
+        }
+        for (i in 1 until pages.size) {
+            assertEquals(pages[i - 1].charEnd, pages[i].charStart)
+        }
+        assertEquals(text.length.toLong(), pages.last().charEnd)
+        Unit
+    }
+
+    @Test
+    fun `right drop off keeps uniform capacity`() = runBlocking {
+        val text = "字".repeat(2000)
+        val pages = paginateAll(paginator(text, rightDrop = false), text.length.toLong())
+        assertTrue(pages.size > 3)
+        for (page in pages) {
+            if (page.charEnd >= text.length.toLong()) continue
+            assertEquals(10, page.lines.size)
+        }
+        Unit
     }
 
     @Test

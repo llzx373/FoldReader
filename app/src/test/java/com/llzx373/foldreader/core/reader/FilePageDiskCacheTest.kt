@@ -91,6 +91,18 @@ class FilePageDiskCacheTest {
     }
 
     @Test
+    fun `rightDrop mismatch invalidates and keeps the original entry`() {
+        val dir = tempDir()
+        val cache = FilePageDiskCache(dir)
+        val bounds = longArrayOf(0L, 60L)
+        cache.save(key(), charCount = 200L, bounds = bounds)
+        assertNull(cache.load(key().copy(rightDrop = true), charCount = 200L))
+        val loaded = cache.load(key(), charCount = 200L)
+        assertNotNull(loaded)
+        assertTrue(bounds.contentEquals(loaded))
+    }
+
+    @Test
     fun `char count mismatch invalidates and removes the file`() {
         val dir = tempDir()
         val cache = FilePageDiskCache(dir)

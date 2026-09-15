@@ -88,8 +88,9 @@ half4 main(float2 fragCoord) {
             half4 tex = page.eval(src);
             float shade = 1.0 - 0.30 * pow(lift, 1.5);
             float ao = 1.0 - 0.10 * exp(-(d - sheetG) / (sheetW * 0.12)) * lift;
-            float ridge = exp(-pow((reach - d) / (sheetW * 0.10), 2.0)) * 0.20 * lift;
-            half3 frontRgb = min(tex.rgb * shade * ao + ridge, half3(1.0));
+            // 自由边高光：乘法项（随纸色缩放，浅色主题不再烧成白边），范围收窄、强度减弱
+            float ridge = exp(-pow((reach - d) / (sheetW * 0.06), 2.0)) * 0.14 * lift;
+            half3 frontRgb = min(tex.rgb * (shade * ao + ridge), half3(1.0));
             // 单页收尾：垂直位窄条向下层淡出（双页 sheetFade 恒 1，无影响）
             half3 base = under.eval(fragCoord).rgb;
             return half4(base + (frontRgb - base) * half(sheetFade), 1.0);

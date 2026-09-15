@@ -288,6 +288,8 @@ class BackupCodecTest {
             update { copy(dualPageMode = mode) }
         override suspend fun setWideScreenDualPage(enabled: Boolean) =
             update { copy(wideScreenDualPage = enabled) }
+        override suspend fun setDualRightPageDrop(enabled: Boolean) =
+            update { copy(dualRightPageDrop = enabled) }
         override suspend fun setPageTurnMode(mode: PageTurnMode) =
             update { copy(pageTurnMode = mode) }
         override suspend fun setPageTurnModeExplicit(explicit: Boolean) =

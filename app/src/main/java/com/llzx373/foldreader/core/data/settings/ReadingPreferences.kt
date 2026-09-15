@@ -24,6 +24,8 @@ data class ReadingPreferences(
     val fontKey: String = "default",
     val dualPageMode: DualPageMode = DualPageMode.AUTO,
     val wideScreenDualPage: Boolean = false,
+    /** 非书籍维度（全局透传）：双页右栏整体下移一行，避让内屏摄像头。 */
+    val dualRightPageDrop: Boolean = false,
     val pageTurnMode: PageTurnMode = PageTurnMode.COVER,
     /** 用户是否显式设置过翻页方式（false 时按姿态取默认：双页仿真、单页覆盖）。 */
     val pageTurnModeExplicit: Boolean = false,

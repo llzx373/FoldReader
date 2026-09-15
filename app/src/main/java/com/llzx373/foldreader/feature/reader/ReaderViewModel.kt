@@ -189,7 +189,6 @@ class ReaderViewModel(
             config = _uiState.value.layoutConfig,
             colors = ctx.colors,
             geom = ctx.geom,
-            headerFooter = ctx.texts(),
             leftHighlights = leftHighlights,
             rightHighlights = rightHighlights,
             density = ctx.density,
@@ -640,7 +639,11 @@ class ReaderViewModel(
                         a.paragraphSpacingEm == b.paragraphSpacingEm &&
                         a.letterSpacingEm == b.letterSpacingEm &&
                         a.fontKey == b.fontKey &&
-                        a.autoIndentEnabled == b.autoIndentEnabled
+                        a.autoIndentEnabled == b.autoIndentEnabled &&
+                        // 翻页模式影响"双页右栏避让"是否生效（滚动模式不分页避让）
+                        a.pageTurnMode == b.pageTurnMode &&
+                        a.pageTurnModeExplicit == b.pageTurnModeExplicit &&
+                        a.dualRightPageDrop == b.dualRightPageDrop
                 },
         ) { v, _, p -> v to p }.collectLatest { (v, p) ->
             val source = content ?: return@collectLatest
@@ -655,7 +658,10 @@ class ReaderViewModel(
                 _prevSpread.value = null
                 _nextSpread.value = null
                 val wasScrolling = _uiState.value.scrollPages.isNotEmpty()
-                val paginator = buildPaginator(source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity)
+                // 右栏避让仅在翻页式双页生效：滚动模式内容连续滚动，避让无意义
+                val rawMode = effectivePageTurnMode(p.pageTurnMode, p.pageTurnModeExplicit, v.dual)
+                val rightDrop = p.dualRightPageDrop && v.dual && rawMode != PageTurnMode.SCROLL
+                val paginator = buildPaginator(source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity, rightDrop)
                 val t0 = System.nanoTime()
                 val spread = withContext(Dispatchers.Default) {
                     spreadFrom(paginator, v.dual, anchorOffset.value)
@@ -705,6 +711,7 @@ class ReaderViewModel(
         heightPx: Int,
         density: Float,
         scaledDensity: Float,
+        rightDrop: Boolean = false,
     ): Paginator {
         val capped = config.copy(
             maxLineChars = capMaxLineChars(
@@ -714,7 +721,7 @@ class ReaderViewModel(
                 fontSizePx = config.fontSizeSp * scaledDensity,
             ),
         )
-        val key = PaginatorKey(bookId, widthPx, heightPx, density, scaledDensity, capped)
+        val key = PaginatorKey(bookId, widthPx, heightPx, density, scaledDensity, capped, rightDrop)
         return Paginator(
             content = source,
             config = capped,
@@ -726,6 +733,7 @@ class ReaderViewModel(
             cache = paginatorStore.getOrCreate(key),
             diskCache = pageDiskCache,
             diskKey = key,
+            rightDrop = rightDrop,
         )
     }
 
@@ -766,7 +774,12 @@ class ReaderViewModel(
         dual: Boolean,
         anchor: Long,
     ): PageSpread {
-        val leftPage = paginator.pageAt(anchor)
+        var leftPage = paginator.pageAt(anchor)
+        // 右栏避让开启时奇数页减容：跨页左页必须落在偶数序页上，否则左右页的
+        // 减容/下移会互换（跳转、进度恢复等任意锚点都可能落在奇数页）
+        if (dual && paginator.rightDrop && paginator.pageIndexOf(leftPage.charStart) % 2 == 1) {
+            paginator.pageBefore(leftPage.charStart)?.let { leftPage = it }
+        }
         val total = content?.charCount ?: 0L
         val rightPage = if (dual && leftPage.charEnd < total) {
             paginator.pageAt(leftPage.charEnd).takeIf { it.charEnd > it.charStart }
