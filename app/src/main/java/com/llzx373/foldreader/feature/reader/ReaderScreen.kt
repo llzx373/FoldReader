@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -482,6 +483,12 @@ fun ReaderScreen(
         }
     }
 
+    // 点按/自动翻页等长驻协程不会随重组重建，直接捕获 turn 会沿用切换前的旧
+    // 翻页模式（表现为"切了动画不生效"）；一律经此引用调用，读到最新闭包
+    val latestTurn by rememberUpdatedState<(Boolean, Offset?) -> Unit> { forward, tapOffset ->
+        turn(forward, tapOffset)
+    }
+
     // 退出过渡开始（popExit）即恢复系统栏：书架在转场第一帧组合时就拿到真实
     // 状态栏 inset，避免转场期间按 inset=0 布局、结束后突变回落的上下跳变
     val readerExiting = animatedVisibilityScope
@@ -525,7 +532,7 @@ fun ReaderScreen(
             if (!menuVisible && selection == null &&
                 simTarget == null && !simSettling && animSpread == null
             ) {
-                turn(forward)
+                latestTurn(forward, null)
             }
         }
     }
@@ -565,7 +572,7 @@ fun ReaderScreen(
             autoScrollY += delta
             if (autoScrollY >= maxScroll) {
                 autoScrollY = 0f
-                turn(true)
+                latestTurn(true, null)
             }
         }
     }
@@ -864,8 +871,8 @@ fun ReaderScreen(
                         y = offset.y,
                         heightPx = size.height.toFloat(),
                     )) {
-                        TapZone.PREVIOUS -> turn(false, tapOffset = offset)
-                        TapZone.NEXT -> turn(true, tapOffset = offset)
+                        TapZone.PREVIOUS -> latestTurn(false, offset)
+                        TapZone.NEXT -> latestTurn(true, offset)
                         TapZone.MENU -> menuVisible = true
                     }
                 }
@@ -1049,10 +1056,10 @@ fun ReaderScreen(
                                 val threshold = size.width * 0.15f
                                 if (dragged < -threshold) {
                                     viewModel.noteManualInteraction()
-                                    turn(true)
+                                    latestTurn(true, null)
                                 } else if (dragged > threshold) {
                                     viewModel.noteManualInteraction()
-                                    turn(false)
+                                    latestTurn(false, null)
                                 }
                             }
                         }
