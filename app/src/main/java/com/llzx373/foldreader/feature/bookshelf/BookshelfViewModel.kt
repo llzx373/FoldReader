@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.format.BookParser
 import com.llzx373.foldreader.core.format.EncodingDetector
@@ -19,13 +20,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-sealed interface ImportUiState {
-    data object Idle : ImportUiState
+/** 书架客户端排序：均为稳定键，阅读行为不会改变列表顺序（进度排序仅在进度百分比变化跨越他书时移动）。 */
+private fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): List<BookWithProgress> =
+    when (sort) {
+        BookshelfSort.IMPORT_TIME -> books.sortedByDescending { it.book.importedAt }
+        BookshelfSort.TITLE -> books.sortedBy { it.book.title }
+        BookshelfSort.PROGRESS -> books.sortedByDescending { item ->
+            val total = item.book.totalChars
+            if (total > 0L) (item.charOffset ?: 0L).toDouble() / total else 0.0
+        }
+    }
+
+sealed interface ImportUiState {    data object Idle : ImportUiState
 
     /** [progress] 小于 0 表示不确定进度（未启用清理）。 */
     data class Importing(val progress: Float = -1f) : ImportUiState
@@ -52,8 +65,21 @@ class BookshelfViewModel(
     private val offsetIndexStore: OffsetIndexStore,
 ) : ViewModel() {
 
-    val books: StateFlow<List<BookWithProgress>> = bookshelfRepository.observeBookshelfWithProgress()
+    val books: StateFlow<List<BookWithProgress>> = combine(
+        bookshelfRepository.observeBookshelfWithProgress(),
+        settingsRepository.preferences
+            .map { it.bookshelfSort }
+            .distinctUntilChanged(),
+    ) { list, sort -> sortBookshelf(list, sort) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val sortOrder: StateFlow<BookshelfSort> = settingsRepository.preferences
+        .map { it.bookshelfSort }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookshelfSort.IMPORT_TIME)
+
+    fun setSortOrder(sort: BookshelfSort) {
+        viewModelScope.launch { settingsRepository.setBookshelfSort(sort) }
+    }
 
     // 首个书架快照到达前视为加载中，区分"加载中"与"空书架"
     val loading: StateFlow<Boolean> = bookshelfRepository.observeBookshelfWithProgress()

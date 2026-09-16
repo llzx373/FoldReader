@@ -38,6 +38,7 @@ interface SettingsRepository {
     suspend fun setSimulationDegraded(degraded: Boolean)
     suspend fun setPanelScreenOff(enabled: Boolean)
     suspend fun setBookshelfGridView(gridView: Boolean)
+    suspend fun setBookshelfSort(sort: BookshelfSort)
     suspend fun setCustomChapterRules(rules: List<String>)
     suspend fun setAdCleanRules(rules: List<String>)
 }

@@ -10,6 +10,9 @@ enum class DualPageMode { AUTO, FORCE_DUAL, FORCE_SINGLE }
 
 enum class AutoPageMode { INTERVAL, SCROLL }
 
+/** 书架排序方式：均为稳定排序，阅读行为本身不会改变列表顺序。 */
+enum class BookshelfSort { IMPORT_TIME, TITLE, PROGRESS }
+
 data class ReadingPreferences(
     val fontSizeSp: Float = 18f,
     val lineSpacingMultiplier: Float = 1.5f,
@@ -48,6 +51,7 @@ data class ReadingPreferences(
     val panelScreenOff: Boolean = false,
     val autoIndentEnabled: Boolean = true,
     val bookshelfGridView: Boolean = true,
+    val bookshelfSort: BookshelfSort = BookshelfSort.IMPORT_TIME,
     val customChapterRules: List<String> = emptyList(),
     val adCleanRules: List<String> = emptyList(),
 )

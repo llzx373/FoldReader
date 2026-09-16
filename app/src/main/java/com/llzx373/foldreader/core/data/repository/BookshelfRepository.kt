@@ -37,6 +37,7 @@ interface BookshelfRepository {
     suspend fun saveProgress(progress: ReadingProgressEntity)
 
     suspend fun getChapters(bookId: Long): List<Chapter>
+    fun observeChapters(bookId: Long): Flow<List<Chapter>>
     suspend fun saveChapters(bookId: Long, chapters: List<Chapter>)
 
     fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>>

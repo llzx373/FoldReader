@@ -249,6 +249,7 @@ class BookPrefsRepositoryTest {
         override suspend fun setSimulationDegraded(degraded: Boolean) = Unit
         override suspend fun setPanelScreenOff(enabled: Boolean) = Unit
         override suspend fun setBookshelfGridView(gridView: Boolean) = Unit
+        override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) = Unit
         override suspend fun setCustomChapterRules(rules: List<String>) = Unit
         override suspend fun setAdCleanRules(rules: List<String>) = Unit
     }

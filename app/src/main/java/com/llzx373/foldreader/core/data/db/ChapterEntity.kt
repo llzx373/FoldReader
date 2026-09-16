@@ -7,6 +7,7 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Entity(
     tableName = "chapters",
@@ -34,6 +35,9 @@ interface ChapterDao {
 
     @Query("SELECT * FROM chapters WHERE bookId = :bookId ORDER BY chapterIndex")
     suspend fun getForBook(bookId: Long): List<ChapterEntity>
+
+    @Query("SELECT * FROM chapters WHERE bookId = :bookId ORDER BY chapterIndex")
+    fun observeForBook(bookId: Long): Flow<List<ChapterEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(chapters: List<ChapterEntity>)

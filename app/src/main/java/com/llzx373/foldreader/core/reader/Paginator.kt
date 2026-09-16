@@ -56,6 +56,30 @@ class Paginator(
     @Volatile private var diskBoundsLoaded = false
     @Volatile private var fullBoundsFromDisk = false
 
+    /**
+     * 临时分页起点（段首吸附后的锚点）。磁盘边界缺失且进度在书中部时，
+     * 从这里开始向后排版先出第一屏，精确前缀边界由后台追上后整体切换。
+     * 注意：从段首临时起排的页边界与从 0 精确起排的页边界一般不一致，
+     * 因此播种分页器不落盘、不进入共享内存缓存。
+     */
+    var seedOrigin: Long = 0L
+        private set
+    private var indexBase: Int = 0
+    val isSeeded: Boolean get() = seedOrigin > 0L
+
+    /** 以 [origin]（必须是段首）为临时第 [pageIndexBase] 页起排。 */
+    fun seed(origin: Long, pageIndexBase: Int) {
+        require(origin > 0L)
+        synchronized(boundsLock) {
+            bounds.clear()
+            bounds += origin
+        }
+        seedOrigin = origin
+        indexBase = pageIndexBase.coerceAtLeast(0)
+        diskBoundsLoaded = true
+        fullBoundsFromDisk = false
+    }
+
     private val fontSizePx = config.fontSizeSp * scaledDensity
     private val lineHeightPx = fontSizePx * config.lineSpacingMultiplier
     private val paragraphSpacingPx = fontSizePx * config.paragraphSpacingEm
@@ -72,7 +96,7 @@ class Paginator(
 
     suspend fun pageAt(offset: Long): Page {
         ensureDiskBounds()
-        val target = offset.coerceIn(0L, content.charCount)
+        val target = offset.coerceIn(seedOrigin, content.charCount)
         var page = getOrPaginate(boundAtOrBefore(target))
         while (page.charEnd <= target && page.charEnd < content.charCount) {
             page = advance(page.charEnd)
@@ -82,9 +106,11 @@ class Paginator(
 
     suspend fun pageBefore(offset: Long): Page? {
         if (offset <= 0L) return null
+        // 播种分页器不知道起点之前的确切页（需从 0 重排），由调用方决定回退策略
+        if (isSeeded && offset <= seedOrigin) return null
         val current = pageAt(offset)
         val target = current.charStart
-        if (target == 0L) return null
+        if (target <= seedOrigin) return null
         var page = getOrPaginate(boundAtOrBefore(target - 1))
         while (page.charEnd < target) {
             page = advance(page.charEnd)
@@ -102,6 +128,42 @@ class Paginator(
         var idx = bounds.binarySearch(target)
         idx = if (idx >= 0) idx else -idx - 2
         bounds[idx.coerceAtLeast(0)]
+    }
+
+    /** 已知的下一条页边界（严格大于 [offset]）；未知返回 null。用于跳过已落盘的前缀。 */
+    fun knownBoundAfter(offset: Long): Long? = synchronized(boundsLock) {
+        val idx = bounds.binarySearch(offset)
+        bounds.getOrNull(if (idx >= 0) idx + 1 else -idx - 1)
+    }
+
+    /** 已知边界（含磁盘缓存）是否覆盖 [offset]：覆盖则 pageAt 只需排一两页。 */
+    fun boundsCover(offset: Long): Boolean {
+        ensureDiskBounds()
+        return synchronized(boundsLock) { offset <= 0L || bounds.last() > offset }
+    }
+
+    /** 按版式几何估算 [offset] 大约在第几页（0-based），用于播种时的临时页码。 */
+    fun estimatePageIndex(offset: Long): Int {
+        val linesPerPage = (availHeightPx / lineHeightPx).toInt().coerceAtLeast(1)
+        val charsPerLine = (textWidthPx / fontSizePx).coerceAtLeast(1f)
+        // 段距/空行的经验折扣，宁低估不高估
+        val charsPerPage = linesPerPage * charsPerLine * 0.92f
+        return (offset.coerceAtLeast(0L) / charsPerPage).toInt()
+    }
+
+    /** [offset] 所在段落（或前一段落）的起点：向前找最后一个换行符的下一字符。 */
+    suspend fun snapToParagraphStart(offset: Long): Long {
+        val pos = offset.coerceIn(0L, content.charCount)
+        if (pos == 0L) return 0L
+        var end = pos
+        while (end > 0L) {
+            val start = maxOf(0L, end - SNAP_SCAN_CHARS)
+            val window = content.read(start until end)
+            val nl = window.lastIndexOf('\n')
+            if (nl >= 0) return start + nl + 1
+            end = start
+        }
+        return 0L
     }
 
     private suspend fun advance(boundary: Long): Page {
@@ -130,14 +192,15 @@ class Paginator(
 
     /** offset 所在页的页序（0-based）：bounds 中小于等于 offset 的最后一条边界序号。 */
     fun pageIndexOf(offset: Long): Int = synchronized(boundsLock) {
-        var idx = bounds.binarySearch(offset.coerceAtLeast(0L))
+        var idx = bounds.binarySearch(offset.coerceAtLeast(seedOrigin))
         idx = if (idx >= 0) idx else -idx - 2
-        idx.coerceAtLeast(0)
+        indexBase + idx.coerceAtLeast(0)
     }
 
-    val boundaryPageCount: Int get() = synchronized(boundsLock) { bounds.size }
+    val boundaryPageCount: Int get() = synchronized(boundsLock) { indexBase + bounds.size }
 
     fun persistBounds() {
+        if (isSeeded) return
         val key = diskKey ?: return
         val cache = diskCache ?: return
         val snapshot = synchronized(boundsLock) { bounds.toLongArray() }
@@ -249,5 +312,6 @@ class Paginator(
 
     private companion object {
         const val SCAN_CHARS = 4096L
+        const val SNAP_SCAN_CHARS = 4096L
     }
 }

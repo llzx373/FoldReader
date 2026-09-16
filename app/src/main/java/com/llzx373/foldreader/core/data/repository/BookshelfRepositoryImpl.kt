@@ -15,6 +15,7 @@ import com.llzx373.foldreader.core.data.db.ReadingSessionDao
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 class BookshelfRepositoryImpl(
     private val bookDao: BookDao,
@@ -83,6 +84,11 @@ class BookshelfRepositoryImpl(
 
     override suspend fun getChapters(bookId: Long): List<Chapter> =
         chapterDao.getForBook(bookId).map { Chapter(it.title, it.charStart, it.charEnd) }
+
+    override fun observeChapters(bookId: Long): Flow<List<Chapter>> =
+        chapterDao.observeForBook(bookId).map { list ->
+            list.map { Chapter(it.title, it.charStart, it.charEnd) }
+        }
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
         chapterDao.deleteForBook(bookId)

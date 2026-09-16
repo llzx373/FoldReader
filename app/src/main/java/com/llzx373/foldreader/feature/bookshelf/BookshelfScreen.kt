@@ -35,6 +35,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
@@ -44,6 +45,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
@@ -64,8 +67,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -85,7 +86,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +99,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookWithProgress
+import com.llzx373.foldreader.core.data.settings.BookshelfSort
+import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.ui.EmptyState
@@ -118,6 +125,7 @@ fun BookshelfScreen(
     val books by viewModel.books.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val gridView by viewModel.gridView.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val groups by viewModel.groups.collectAsState()
@@ -255,6 +263,31 @@ fun BookshelfScreen(
                         IconButton(onClick = { searchActive = true }) {
                             Icon(Icons.Filled.Search, contentDescription = "搜索书架")
                         }
+                        var sortMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { sortMenuExpanded = true }) {
+                                SortIcon(contentDescription = "排序方式")
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                            ) {
+                                BookshelfSort.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(bookshelfSortLabel(option)) },
+                                        onClick = {
+                                            viewModel.setSortOrder(option)
+                                            sortMenuExpanded = false
+                                        },
+                                        trailingIcon = {
+                                            if (option == sortOrder) {
+                                                Icon(Icons.Filled.Check, contentDescription = null)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
                         IconButton(onClick = viewModel::toggleViewMode) {
                             if (gridView) {
                                 Icon(
@@ -299,20 +332,32 @@ fun BookshelfScreen(
             }
         },
     ) { innerPadding ->
+        // 返回书架跳动的诊断（仅 debug）：innerPadding 四边实际值 + 内容区在窗口中的
+        // 位置。跳动的本质是外层 rail 宽度 = 80dp + start 系统栏 inset 变化，把整个内容区
+        // （网格封面、右上动作、FAB）整体推移，所以必须同时看 padding 与 pos。
+        val traceLayoutDirection = LocalLayoutDirection.current
+        ReturnTrace.log(
+            "bookshelf: innerPadding=(" +
+                "${innerPadding.calculateLeftPadding(traceLayoutDirection)}," +
+                "${innerPadding.calculateTopPadding()}," +
+                "${innerPadding.calculateRightPadding(traceLayoutDirection)}," +
+                "${innerPadding.calculateBottomPadding()}) books=${books.size}",
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .onSizeChanged { ReturnTrace.log("bookshelf: content size=$it") }
+                .onGloballyPositioned {
+                    ReturnTrace.log(
+                        "bookshelf: content pos=${it.positionInWindow()} size=${it.size}",
+                    )
+                },
         ) {
             when {
                 loading -> LoadingIndicator(modifier = Modifier.align(Alignment.Center))
                 books.isEmpty() -> EmptyBookshelf(onImportClick = launchImport)
                 else -> {
-                    val recent = remember(books) {
-                        books.filter { it.book.lastReadAt != null }
-                            .sortedByDescending { it.book.lastReadAt }
-                            .take(10)
-                    }
                     Column(modifier = Modifier.fillMaxSize()) {
                         if (!selectionMode) {
                             GroupFilterChips(
@@ -340,14 +385,6 @@ fun BookshelfScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             else -> {
-                                if (!selectionMode && searchQuery.isBlank() && groupFilter == null && recent.isNotEmpty()) {
-                                    RecentReadsCarousel(
-                                        recent = recent,
-                                        onOpenBook = onOpenBook,
-                                        sharedTransitionScope = sharedTransitionScope,
-                                        animatedVisibilityScope = animatedVisibilityScope,
-                                    )
-                                }
                                 Box(modifier = Modifier.weight(1f)) {
                                     if (gridView) {
                                         BookGrid(
@@ -713,48 +750,45 @@ private fun EmptyBookshelf(onImportClick: () -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
-private fun RecentReadsCarousel(
-    recent: List<BookWithProgress>,
-    onOpenBook: (bookId: Long, title: String) -> Unit,
-    sharedTransitionScope: SharedTransitionScope?,
-    animatedVisibilityScope: AnimatedVisibilityScope?,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "最近阅读",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        HorizontalMultiBrowseCarousel(
-            state = rememberCarouselState { recent.size },
-            modifier = Modifier.fillMaxWidth(),
-            preferredItemWidth = 118.dp,
-            itemSpacing = 8.dp,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-        ) { index ->
-            val item = recent[index]
-            Column {
-                BookCover(
-                    title = item.book.title,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenBook(item.book.id, item.book.title) },
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    bookId = item.book.id,
-                )
-                Text(
-                    text = formatReadingProgress(item.charOffset, item.book.totalChars),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
+private fun SortIcon(contentDescription: String) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(
+        modifier = Modifier
+            .size(24.dp)
+            .semantics { this.contentDescription = contentDescription },
+    ) {
+        val w = size.width
+        val h = size.height
+        val stroke = h * 0.09f
+        // 三条长度递减的横线 + 左侧向下箭头，表示排序
+        val rows = listOf(0.86f, 0.62f, 0.38f)
+        rows.forEachIndexed { i, frac ->
+            drawLine(
+                color = tint,
+                start = Offset(w * 0.32f, h * (0.22f + i * 0.28f)),
+                end = Offset(w * (0.32f + frac * 0.62f), h * (0.22f + i * 0.28f)),
+                strokeWidth = stroke,
+            )
         }
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.14f, h * 0.18f),
+            end = Offset(w * 0.14f, h * 0.72f),
+            strokeWidth = stroke,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.05f, h * 0.58f),
+            end = Offset(w * 0.14f, h * 0.72f),
+            strokeWidth = stroke,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.23f, h * 0.58f),
+            end = Offset(w * 0.14f, h * 0.72f),
+            strokeWidth = stroke,
+        )
     }
 }
 
@@ -951,4 +985,10 @@ private fun bookSubtitle(item: BookWithProgress): String {
     val progress = formatReadingProgress(item.charOffset, item.book.totalChars)
     val lastRead = formatLastRead(item.book.lastReadAt)
     return if (lastRead != null) "$progress · $lastRead" else progress
+}
+
+private fun bookshelfSortLabel(sort: BookshelfSort): String = when (sort) {
+    BookshelfSort.IMPORT_TIME -> "按导入时间"
+    BookshelfSort.TITLE -> "按书名"
+    BookshelfSort.PROGRESS -> "按阅读进度"
 }

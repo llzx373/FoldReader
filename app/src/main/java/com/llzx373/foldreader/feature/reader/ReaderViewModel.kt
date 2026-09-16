@@ -23,6 +23,7 @@ import com.llzx373.foldreader.core.reader.CharsReadTracker
 import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.core.reader.LayoutConfig
 import com.llzx373.foldreader.core.reader.Page
+import com.llzx373.foldreader.core.reader.PageCache
 import com.llzx373.foldreader.core.reader.PageDiskCache
 import com.llzx373.foldreader.core.reader.Paginator
 import com.llzx373.foldreader.core.reader.PaginatorKey
@@ -32,6 +33,8 @@ import com.llzx373.foldreader.core.reader.renderSpreadToBitmap
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -129,6 +132,17 @@ class ReaderViewModel(
     private val charsReadTracker = CharsReadTracker()
     private var lastSessionFlushTotalMs = 0L
     private var paginatorLeft: Paginator? = null
+    /** 播种（临时起点）分页器激活期间，后台追赶用的精确分页器。 */
+    private var exactPaginator: Paginator? = null
+    private var boundsJob: kotlinx.coroutines.Job? = null
+    /** 首帧已上屏：后台全书分页、位图预渲染等重活的总开关。 */
+    private val firstFrameRendered = MutableStateFlow(false)
+
+    /** UI 在第一帧实际绘制后调用；此前不做任何抢占 CPU 的后台工作。 */
+    fun noteFirstFrameRendered() {
+        firstFrameRendered.value = true
+    }
+
     private var dualActive = false
     // 当前分页器产出版式：showSpread 落账时用它们盖章（而不是 uiState 现值），
     // 避免重分页竞态把"旧版式 spread + 新版式指纹"发布出去
@@ -442,6 +456,13 @@ class ReaderViewModel(
     init {
         openBook()
         viewModelScope.launch {
+            // 章节随数据库被动更新：首次打开时表为空，后台索引扫完落库后这里自动刷新
+            bookshelfRepository.observeChapters(bookId).collect { list ->
+                chapters = list
+                refreshChapterState()
+            }
+        }
+        viewModelScope.launch {
             pendingSave.filterNotNull().debounce(500L).collect { offset ->
                 runCatching { persistProgress(offset) }
             }
@@ -488,17 +509,13 @@ class ReaderViewModel(
             try {
                 val uri = Uri.parse(book.fileUri)
                 val charsetOverride = EncodingDetector.forNameOrNull(book.encoding)
+                // 打开关键路径只做两件事：建/读偏移索引（缺失时异步后台补建）+ 恢复进度。
+                // 章节扫描不再挡在首帧前：实时索引完成后由 onChaptersIndexed 落库，
+                // 本章节的 observeChapters 收集器随数据库更新自动刷新。
                 val opened = withContext(Dispatchers.IO) {
-                    val stored = bookshelfRepository.getChapters(bookId)
-                    val resolved = stored.ifEmpty {
-                        parser.parseChapters(uri, charsetOverride).also { scanned ->
-                            runCatching { bookshelfRepository.saveChapters(bookId, scanned) }
-                        }
-                    }
-                    parser.openContent(uri, charsetOverride) to resolved
+                    parser.openContent(uri, charsetOverride)
                 }
-                content = opened.first
-                chapters = opened.second
+                content = opened
                 appliedEncoding = book.encoding
                 verifyAnnotationSnapshots()
                 val progress = bookshelfRepository.getProgress(bookId)
@@ -507,19 +524,43 @@ class ReaderViewModel(
                 charsReadBase = progress?.charsReadTotal ?: 0L
                 anchorOffset.value = when {
                     pendingReopenAnchor >= 0L ->
-                        pendingReopenAnchor.coerceAtMost(opened.first.charCount).also {
+                        pendingReopenAnchor.coerceAtMost(opened.charCount).also {
                             pendingReopenAnchor = -1L
                         }
-                    initialAnchor >= 0L -> initialAnchor.coerceAtMost(opened.first.charCount)
+                    initialAnchor >= 0L -> initialAnchor.coerceAtMost(opened.charCount)
                     else -> progress?.charOffset ?: 0L
                 }
                 charsReadTracker.jump(anchorOffset.value)
                 _uiState.update {
-                    it.copy(bookTitle = book.title, totalChars = opened.first.charCount)
+                    it.copy(bookTitle = book.title, totalChars = opened.charCount)
                 }
+                maybeScanChaptersInBackground(uri, charsetOverride, opened)
                 collectViewport()
             } catch (t: Throwable) {
                 _uiState.update { it.copy(loading = false, error = t.message ?: "打开失败") }
+            }
+        }
+    }
+
+    /**
+     * 兜底补扫章节：索引快照有效（无后台索引在跑）但章节表为空，
+     * 说明上次扫描结果没落库；首帧上屏后闲时补扫一次。
+     */
+    private fun maybeScanChaptersInBackground(
+        uri: Uri,
+        charsetOverride: java.nio.charset.Charset?,
+        opened: BookContent,
+    ) {
+        val liveIndexing = (opened as? com.llzx373.foldreader.core.format.txt.TxtBookContent)
+            ?.indexProgress != null
+        if (liveIndexing) return
+        viewModelScope.launch(Dispatchers.IO) {
+            firstFrameRendered.filter { it }.first()
+            if (chapters.isNotEmpty()) return@launch
+            val scanned = runCatching { parser.parseChapters(uri, charsetOverride) }.getOrNull()
+                ?: return@launch
+            if (chapters.isEmpty()) {
+                runCatching { bookshelfRepository.saveChapters(bookId, scanned) }
             }
         }
     }
@@ -657,25 +698,50 @@ class ReaderViewModel(
                 _prevSpread.value = null
                 _nextSpread.value = null
                 val wasScrolling = _uiState.value.scrollPages.isNotEmpty()
-                val paginator = buildPaginator(
-                    source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity, v.avoidance,
-                )
+                val anchor = anchorOffset.value
                 val t0 = System.nanoTime()
-                val spread = withContext(Dispatchers.Default) {
-                    spreadFrom(paginator, v.dual, anchorOffset.value)
+                val prepared = withContext(Dispatchers.Default) {
+                    val exact = buildPaginator(
+                        source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity, v.avoidance,
+                    )
+                    // 磁盘/已知边界覆盖不到锚点且锚点在书中部：从锚点所在段首临时起排，
+                    // 先把第一屏排出来；精确前缀边界由 scheduleBoundsBuild 后台追上后切换
+                    val seeded = if (!exact.boundsCover(anchor) && anchor >= SEED_MIN_ANCHOR_CHARS) {
+                        val origin = exact.snapToParagraphStart(anchor)
+                        // 全书无换行（起点为 0）或锚点恰在段边界末尾（起点即文末，会排出空页）时不播种
+                        if (origin > 0L && origin < source.charCount) {
+                            buildPaginator(
+                                source, config, pageWidthPx, v.heightPx, v.density, v.scaledDensity,
+                                v.avoidance, sharedCache = false,
+                            ).also { it.seed(origin, exact.estimatePageIndex(origin)) }
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                    val active = seeded ?: exact
+                    Triple(exact, active, spreadFrom(active, v.dual, anchor))
                 }
                 logPaginateTiming(t0)
                 val geom = SpreadGeometry(v.dual, pageWidthPx, v.heightPx)
                 pageMutex.withLock {
-                    paginatorLeft = paginator
+                    paginatorLeft = prepared.second
+                    exactPaginator = if (prepared.second !== prepared.first) prepared.first else null
                     dualActive = v.dual
                     activeConfig = config
                     activeGeom = geom
                 }
-                publish(spread, config, v.dual, geom)
+                publish(prepared.third, config, v.dual, geom)
+                if (prepared.second !== prepared.first) {
+                    // 精确总页数未知期间先给估算值，后台追界时逐步修正
+                    _uiState.update {
+                        it.copy(totalPages = prepared.first.estimatePageIndex(it.totalChars) + 1)
+                    }
+                }
                 // 滚动模式：版式变化后按当前锚点用新分页器重建滚动页流
                 if (wasScrolling) enterScrollMode()
-                buildFullBounds(paginator)
+                scheduleBoundsBuild(prepared.first)
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
             } catch (t: Throwable) {
@@ -711,6 +777,8 @@ class ReaderViewModel(
         scaledDensity: Float,
         avoidance: com.llzx373.foldreader.core.reader.PageAvoidance =
             com.llzx373.foldreader.core.reader.PageAvoidance(),
+        /** false = 临时（播种）分页器：页边界与精确序列不同，不进共享缓存、不读盘。 */
+        sharedCache: Boolean = true,
     ): Paginator {
         val capped = config.copy(
             maxLineChars = capMaxLineChars(
@@ -729,23 +797,33 @@ class ReaderViewModel(
             heightPx = heightPx,
             density = density,
             scaledDensity = scaledDensity,
-            cache = paginatorStore.getOrCreate(key),
-            diskCache = pageDiskCache,
-            diskKey = key,
+            cache = if (sharedCache) paginatorStore.getOrCreate(key) else PageCache(64),
+            diskCache = if (sharedCache) pageDiskCache else null,
+            diskKey = if (sharedCache) key else null,
             avoidance = avoidance,
         )
     }
 
-    /** 闲时把全书分页一遍：页边界落盘，并向 UI 汇报总页数（随 collectLatest 取消）。 */
-    private suspend fun buildFullBounds(paginator: Paginator) {
+    /**
+     * 首帧上屏后（再稍候片刻）后台把全书边界排完：逐段落盘、向 UI 汇报总页数，
+     * 追上当前阅读位置时把播种分页器切换为精确分页器。
+     */
+    private fun scheduleBoundsBuild(paginator: Paginator) {
+        boundsJob?.cancel()
         val total = content?.charCount ?: return
         if (total <= 0L) return
-        withContext(Dispatchers.Default) {
-            if (paginator.hasFullBoundaryIndex) {
-                _uiState.update { it.copy(totalPages = paginator.boundaryPageCount) }
-            } else {
+        boundsJob = viewModelScope.launch {
+            firstFrameRendered.filter { it }.first()
+            delay(FULL_BOUNDS_IDLE_DELAY_MS)
+            withContext(Dispatchers.Default) {
+                if (paginator.hasFullBoundaryIndex) {
+                    _uiState.update { it.copy(totalPages = paginator.boundaryPageCount) }
+                    swapToExactIfCovered(paginator)
+                    return@withContext
+                }
                 val count = paginateToEnd(paginator, total) { done ->
                     _uiState.update { it.copy(totalPages = done) }
+                    swapToExactIfCovered(paginator)
                 }
                 _uiState.update { it.copy(totalPages = count) }
                 withContext(Dispatchers.IO) { paginator.persistBounds() }
@@ -753,16 +831,64 @@ class ReaderViewModel(
         }
     }
 
-    private suspend fun paginateToEnd(paginator: Paginator, total: Long, onCount: (Int) -> Unit): Int {
-        var page = paginator.pageAt(0)
+    /** 精确边界追上当前位置后整体切换：重新锚定当前 spread（页起点可能与临时分页略不同）。 */
+    private suspend fun swapToExactIfCovered(exact: Paginator) {
+        pageMutex.withLock {
+            if (exactPaginator === exact && paginatorLeft?.isSeeded == true) paginatorLeft else null
+        } ?: return
+        if (!exact.boundsCover(anchorOffset.value)) return
+        val dual = pageMutex.withLock {
+            if (exactPaginator !== exact) return
+            paginatorLeft = exact
+            exactPaginator = null
+            dualActive
+        }
+        _prevSpread.value = null
+        _nextSpread.value = null
+        val spread = withContext(Dispatchers.Default) { spreadFrom(exact, dual, anchorOffset.value) }
+        showSpread(spread, countCharsRead = false)
+        if (_uiState.value.scrollPages.isNotEmpty()) enterScrollMode()
+    }
+
+    /** 目标越过临时起点（向前翻回起点之前）时，立即切回精确分页器同步补排前缀。 */
+    private suspend fun paginatorFor(anchor: Long): Paginator? {
+        val current = pageMutex.withLock { paginatorLeft } ?: return null
+        if (!current.isSeeded || anchor >= current.seedOrigin) return current
+        return pageMutex.withLock {
+            val exact = exactPaginator
+            if (exact != null) {
+                paginatorLeft = exact
+                exactPaginator = null
+            }
+            exact ?: paginatorLeft
+        }
+    }
+
+    private suspend fun paginateToEnd(paginator: Paginator, total: Long, onBatch: suspend (Int) -> Unit): Int {
+        var pos = 0L
         var count = 1
-        while (page.charEnd < total) {
+        var sincePersist = 0
+        while (pos < total) {
             kotlinx.coroutines.yield()
-            page = paginator.pageAt(page.charEnd)
+            // 已落盘/已排出的前缀边界直接跳过，不为它们重新排版
+            val known = paginator.knownBoundAfter(pos)
+            pos = if (known != null) {
+                known
+            } else {
+                val page = paginator.pageAt(pos)
+                if (page.charEnd <= pos) break
+                page.charEnd
+            }
             count++
+            sincePersist++
             if (count % 16 == 0) {
-                onCount(count)
+                onBatch(count)
                 delay(10L)
+            }
+            // 分段落盘：中途退出时前缀边界仍在，下次打开只需接续后排
+            if (sincePersist >= INCREMENTAL_PERSIST_PAGES) {
+                sincePersist = 0
+                withContext(Dispatchers.IO) { paginator.persistBounds() }
             }
         }
         return count
@@ -789,9 +915,9 @@ class ReaderViewModel(
     }
 
     private suspend fun currentSpreadFrom(anchor: Long): PageSpread? {
-        val (paginator, dual) = pageMutex.withLock { paginatorLeft to dualActive }
-        val p = paginator ?: return null
-        return withContext(Dispatchers.Default) { spreadFrom(p, dual, anchor) }
+        val paginator = paginatorFor(anchor) ?: return null
+        val dual = pageMutex.withLock { dualActive }
+        return withContext(Dispatchers.Default) { spreadFrom(paginator, dual, anchor) }
     }
 
     fun setViewports(
@@ -818,13 +944,13 @@ class ReaderViewModel(
 
     suspend fun adjacentSpread(forward: Boolean): PageSpread? {
         val current = _uiState.value.spread ?: return null
-        val left = pageMutex.withLock { paginatorLeft } ?: return null
         val dual = pageMutex.withLock { dualActive }
         val total = _uiState.value.totalChars
         val anchor = when {
             forward && dual -> current.right?.charEnd ?: return null
             forward -> if (current.left.charEnd < total) current.left.charEnd else return null
             else -> {
+                val left = paginatorFor(current.left.charStart - 1) ?: return null
                 val one = withContext(Dispatchers.Default) {
                     left.pageBefore(current.left.charStart)
                 } ?: return null
@@ -877,7 +1003,8 @@ class ReaderViewModel(
     suspend fun scrollExtend(forward: Boolean) {
         val pages = _uiState.value.scrollPages
         if (pages.isEmpty()) return
-        val p = pageMutex.withLock { paginatorLeft } ?: return
+        val edge = if (forward) pages.last().charStart else pages.first().charStart - 1
+        val p = paginatorFor(edge) ?: return
         val next = withContext(Dispatchers.Default) {
             if (forward) p.pageAfter(pages.last().charStart) else p.pageBefore(pages.first().charStart)
         } ?: return
@@ -1041,6 +1168,19 @@ class ReaderViewModel(
         if (timer.isRunning) speedTracker.feed(offset, System.currentTimeMillis())
     }
 
+    /** 章节表更新后按当前位置刷新章节标题/序号/章内进度。 */
+    private fun refreshChapterState() {
+        val anchor = _uiState.value.spread?.left?.charStart ?: anchorOffset.value
+        _uiState.update {
+            it.copy(
+                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, anchor))?.title.orEmpty(),
+                chapterIndex = chapterIndexAt(chapters, anchor),
+                chapterCount = chapters.size,
+                inChapterFraction = inChapterFraction(chapters, chapterIndexAt(chapters, anchor), anchor),
+            )
+        }
+    }
+
     private fun publish(spread: PageSpread, config: LayoutConfig, dual: Boolean, geom: SpreadGeometry?) {
         _uiState.update {
             it.copy(
@@ -1110,6 +1250,8 @@ class ReaderViewModel(
                 _nextSpread.value = next
                 _prevSpread.value = prev
             }
+            // 首帧上屏前不渲染整页位图（3 张整页 drawText 会跟首屏抢 CPU）
+            firstFrameRendered.filter { it }.first()
             pregenCurlBitmaps(listOfNotNull(spread, prev, next))
         }
     }
@@ -1117,7 +1259,12 @@ class ReaderViewModel(
     override fun onCleared() {
         val offset = pendingSave.value
         val nowMs = System.currentTimeMillis()
-        kotlinx.coroutines.runBlocking {
+        val exact = exactPaginator
+        val active = paginatorLeft
+        // 收尾落库 + 页边界落盘 + 关闭内容源放 IO 线程异步做：
+        // 进度在阅读期间已由防抖保存覆盖，这里只是最后一笔，
+        // 不值得在主线程 runBlocking 挡返回转场的收尾帧。
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
                 if (offset != null) {
                     bookshelfRepository.saveProgress(buildProgress(offset, nowMs))
@@ -1125,14 +1272,25 @@ class ReaderViewModel(
                 bookshelfRepository.touchLastRead(bookId, nowMs)
                 flushReadingSession(nowMs)
             }
+            runCatching { exact?.persistBounds() }
+            runCatching { active?.persistBounds() }
+            // 关闭内容源，连带取消未完成的后台索引构建
+            runCatching { (content as? java.io.Closeable)?.close() }
+            content = null
+            curlBitmapCache.clear()
         }
-        // 关闭内容源，连带取消未完成的后台索引构建
-        runCatching { (content as? java.io.Closeable)?.close() }
-        content = null
-        curlBitmapCache.clear()
     }
 
     companion object {
+        /** 锚点深于该字数且页边界缓存未覆盖时，才启用段首播种起排（浅位置从 0 排足够快）。 */
+        private const val SEED_MIN_ANCHOR_CHARS = 30_000L
+
+        /** 首帧上屏后再延迟该时长，才启动全书后台分页，避开首次翻页。 */
+        private const val FULL_BOUNDS_IDLE_DELAY_MS = 400L
+
+        /** 后台每多排多少页就把页边界增量落盘一次。 */
+        private const val INCREMENTAL_PERSIST_PAGES = 64
+
         fun factory(
             container: AppContainer,
             bookId: Long,

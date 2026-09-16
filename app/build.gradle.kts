@@ -29,6 +29,10 @@ android {
             }
         }
     }
+    // APK 输出文件名与项目目录名一致：FoldReader-debug.apk / FoldReader-release.apk
+    base {
+        archivesName = "FoldReader"
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

@@ -162,6 +162,7 @@ class BookshelfRepositoryDeleteTest {
 
     private class FakeChapterDao : ChapterDao {
         override suspend fun getForBook(bookId: Long): List<ChapterEntity> = emptyList()
+        override fun observeForBook(bookId: Long): Flow<List<ChapterEntity>> = flowOf(emptyList())
         override suspend fun upsertAll(chapters: List<ChapterEntity>) = Unit
         override suspend fun deleteForBook(bookId: Long) = Unit
     }

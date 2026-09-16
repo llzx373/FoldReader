@@ -16,14 +16,16 @@ data class BookWithProgress(
 @Dao
 interface BookDao {
 
-    @Query("SELECT * FROM books ORDER BY COALESCE(lastReadAt, importedAt) DESC")
+    // 书架排序改由 ViewModel 按用户选择客户端排序，DAO 只保证稳定顺序（id），
+    // 避免 lastReadAt 更新导致从阅读页返回时列表重排。
+    @Query("SELECT * FROM books ORDER BY id")
     fun observeBookshelf(): Flow<List<BookEntity>>
 
     @Query(
         """
         SELECT books.*, reading_progress.charOffset AS charOffset
         FROM books LEFT JOIN reading_progress ON reading_progress.bookId = books.id
-        ORDER BY COALESCE(books.lastReadAt, books.importedAt) DESC
+        ORDER BY books.id
         """,
     )
     fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>>
@@ -36,7 +38,7 @@ interface BookDao {
         SELECT books.*, reading_progress.charOffset AS charOffset
         FROM books LEFT JOIN reading_progress ON reading_progress.bookId = books.id
         WHERE (:groupName IS NULL AND books.groupName IS NULL) OR books.groupName = :groupName
-        ORDER BY COALESCE(books.lastReadAt, books.importedAt) DESC
+        ORDER BY books.id
         """,
     )
     fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>>

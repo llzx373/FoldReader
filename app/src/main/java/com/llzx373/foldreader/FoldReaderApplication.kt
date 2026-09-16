@@ -63,6 +63,9 @@ class AppContainer(context: Context) {
                 ?.takeIf { it.totalChars != totalChars }
                 ?.let { bookshelfRepository.upsertBook(it.copy(totalChars = totalChars)) }
         },
+        onChaptersIndexed = { bookId, chapters ->
+            bookshelfRepository.saveChapters(bookId, chapters)
+        },
         chapterRules = {
             ChapterRules.merge(settingsRepository.preferences.first().customChapterRules)
         },

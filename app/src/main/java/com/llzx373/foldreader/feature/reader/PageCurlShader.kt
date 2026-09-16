@@ -39,7 +39,7 @@ import kotlin.math.sin
  *
  * 片元分类：
  * - 前半程（cosPhi>0）：delta ∈ [sheetG·cos, edge) 为纸张正面（d=delta/cos 取样
- *   page，明暗∝sinφ + 书脊 AO + 自由边高光脊）；delta ∈ [edge, sheetG+sheetW)
+ *   page，明暗∝sinφ + 书脊 AO + 自由边暗影）；delta ∈ [edge, sheetG+sheetW)
  *   为已揭示区（under + 自由边投影，渐入再衰减剖面，强度∝sinφ）；其余为静止区
  *   （page 原位：对侧页 + 铰链缝 + 外边距）；
  * - 后半程（cosPhi<0，仅双页到达）：delta ∈ [edge, sheetG·cos) 为纸张背面
@@ -88,9 +88,9 @@ half4 main(float2 fragCoord) {
             half4 tex = page.eval(src);
             float shade = 1.0 - 0.30 * pow(lift, 1.5);
             float ao = 1.0 - 0.10 * exp(-(d - sheetG) / (sheetW * 0.12)) * lift;
-            // 自由边高光：乘法项（随纸色缩放，浅色主题不再烧成白边），范围收窄、强度减弱
-            float ridge = exp(-pow((reach - d) / (sheetW * 0.06), 2.0)) * 0.14 * lift;
-            half3 frontRgb = min(tex.rgb * (shade * ao + ridge), half3(1.0));
+            // 自由边暗影：靠近外缘按高斯剖面压暗（乘进明暗，随纸色缩放），范围收窄
+            float edgeShade = 1.0 - 0.20 * exp(-pow((reach - d) / (sheetW * 0.06), 2.0)) * lift;
+            half3 frontRgb = tex.rgb * (shade * ao * edgeShade);
             // 单页收尾：垂直位窄条向下层淡出（双页 sheetFade 恒 1，无影响）
             half3 base = under.eval(fragCoord).rgb;
             return half4(base + (frontRgb - base) * half(sheetFade), 1.0);

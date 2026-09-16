@@ -329,6 +329,8 @@ class BackupCodecTest {
             update { copy(panelScreenOff = enabled) }
         override suspend fun setBookshelfGridView(gridView: Boolean) =
             update { copy(bookshelfGridView = gridView) }
+        override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) =
+            update { copy(bookshelfSort = sort) }
         override suspend fun setCustomChapterRules(rules: List<String>) =
             update { copy(customChapterRules = rules) }
         override suspend fun setAdCleanRules(rules: List<String>) =
@@ -375,6 +377,7 @@ class BackupCodecTest {
         }
 
         override suspend fun getChapters(bookId: Long): List<Chapter> = emptyList()
+        override fun observeChapters(bookId: Long): Flow<List<Chapter>> = flowOf(emptyList())
         override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) = Unit
 
         override fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>> =

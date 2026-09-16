@@ -32,6 +32,8 @@ class TxtBookParser(
     private val bookIdResolver: suspend (Uri) -> Long? = { null },
     private val contentUriResolver: suspend (Uri) -> Uri = { it },
     private val onBookIndexed: suspend (bookId: Long, totalChars: Long) -> Unit = { _, _ -> },
+    /** 实时索引（异步建偏移索引）扫描完成后回传章节，调用方负责落库与通知 UI。 */
+    private val onChaptersIndexed: suspend (bookId: Long, chapters: List<Chapter>) -> Unit = { _, _ -> },
     private val chapterRules: suspend () -> List<Regex> = { ChapterRules.DEFAULT },
 ) : BookParser {
 
@@ -144,7 +146,7 @@ class TxtBookParser(
                 indexChannel = UriChannels.open(context, uri)
                 store.begin(key)
                 val batch = ArrayList<Pair<Int, Long>>(PERSIST_BATCH_BLOCKS)
-                TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules) { chunkIndex, startByteOffset, endByteOffset ->
+                val chapters = TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules) { chunkIndex, startByteOffset, endByteOffset ->
                     if (!isActive) throw CancellationException()
                     progress.value = if (fileLength > 0) {
                         (endByteOffset.toFloat() / fileLength).coerceIn(0f, 1f)
@@ -161,6 +163,7 @@ class TxtBookParser(
                 if (batch.isNotEmpty()) store.appendBlocks(key, batch.toList())
                 store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
                 progress.value = 1f
+                runCatching { onChaptersIndexed(bookId, chapters) }
                 runCatching { onBookIndexed(bookId, shared.totalChars) }
             } catch (t: Throwable) {
                 shared.abort(t)
