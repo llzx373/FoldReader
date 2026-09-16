@@ -104,6 +104,9 @@ import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.foldable.WidthCategory
+import com.llzx373.foldreader.feature.importer.BatchImportConfirmDialog
+import com.llzx373.foldreader.feature.importer.BatchImportProgressOverlay
+import com.llzx373.foldreader.feature.importer.BatchImportSummaryDialog
 import com.llzx373.foldreader.ui.EmptyState
 import kotlinx.coroutines.launch
 
@@ -129,6 +132,7 @@ fun BookshelfScreen(
     val sortOrder by viewModel.sortOrder.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
+    val batchImportState by viewModel.batchImportState.collectAsState()
     val groups by viewModel.groups.collectAsState()
     val allBookmarks by viewModel.allBookmarks.collectAsState()
     val allAnnotations by viewModel.allAnnotations.collectAsState()
@@ -170,8 +174,29 @@ fun BookshelfScreen(
             importRequest = uri to false
         }
     }
+    val openTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.enumerateBatchDirectory(uri)
+        }
+    }
     val launchImport = {
-        openDocumentLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
+        openDocumentLauncher.launch(
+            arrayOf(
+                "text/plain",
+                "application/epub+zip",
+                // FB2 无标准注册 MIME，靠扩展名 + octet-stream 兜底
+                "application/x-fictionbook+xml",
+                "application/octet-stream",
+            ),
+        )
     }
 
     LaunchedEffect(Unit) {
@@ -329,6 +354,14 @@ fun BookshelfScreen(
                         icon = { Icon(Icons.Filled.Create, contentDescription = null) },
                         text = { Text("导入本地书籍") },
                     )
+                    FloatingActionButtonMenuItem(
+                        onClick = {
+                            fabMenuExpanded = false
+                            openTreeLauncher.launch(null)
+                        },
+                        icon = { FolderIcon(contentDescription = "导入目录为分组") },
+                        text = { Text("导入目录为分组") },
+                    )
                 }
             }
         },
@@ -450,7 +483,62 @@ fun BookshelfScreen(
                     }
                 }
             }
+            when (val batch = batchImportState) {
+                BatchImportUiState.Enumerating -> Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitPointerEvent()
+                            }
+                        },
+                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        LoadingIndicator()
+                        Text(
+                            text = "正在扫描目录…",
+                            modifier = Modifier.padding(top = 16.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+                is BatchImportUiState.Importing -> BatchImportProgressOverlay(
+                    done = batch.done,
+                    total = batch.total,
+                    currentName = batch.currentName,
+                    onCancel = viewModel::cancelBatchImport,
+                )
+                else -> Unit
+            }
         }
+    }
+
+    when (val batch = batchImportState) {
+        is BatchImportUiState.Confirming -> BatchImportConfirmDialog(
+            defaultGroupName = batch.defaultGroupName,
+            foundCount = batch.result.entries.size,
+            truncated = batch.result.truncated,
+            onConfirm = { viewModel.startBatchImport(batch.result.entries, it) },
+            onDismiss = viewModel::consumeBatchImportState,
+        )
+        is BatchImportUiState.Done -> BatchImportSummaryDialog(
+            result = batch.result,
+            onDismiss = {
+                val group = batch.result.groupName
+                viewModel.consumeBatchImportState()
+                if (group != null) groupFilter = group
+            },
+        )
+        is BatchImportUiState.Error -> LaunchedEffect(batch) {
+            snackbarHostState.showSnackbar(batch.message)
+            viewModel.consumeBatchImportState()
+        }
+        else -> Unit
     }
 
     importRequest?.let { (uri, openAfter) ->
@@ -860,6 +948,7 @@ private fun BookGridItem(
                 sharedTransitionScope = sharedTransitionScope,
                 animatedVisibilityScope = animatedVisibilityScope,
                 bookId = book.id,
+                coverPath = book.coverPath,
             )
             if (selected) {
                 Box(
@@ -976,6 +1065,7 @@ private fun BookList(
                             sharedTransitionScope = sharedTransitionScope,
                             animatedVisibilityScope = animatedVisibilityScope,
                             bookId = book.id,
+                            coverPath = book.coverPath,
                         )
                         if (book.source == BookSource.EXTERNAL) {
                             ExternalSourceBadge(modifier = Modifier.align(Alignment.TopEnd))

@@ -53,6 +53,6 @@ class BackupManager(
     }
 
     companion object {
-        const val BACKUP_VERSION = 2
+        const val BACKUP_VERSION = 4
     }
 }

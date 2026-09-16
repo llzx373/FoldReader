@@ -57,6 +57,15 @@ class BackupCodec(
                 .put("encoding", book.encoding)
                 .put("importedAt", book.importedAt)
                 .put("lastReadAt", book.lastReadAt ?: JSONObject.NULL)
+                .put("groupName", book.groupName ?: JSONObject.NULL)
+                .put("description", book.description ?: JSONObject.NULL)
+                .put("publisher", book.publisher ?: JSONObject.NULL)
+                .put("language", book.language ?: JSONObject.NULL)
+                .put("pubDate", book.pubDate ?: JSONObject.NULL)
+                .put("subjects", book.subjects ?: JSONObject.NULL)
+                .put("identifier", book.identifier ?: JSONObject.NULL)
+                .put("seriesName", book.seriesName ?: JSONObject.NULL)
+                .put("seriesIndex", book.seriesIndex ?: JSONObject.NULL)
 
             val progress = bookshelfRepository.getProgress(book.id)
             bookJson.put(
@@ -147,6 +156,44 @@ class BackupCodec(
                 continue
             }
             restoredBooks++
+
+            // v3 起备份分组：字段存在（含 null）时恢复/清除分组；v2 及更早无此字段，保持现状不动
+            if (bookJson.has("groupName")) {
+                val groupName = if (bookJson.isNull("groupName")) {
+                    null
+                } else {
+                    bookJson.optString("groupName").trim().takeIf { it.isNotEmpty() }
+                }
+                bookshelfRepository.updateGroup(listOf(local.id), groupName)
+            }
+
+            // v4 起备份 EPUB 扩展元数据；字段缺省（旧版本备份）时保持本地值
+            val metaKeys = listOf(
+                "description", "publisher", "language", "pubDate",
+                "subjects", "identifier", "seriesName", "seriesIndex",
+            )
+            if (metaKeys.any { bookJson.has(it) }) {
+                fun opt(key: String, current: String?): String? =
+                    if (!bookJson.has(key)) {
+                        current
+                    } else if (bookJson.isNull(key)) {
+                        null
+                    } else {
+                        bookJson.optString(key).takeIf { it.isNotEmpty() }
+                    }
+                bookshelfRepository.upsertBook(
+                    local.copy(
+                        description = opt("description", local.description),
+                        publisher = opt("publisher", local.publisher),
+                        language = opt("language", local.language),
+                        pubDate = opt("pubDate", local.pubDate),
+                        subjects = opt("subjects", local.subjects),
+                        identifier = opt("identifier", local.identifier),
+                        seriesName = opt("seriesName", local.seriesName),
+                        seriesIndex = opt("seriesIndex", local.seriesIndex),
+                    ),
+                )
+            }
 
             bookJson.optJSONObject("progress")?.let { p ->
                 val existing = bookshelfRepository.getProgress(local.id)

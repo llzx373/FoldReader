@@ -50,6 +50,8 @@ class Paginator(
     private val diskKey: PaginatorKey? = null,
     /** 摄像头开孔规避：奇数序页顶部/偶数序页底部按行减容，配合渲染偏移避开开孔。 */
     val avoidance: PageAvoidance = PageAvoidance(),
+    /** 图片占位段落表：占位符（U+FFFC）偏移 → IMAGE span（含原始尺寸）；非图片书为空。 */
+    private val images: Map<Long, com.llzx373.foldreader.core.format.TextSpan> = emptyMap(),
 ) {
     private val bounds = mutableListOf(0L)
     private val boundsLock = Any()
@@ -93,6 +95,8 @@ class Paginator(
     private val centerSlackPx = (fullTextWidthPx - textWidthPx).coerceAtLeast(0f) / 2f
     private val paddingLeftPx = marginLeftPx + centerSlackPx
     private val paddingRightPx = marginRightPx + centerSlackPx
+    /** 图片行高上限：约 60% 页可用高（等比缩放上限，与奇偶页减容无关保持稳定）。 */
+    private val maxImageHeightPx = availHeightPx * 0.6f
 
     suspend fun pageAt(offset: Long): Page {
         ensureDiskBounds()
@@ -234,12 +238,14 @@ class Paginator(
         while (true) {
             val line = producer.next() ?: break
             val extra = if (line.isParagraphStart && lines.isNotEmpty()) paragraphSpacingPx else 0f
-            if (lines.isNotEmpty() && used + extra + lineHeightPx > pageAvailHeightPx) {
+            // 图片行按缩放后实际高度占用；文本行仍固定 lineHeightPx（纯文本路径逐像素不变）
+            val lineH = line.heightPx ?: lineHeightPx
+            if (lines.isNotEmpty() && used + extra + lineH > pageAvailHeightPx) {
                 producer.pushBack(line)
                 break
             }
             lines += line
-            used += extra + lineHeightPx
+            used += extra + lineH
         }
         return Page(
             charStart = start,
@@ -288,41 +294,93 @@ class Paginator(
             if (body.isEmpty()) {
                 pending += PageLine(pos, paraEnd, "", isParagraphStart = paragraphStart, isParagraphEnd = true)
             } else {
-                val paraIndentPx =
-                    if (!config.autoIndentEnabled || hasLeadingIndent(body)) 0 else indentPx
-                val raw = measurer.measureLineBreaks(
-                    body, textWidthPx.toInt(), paraIndentPx, fontSizePx,
-                    config.letterSpacingEm, config.typeface,
-                )
-                val breaks = Kinsoku.adjust(body, raw)
-                val starts = ArrayList<Int>(breaks.size)
-                val ends = ArrayList<Int>(breaks.size)
-                var lineStart = 0
-                for (b0 in breaks) {
-                    val b = maxOf(b0, lineStart + 1).coerceAtMost(body.length)
-                    if (b <= lineStart) continue
-                    starts += lineStart
-                    ends += b
-                    lineStart = b
-                    if (lineStart >= body.length) break
+                // 图片占位段落（单 U+FFFC 字符且在图片表中）：产出图片行，高度按缩放后实际值
+                val imageSpan = if (body.length == 1 && body[0] == IMAGE_PLACEHOLDER_CHAR) {
+                    images[pos]
+                } else {
+                    null
                 }
-                for (i in starts.indices) {
-                    val isLast = i == starts.lastIndex
+                if (imageSpan != null) {
                     pending += PageLine(
-                        charStart = pos + starts[i],
-                        charEnd = if (isLast) paraEnd else pos + ends[i],
-                        text = body.substring(starts[i], ends[i]),
-                        isParagraphStart = paragraphStart && i == 0,
-                        isParagraphEnd = isLast && paragraphEnd,
+                        charStart = pos,
+                        charEnd = paraEnd,
+                        text = body,
+                        isParagraphStart = paragraphStart,
+                        isParagraphEnd = true,
+                        heightPx = imageLineHeightPx(
+                            srcW = imageSpan.width,
+                            srcH = imageSpan.height,
+                            availWidthPx = textWidthPx,
+                            maxHeightPx = maxImageHeightPx,
+                            fallbackPx = lineHeightPx,
+                        ),
+                        imagePath = imageSpan.payload,
+                        imageAlt = imageSpan.alt,
                     )
+                } else {
+                    loadTextLines(body, paraEnd, paragraphStart, paragraphEnd)
                 }
             }
             pos = paraEnd
+        }
+
+        private suspend fun loadTextLines(
+            body: String,
+            paraEnd: Long,
+            paragraphStart: Boolean,
+            paragraphEnd: Boolean,
+        ) {
+            val paraIndentPx =
+                if (!config.autoIndentEnabled || hasLeadingIndent(body)) 0 else indentPx
+            val raw = measurer.measureLineBreaks(
+                body, textWidthPx.toInt(), paraIndentPx, fontSizePx,
+                config.letterSpacingEm, config.typeface,
+            )
+            val breaks = Kinsoku.adjust(body, raw)
+            val starts = ArrayList<Int>(breaks.size)
+            val ends = ArrayList<Int>(breaks.size)
+            var lineStart = 0
+            for (b0 in breaks) {
+                val b = maxOf(b0, lineStart + 1).coerceAtMost(body.length)
+                if (b <= lineStart) continue
+                starts += lineStart
+                ends += b
+                lineStart = b
+                if (lineStart >= body.length) break
+            }
+            for (i in starts.indices) {
+                val isLast = i == starts.lastIndex
+                pending += PageLine(
+                    charStart = pos + starts[i],
+                    charEnd = if (isLast) paraEnd else pos + ends[i],
+                    text = body.substring(starts[i], ends[i]),
+                    isParagraphStart = paragraphStart && i == 0,
+                    isParagraphEnd = isLast && paragraphEnd,
+                )
+            }
         }
     }
 
     private companion object {
         const val SCAN_CHARS = 4096L
         const val SNAP_SCAN_CHARS = 4096L
+        /** 图片占位字符（U+FFFC，与压平规范 v3 的 img 占位块一致）。 */
+        const val IMAGE_PLACEHOLDER_CHAR = '￼'
     }
+}
+
+/**
+ * 图片行高：按可用宽等比缩放后的实际高度，上限 [maxHeightPx]（约 60% 页高）；
+ * 原始尺寸未知（<=0）时退回一行文本高度（占位灰框）。
+ */
+internal fun imageLineHeightPx(
+    srcW: Int,
+    srcH: Int,
+    availWidthPx: Float,
+    maxHeightPx: Float,
+    fallbackPx: Float,
+): Float {
+    if (srcW <= 0 || srcH <= 0) return fallbackPx
+    val scaled = srcH * (availWidthPx / srcW)
+    return scaled.coerceIn(1f, maxHeightPx)
 }

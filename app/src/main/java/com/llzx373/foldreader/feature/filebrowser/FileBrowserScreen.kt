@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.filebrowser
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +54,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.feature.importer.BatchImportConfirmDialog
+import com.llzx373.foldreader.feature.importer.BatchImportProgressOverlay
+import com.llzx373.foldreader.feature.importer.BatchImportSummaryDialog
+import com.llzx373.foldreader.feature.importer.BatchImportUseCase
 import com.llzx373.foldreader.ui.EmptyState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -68,7 +76,34 @@ fun FileBrowserScreen(
     val loading by viewModel.loading.collectAsState()
     val openingFile by viewModel.openingFile.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var removeRootTarget by remember { mutableStateOf<BrowserRoot?>(null) }
+    // 目录批量导入的本地状态机（枚举中/待确认/进度/汇总），复用书架同款对话框
+    val batchImport = remember { app.container.batchImportUseCase }
+    var batchEnumerating by remember { mutableStateOf(false) }
+    var batchConfirm by remember {
+        mutableStateOf<Pair<String, BatchImportUseCase.EnumerateResult>?>(null)
+    }
+    var batchProgress by remember { mutableStateOf<Triple<Int, Int, String>?>(null) }
+    var batchSummary by remember { mutableStateOf<BatchImportUseCase.BatchResult?>(null) }
+    var batchJob by remember { mutableStateOf<Job?>(null) }
+
+    val startDirectoryImport: (BrowserEntry) -> Unit = { entry ->
+        val treeUriString = path.lastOrNull()?.treeUri
+        if (treeUriString != null && !batchEnumerating && batchProgress == null) {
+            batchEnumerating = true
+            scope.launch {
+                val result = runCatching {
+                    batchImport.enumerate(Uri.parse(treeUriString), entry.documentId)
+                }
+                batchEnumerating = false
+                result.onSuccess { batchConfirm = entry.name to it }
+                    .onFailure {
+                        snackbarHostState.showSnackbar("目录扫描失败：${it.message ?: "未知错误"}")
+                    }
+            }
+        }
+    }
 
     val treeLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -138,9 +173,10 @@ fun FileBrowserScreen(
                     loading = loading,
                     onEnter = viewModel::enterDirectory,
                     onOpen = viewModel::openFile,
+                    onImportDirectory = startDirectoryImport,
                 )
             }
-            if (openingFile) {
+            if (openingFile || batchEnumerating) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -148,7 +184,7 @@ fun FileBrowserScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         LoadingIndicator()
                         Text(
-                            text = "正在打开…",
+                            text = if (batchEnumerating) "正在扫描目录…" else "正在打开…",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -156,7 +192,45 @@ fun FileBrowserScreen(
                     }
                 }
             }
+            batchProgress?.let { (done, total, name) ->
+                BatchImportProgressOverlay(
+                    done = done,
+                    total = total,
+                    currentName = name,
+                    onCancel = { batchJob?.cancel() },
+                )
+            }
         }
+    }
+
+    batchConfirm?.let { (dirName, enumResult) ->
+        BatchImportConfirmDialog(
+            defaultGroupName = BatchImportUseCase.defaultGroupName(dirName),
+            foundCount = enumResult.entries.size,
+            truncated = enumResult.truncated,
+            onConfirm = { groupName ->
+                batchConfirm = null
+                batchProgress = Triple(0, enumResult.entries.size, "")
+                batchJob = scope.launch {
+                    val batchResult = batchImport.importDirectory(
+                        enumResult.entries,
+                        groupName,
+                    ) { done, total, name ->
+                        batchProgress = Triple(done, total, name)
+                    }
+                    batchProgress = null
+                    batchSummary = batchResult
+                }
+            },
+            onDismiss = { batchConfirm = null },
+        )
+    }
+
+    batchSummary?.let { result ->
+        BatchImportSummaryDialog(
+            result = result,
+            onDismiss = { batchSummary = null },
+        )
     }
 
     removeRootTarget?.let { target ->
@@ -219,11 +293,12 @@ private fun EntryList(
     loading: Boolean,
     onEnter: (BrowserEntry) -> Unit,
     onOpen: (BrowserEntry) -> Unit,
+    onImportDirectory: (BrowserEntry) -> Unit,
 ) {
     if (!loading && entries.isEmpty()) {
         EmptyState(
-            title = "此文件夹没有 TXT 书籍",
-            description = "仅显示子文件夹和 .txt 文件",
+            title = "此文件夹没有可导入的书籍",
+            description = "仅显示子文件夹和支持的电子书（TXT / EPUB / FB2）",
         )
         return
     }
@@ -247,7 +322,16 @@ private fun EntryList(
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (entry.isDirectory) {
+                    IconButton(onClick = { onImportDirectory(entry) }) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = "将「${entry.name}」全部导入为分组",
+                        )
+                    }
+                }
             }
         }
     }

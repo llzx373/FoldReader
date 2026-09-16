@@ -11,10 +11,11 @@ import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
-import com.llzx373.foldreader.core.format.BookParser
+import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.OffsetIndexStore
 import com.llzx373.foldreader.core.format.TextCleaner
+import com.llzx373.foldreader.feature.importer.BatchImportUseCase
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -57,11 +58,25 @@ sealed interface ImportUiState {    data object Idle : ImportUiState
     data class Error(val message: String) : ImportUiState
 }
 
+/** 目录批量导入的状态机，与单书 [ImportUiState] 完全分离。 */
+sealed interface BatchImportUiState {
+    data object Idle : BatchImportUiState
+    data object Enumerating : BatchImportUiState
+    data class Confirming(
+        val defaultGroupName: String,
+        val result: BatchImportUseCase.EnumerateResult,
+    ) : BatchImportUiState
+    data class Importing(val done: Int, val total: Int, val currentName: String) : BatchImportUiState
+    data class Done(val result: BatchImportUseCase.BatchResult) : BatchImportUiState
+    data class Error(val message: String) : BatchImportUiState
+}
+
 class BookshelfViewModel(
     private val importBook: ImportBookUseCase,
+    private val batchImport: BatchImportUseCase,
     private val bookshelfRepository: BookshelfRepository,
     private val settingsRepository: SettingsRepository,
-    private val parser: BookParser,
+    private val parsers: BookParsers,
     private val offsetIndexStore: OffsetIndexStore,
 ) : ViewModel() {
 
@@ -153,6 +168,47 @@ class BookshelfViewModel(
         _importState.value = ImportUiState.Idle
     }
 
+    private val _batchImportState = MutableStateFlow<BatchImportUiState>(BatchImportUiState.Idle)
+    val batchImportState: StateFlow<BatchImportUiState> = _batchImportState.asStateFlow()
+    private var batchJob: kotlinx.coroutines.Job? = null
+
+    fun enumerateBatchDirectory(treeUri: Uri) {
+        if (_batchImportState.value != BatchImportUiState.Idle) return
+        _batchImportState.value = BatchImportUiState.Enumerating
+        batchJob = viewModelScope.launch {
+            _batchImportState.value = runCatching { batchImport.enumerate(treeUri) }.fold(
+                onSuccess = { result ->
+                    BatchImportUiState.Confirming(
+                        defaultGroupName = BatchImportUseCase.defaultGroupName(
+                            batchImport.treeDisplayName(treeUri),
+                        ),
+                        result = result,
+                    )
+                },
+                onFailure = { BatchImportUiState.Error(it.message ?: "目录扫描失败") },
+            )
+        }
+    }
+
+    fun startBatchImport(entries: List<BatchImportUseCase.DocEntry>, groupName: String) {
+        if (_batchImportState.value !is BatchImportUiState.Confirming) return
+        _batchImportState.value = BatchImportUiState.Importing(0, entries.size, "")
+        batchJob = viewModelScope.launch {
+            val result = batchImport.importDirectory(entries, groupName) { done, total, name ->
+                _batchImportState.value = BatchImportUiState.Importing(done, total, name)
+            }
+            _batchImportState.value = BatchImportUiState.Done(result)
+        }
+    }
+
+    fun cancelBatchImport() {
+        batchJob?.cancel()
+    }
+
+    fun consumeBatchImportState() {
+        _batchImportState.value = BatchImportUiState.Idle
+    }
+
     fun toggleViewMode() {
         viewModelScope.launch { settingsRepository.setBookshelfGridView(!gridView.value) }
     }
@@ -208,7 +264,7 @@ class BookshelfViewModel(
             bookshelfRepository.saveChapters(bookId, emptyList())
             val override = EncodingDetector.forNameOrNull(book.encoding)
             val scanned = runCatching {
-                parser.parseChapters(Uri.parse(book.fileUri), override)
+                parsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override)
             }.getOrDefault(emptyList())
             bookshelfRepository.saveChapters(bookId, scanned)
         }
@@ -219,9 +275,10 @@ class BookshelfViewModel(
             initializer {
                 BookshelfViewModel(
                     importBook = container.importBookUseCase,
+                    batchImport = container.batchImportUseCase,
                     bookshelfRepository = container.bookshelfRepository,
                     settingsRepository = container.settingsRepository,
-                    parser = container.txtBookParser,
+                    parsers = container.bookParsers,
                     offsetIndexStore = container.offsetIndexStore,
                 )
             }

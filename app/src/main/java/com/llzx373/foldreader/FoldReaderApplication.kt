@@ -13,9 +13,15 @@ import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.SettingsRepositoryImpl
 import com.llzx373.foldreader.core.foldable.FoldableStateProvider
+import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.ChapterRules
+import com.llzx373.foldreader.core.format.epub.EpubBookParser
+import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
 import com.llzx373.foldreader.core.format.txt.TxtBookParser
+import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +38,10 @@ class AppContainer(context: Context) {
     )
     val database: FoldReaderDatabase =
         Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db").build()
+    /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
+    val convertedDir = File(context.filesDir, "converted").apply { mkdirs() }
+    /** 封面图片目录（<contentHash>.<ext>），与 converted/ 同生命周期。 */
+    val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
     val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
         bookDao = database.bookDao(),
         progressDao = database.readingProgressDao(),
@@ -39,6 +49,8 @@ class AppContainer(context: Context) {
         bookmarkDao = database.bookmarkDao(),
         annotationDao = database.annotationDao(),
         sessionDao = database.readingSessionDao(),
+        convertedDir = convertedDir,
+        coversDir = coversDir,
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val fileBrowserRootsStore = FileBrowserRootsStore(context)
@@ -49,6 +61,14 @@ class AppContainer(context: Context) {
     val offsetIndexDao = database.offsetIndexDao()
     val offsetIndexStore = RoomOffsetIndexStore(offsetIndexDao)
     val parserScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val onBookIndexed: suspend (Long, Long) -> Unit = { bookId, totalChars ->
+        bookshelfRepository.getBook(bookId)
+            ?.takeIf { it.totalChars != totalChars }
+            ?.let { bookshelfRepository.upsertBook(it.copy(totalChars = totalChars)) }
+    }
+    private val chapterRules: suspend () -> List<Regex> = {
+        ChapterRules.merge(settingsRepository.preferences.first().customChapterRules)
+    }
     val txtBookParser = TxtBookParser(
         context = context,
         offsetIndexStore = offsetIndexStore,
@@ -60,17 +80,56 @@ class AppContainer(context: Context) {
                 ?.let { Uri.fromFile(java.io.File(it)) }
                 ?: uri
         },
-        onBookIndexed = { bookId, totalChars ->
-            bookshelfRepository.getBook(bookId)
-                ?.takeIf { it.totalChars != totalChars }
-                ?.let { bookshelfRepository.upsertBook(it.copy(totalChars = totalChars)) }
-        },
+        onBookIndexed = onBookIndexed,
         onChaptersIndexed = { bookId, chapters ->
             bookshelfRepository.saveChapters(bookId, chapters)
         },
-        chapterRules = {
-            ChapterRules.merge(settingsRepository.preferences.first().customChapterRules)
+        chapterRules = chapterRules,
+    )
+    // 内部 TXT 管线（EPUB/FB2 共用）：压平文件 uri → 文件名即原书 contentHash → 反查 bookId，
+    // 使偏移索引缓存落在原书 bookId 上；启发式章节回填在此禁用（真实章节由各格式 parser 回填）
+    private val flattenedTxtParser = TxtBookParser(
+        context = context,
+        offsetIndexStore = offsetIndexStore,
+        indexScope = parserScope,
+        bookIdResolver = { uri ->
+            uri.lastPathSegment
+                ?.substringBeforeLast('.')
+                ?.let { bookshelfRepository.findByContentHash(it)?.id }
         },
+        contentUriResolver = { it },
+        onBookIndexed = onBookIndexed,
+        onChaptersIndexed = { _, _ -> },
+        chapterRules = chapterRules,
+    )
+    private val openFlattenedContent: suspend (File) -> com.llzx373.foldreader.core.format.BookContent =
+        { file -> flattenedTxtParser.openContent(Uri.fromFile(file), Charsets.UTF_8) }
+    val epubBookParser = EpubBookParser(
+        convertedDir = convertedDir,
+        openFlattenedContent = openFlattenedContent,
+        openChannel = { uri -> UriChannels.open(context, uri) },
+        displayNameOf = { uri -> UriChannels.displayName(context, uri) },
+        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
+        onChaptersIndexed = { bookId, chapters ->
+            bookshelfRepository.saveChapters(bookId, chapters)
+        },
+    )
+    val fb2BookParser = Fb2BookParser(
+        convertedDir = convertedDir,
+        openFlattenedContent = openFlattenedContent,
+        openChannel = { uri -> UriChannels.open(context, uri) },
+        displayNameOf = { uri -> UriChannels.displayName(context, uri) },
+        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
+        onChaptersIndexed = { bookId, chapters ->
+            bookshelfRepository.saveChapters(bookId, chapters)
+        },
+    )
+    val bookParsers = BookParsers(
+        mapOf(
+            BookFormat.TXT to txtBookParser,
+            BookFormat.EPUB to epubBookParser,
+            BookFormat.FB2 to fb2BookParser,
+        ),
     )
     val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
     val pageDiskCache = com.llzx373.foldreader.core.reader.FilePageDiskCache(
@@ -85,6 +144,16 @@ class AppContainer(context: Context) {
     )
     val importBookUseCase = ImportBookUseCase(
         context = context,
+        bookshelfRepository = bookshelfRepository,
+        convertedParsers = mapOf(
+            BookFormat.EPUB to epubBookParser,
+            BookFormat.FB2 to fb2BookParser,
+        ),
+        coversDir = coversDir,
+    )
+    val batchImportUseCase = com.llzx373.foldreader.feature.importer.BatchImportUseCase(
+        context = context,
+        importBook = importBookUseCase,
         bookshelfRepository = bookshelfRepository,
     )
 }

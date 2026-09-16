@@ -7,10 +7,15 @@ import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.format.ContentHasher
+import com.llzx373.foldreader.core.format.CoverImage
 import com.llzx373.foldreader.core.format.EncodingDetection
 import com.llzx373.foldreader.core.format.EncodingDetector
+import com.llzx373.foldreader.core.format.BookMeta
+import com.llzx373.foldreader.core.format.BookParser
+import com.llzx373.foldreader.core.format.FormatDetector
 import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.core.format.TsCharMap
+import com.llzx373.foldreader.core.format.epub.DrmProtectedException
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import java.io.File
 import java.io.FilterInputStream
@@ -27,14 +32,25 @@ class ImportBookUseCase(
     private val openChannel: (String) -> SeekableByteChannel,
     private val displayNameOf: (String) -> String?,
     private val traditionalMap: () -> Map<Char, Char>,
+    /** 非 TXT 格式（EPUB/FB2…）的解析器：导入时仅用于 parseMeta 取元数据。 */
+    private val convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
+    /** 封面落盘目录（filesDir/covers）；null 时跳过封面提取。 */
+    private val coversDir: File? = null,
 ) {
 
-    constructor(context: Context, bookshelfRepository: BookshelfRepository) : this(
+    constructor(
+        context: Context,
+        bookshelfRepository: BookshelfRepository,
+        convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
+        coversDir: File? = null,
+    ) : this(
         bookshelfRepository = bookshelfRepository,
         cleanedDir = File(context.filesDir, "cleaned"),
         openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
         traditionalMap = { TsCharMap.load(context) },
+        convertedParsers = convertedParsers,
+        coversDir = coversDir,
     )
 
     sealed interface Result {
@@ -74,6 +90,14 @@ class ImportBookUseCase(
 
         openChannel(uriKey).use { channel ->
             val head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
+            val format = FormatDetector.detect(displayNameOf(uriKey), mimeType = null, head = head)
+            if (format != null && format != BookFormat.TXT) {
+                // 非 TXT 忽略 CleanOptions：不复制原文件，转换发生在首开压平时
+                return importConverted(format, uriKey, channel, source, onProgress)
+            }
+            if (format == null && FormatDetector.isPdf(head)) {
+                return Result.Failure("暂不支持 PDF 格式")
+            }
             val detection = EncodingDetector.detect(head)
             val bom = EncodingDetector.bomLengthOf(head)
             val headText = String(
@@ -149,6 +173,91 @@ class ImportBookUseCase(
 
     private fun hashOf(file: File): String =
         RandomAccessFile(file, "r").use { hashOf(it.channel) }
+
+    /**
+     * 非 TXT（EPUB/FB2…）导入：跳过编码检测/TextCleaner/标题启发；
+     * 元数据由对应格式 parser 的 parseMeta 提供（失败回退文件名）。
+     * 无论 CleanOptions 如何都不复制原文件（压平转换发生在首开）。
+     */
+    private suspend fun importConverted(
+        format: BookFormat,
+        uriKey: String,
+        channel: SeekableByteChannel,
+        source: BookSource,
+        onProgress: (Float) -> Unit,
+    ): Result {
+        bookshelfRepository.findByFileUri(uriKey)
+            ?.takeIf { it.cleanedFilePath == null }
+            ?.let { return Result.DuplicateSameUri(it.id, it.title) }
+        val contentHash = hashOf(channel)
+        bookshelfRepository.findByContentHash(contentHash)
+            ?.let { return Result.DuplicateSameHash(it.id, it.title) }
+        val meta = try {
+            convertedParsers[format]?.parseMeta(Uri.parse(uriKey))
+        } catch (e: DrmProtectedException) {
+            return Result.Failure(e.message ?: "受 DRM 保护，无法导入")
+        } catch (t: Throwable) {
+            null
+        }
+        val title = meta?.title?.takeIf { it.isNotBlank() }
+            ?: displayNameOf(uriKey)
+                ?.removeSuffix(".zip")
+                ?.substringBeforeLast('.')
+                ?.takeIf { it.isNotBlank() }
+            ?: "未知书名"
+        val coverPath = coversDir?.let { dir ->
+            runCatching {
+                convertedParsers[format]?.extractCover(Uri.parse(uriKey))
+                    ?.let { writeCover(dir, contentHash, it) }
+            }.getOrNull()
+        }
+        val bookId = bookshelfRepository.upsertBook(
+            convertedEntity(title, meta, uriKey, contentHash, format, source, coverPath),
+        )
+        onProgress(1f)
+        return Result.Imported(bookId, title, encodingConfidence = 1f)
+    }
+
+    /** 非 TXT 入库实体：EPUB 扩展元数据全字段映射（meta 为 null 时全部留空）。 */
+    internal fun convertedEntity(
+        title: String,
+        meta: BookMeta?,
+        uriKey: String,
+        contentHash: String,
+        format: BookFormat,
+        source: BookSource,
+        coverPath: String?,
+    ): BookEntity = BookEntity(
+        title = title,
+        author = meta?.author,
+        fileUri = uriKey,
+        contentHash = contentHash,
+        format = format,
+        totalChars = 0,
+        encoding = Charsets.UTF_8.name(),
+        importedAt = System.currentTimeMillis(),
+        lastReadAt = null,
+        cleanedFilePath = null,
+        source = source,
+        description = meta?.description,
+        publisher = meta?.publisher,
+        language = meta?.language,
+        pubDate = meta?.pubDate,
+        subjects = meta?.subjects?.joinToString("\n")?.takeIf { it.isNotBlank() },
+        identifier = meta?.identifier,
+        seriesName = meta?.seriesName,
+        seriesIndex = meta?.seriesIndex,
+        coverPath = coverPath,
+    )
+
+    /** 封面落盘；同哈希旧封面（扩展名可能不同）先清掉再写。返回绝对路径。 */
+    internal fun writeCover(dir: File, contentHash: String, cover: CoverImage): String {
+        dir.mkdirs()
+        dir.listFiles { f -> f.name.startsWith("$contentHash.") }?.forEach { it.delete() }
+        val target = File(dir, "$contentHash.${cover.extension}")
+        target.writeBytes(cover.bytes)
+        return target.absolutePath
+    }
 
     private suspend fun insert(
         uriKey: String,

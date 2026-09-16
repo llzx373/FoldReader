@@ -13,6 +13,7 @@ import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
 import com.llzx373.foldreader.core.format.TextCleaner
+import com.llzx373.foldreader.core.format.isSupportedBookName
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -206,7 +207,7 @@ class FileBrowserViewModel(
                 val name = cursor.getString(1) ?: continue
                 val mime = cursor.getString(2)
                 val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
-                if (!isDirectory && !isTxt(name, mime)) continue
+                if (!isDirectory && !isSupportedBook(name, mime)) continue
                 entries += BrowserEntry(
                     name = name,
                     uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId),
@@ -229,8 +230,8 @@ class FileBrowserViewModel(
         android.util.Log.d("FileBrowserPerf", "listed $count entries in ${ms}ms (query ${queryMs}ms)")
     }
 
-    private fun isTxt(name: String, mimeType: String?): Boolean =
-        name.substringAfterLast('.', "").equals("txt", ignoreCase = true) || mimeType == "text/plain"
+    private fun isSupportedBook(name: String, mimeType: String?): Boolean =
+        isSupportedBookName(name, mimeType)
 
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {

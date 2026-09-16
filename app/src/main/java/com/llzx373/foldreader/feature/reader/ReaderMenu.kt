@@ -57,6 +57,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
@@ -651,16 +653,20 @@ private fun EncodingMenuEntry() {
     val activeBookId by container.activeReaderBookId.collectAsState()
     val bookId = activeBookId ?: return
     var refreshTick by remember { mutableIntStateOf(0) }
-    val encoding by produceState<String?>(initialValue = null, bookId, refreshTick) {
-        value = container.bookshelfRepository.getBook(bookId)?.encoding
+    val book by produceState<BookEntity?>(initialValue = null, bookId, refreshTick) {
+        value = container.bookshelfRepository.getBook(bookId)
     }
+    val currentBook = book ?: return
+    // 非 TXT 格式固定 UTF-8（压平产物），不提供编码切换
+    if (currentBook.format != BookFormat.TXT) return
+    val encoding = currentBook.encoding
     var showPicker by remember { mutableStateOf(false) }
     TextButton(onClick = { showPicker = true }) {
-        Text("编码：${encoding?.takeIf { it.isNotBlank() } ?: "自动检测"}")
+        Text("编码：${encoding.takeIf { it.isNotBlank() } ?: "自动检测"}")
     }
     if (showPicker) {
         EncodingPickerDialog(
-            currentEncoding = encoding.orEmpty(),
+            currentEncoding = encoding,
             onSelect = { name ->
                 showPicker = false
                 scope.launch {

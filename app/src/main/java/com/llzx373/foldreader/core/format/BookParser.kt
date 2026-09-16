@@ -8,7 +8,30 @@ data class BookMeta(
     val author: String?,
     val encoding: String,
     val byteSize: Long,
+    /** 以下为 EPUB 等富元数据格式的扩展字段（TXT/FB2 留空）。 */
+    val description: String? = null,
+    val publisher: String? = null,
+    val language: String? = null,
+    val pubDate: String? = null,
+    val subjects: List<String> = emptyList(),
+    val identifier: String? = null,
+    val seriesName: String? = null,
+    val seriesIndex: String? = null,
 )
+
+/** 提取出的封面图片字节与扩展名（jpg/png/gif/webp，已过魔数或扩展名校验）。 */
+data class CoverImage(val bytes: ByteArray, val extension: String) {
+    override fun equals(other: Any?): Boolean =
+        other is CoverImage && bytes.contentEquals(other.bytes) && extension == other.extension
+    override fun hashCode(): Int = bytes.contentHashCode() * 31 + extension.hashCode()
+}
+
+/** 纸书页码：label 为原文页码标记（可能是 "12"/"xii" 等任意串），charOffset 为该页在压平流中的起点。 */
+data class PageLabel(val label: String, val charOffset: Long)
+
+/** 当前偏移所处的纸书页：最后一个 charOffset <= [offset] 的页码（labels 须按偏移升序）。 */
+fun pageLabelAt(labels: List<PageLabel>, offset: Long): PageLabel? =
+    labels.lastOrNull { it.charOffset <= offset }
 
 data class Chapter(
     val title: String,
@@ -35,4 +58,19 @@ interface BookParser {
     suspend fun parseMeta(uri: Uri): BookMeta
     suspend fun parseChapters(uri: Uri, charsetOverride: Charset? = null): List<Chapter>
     suspend fun openContent(uri: Uri, charsetOverride: Charset? = null): BookContent
+
+    /** 提取内嵌封面（仅 EPUB 等格式实现）；无封面或条目非图片时返回 null。 */
+    suspend fun extractCover(uri: Uri): CoverImage? = null
+
+    /** 正文起点（EPUB landmarks/guide "text" 等）；无则 null，首次打开从 0 开始。 */
+    suspend fun preferredStartOffset(uri: Uri): Long? = null
+
+    /** 纸书页码序列（EPUB page-list），按 charOffset 升序；无 page-list 返回 null。 */
+    suspend fun pageLabels(uri: Uri): List<PageLabel>? = null
+
+    /** 样式/结构 span（EPUB 压平规范 v3 起记录）；TXT/FB2 恒 null。 */
+    suspend fun textSpans(uri: Uri): List<TextSpan>? = null
+
+    /** 内嵌图片的本地文件（EPUB 压平时抽取到 converted/<hash>.images/）；无此书/此图返回 null。 */
+    suspend fun imageFile(uri: Uri, imagePath: String): java.io.File? = null
 }

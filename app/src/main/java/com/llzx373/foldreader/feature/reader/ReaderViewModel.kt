@@ -17,8 +17,13 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.BookParser
+import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.EncodingDetector
+import com.llzx373.foldreader.core.format.PageLabel
+import com.llzx373.foldreader.core.format.TextSpan
+import com.llzx373.foldreader.core.format.TextSpanType
+import com.llzx373.foldreader.core.format.pageLabelAt
 import com.llzx373.foldreader.core.reader.CharsReadTracker
 import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.core.reader.LayoutConfig
@@ -31,6 +36,7 @@ import com.llzx373.foldreader.core.reader.PaginatorStore
 import com.llzx373.foldreader.core.reader.StaticLayoutTextMeasurer
 import com.llzx373.foldreader.core.reader.renderSpreadToBitmap
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
+import com.llzx373.foldreader.core.reader.sliceSpansForLine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.CoroutineScope
@@ -85,6 +91,8 @@ data class ReaderUiState(
     val pageNumber: Int = 0,
     val inChapterFraction: Float = -1f,
     val spreadGeometry: SpreadGeometry? = null,
+    /** 当前位置对应的纸书页码（EPUB page-list）；无 page-list 的书为 null。 */
+    val paperPageLabel: String? = null,
 )
 
 private data class SpreadViewport(
@@ -104,7 +112,7 @@ class ReaderViewModel(
     private val bookId: Long,
     private val bookshelfRepository: BookshelfRepository,
     private val bookPrefsRepository: BookPrefsRepository,
-    private val parser: BookParser,
+    private val parsers: BookParsers,
     private val fontManager: FontManager,
     private val pageDiskCache: PageDiskCache,
     private val initialAnchor: Long = -1L,
@@ -124,6 +132,20 @@ class ReaderViewModel(
 
     private var content: BookContent? = null
     private var chapters: List<Chapter> = emptyList()
+    private var paperPageLabels: List<PageLabel>? = null
+    /** 打开书时加载一次的样式/结构 span（EPUB）；TXT/FB2 为 null。 */
+    private var textSpans: List<TextSpan>? = null
+    /** 图片占位段落表（占位符偏移 → IMAGE span），buildPaginator 时注入分页器。 */
+    private var imageLineSpans: Map<Long, TextSpan> = emptyMap()
+    private var bookUri: Uri? = null
+    private var bookParser: BookParser? = null
+    /** 图片位图 LRU（按字节数）；渲染同步路径只查缓存，解码在 spread 构建期预取。 */
+    private val imageBitmapCache = object : android.util.LruCache<String, Bitmap>(IMAGE_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+    /** 图片行位图查询（渲染期同步调用；未命中 = 占位灰框，不阻塞）。 */
+    val imageProvider: (String) -> Bitmap? = { imageBitmapCache.get(it) }
+    private var lastPageWidthPx = 0
     private var appliedEncoding: String? = null
     private var pendingReopenAnchor = -1L
     private var baseReadingMillis = 0L
@@ -214,6 +236,7 @@ class ReaderViewModel(
             scaledDensity = ctx.scaledDensity,
             widthPx = ctx.widthPx,
             heightPx = ctx.heightPx,
+            imageProvider = imageProvider,
         )
     }
 
@@ -330,6 +353,21 @@ class ReaderViewModel(
         return withContext(Dispatchers.IO) {
             runCatching { source.read(start until safeEnd) }.getOrDefault("")
         }
+    }
+
+    /**
+     * 脚注弹注内容：从目标偏移读一段原文并按段落/长度截取；
+     * 目标越界（如注释锚点在 linear="no" 部分）或读取失败时返回 null，调用方降级为普通跳转。
+     */
+    suspend fun noteExcerptAt(offset: Long): String? {
+        val source = content ?: return null
+        val total = source.charCount
+        if (offset < 0 || offset >= total) return null
+        val end = minOf(offset + NOTE_EXCERPT_READ_CHARS, total)
+        val raw = withContext(Dispatchers.IO) {
+            runCatching { source.read(offset until end) }.getOrNull()
+        } ?: return null
+        return com.llzx373.foldreader.core.reader.excerptNote(raw).takeIf { it.isNotEmpty() }
     }
 
     private suspend fun snapshotFor(start: Long, end: Long): String {
@@ -510,6 +548,7 @@ class ReaderViewModel(
             runCatching { bookPrefsRepository.ensureInitialized(bookId) }
             try {
                 val uri = Uri.parse(book.fileUri)
+                val parser = parsers.parserFor(book.format)
                 val charsetOverride = EncodingDetector.forNameOrNull(book.encoding)
                 // 打开关键路径只做两件事：建/读偏移索引（缺失时异步后台补建）+ 恢复进度。
                 // 章节扫描不再挡在首帧前：实时索引完成后由 onChaptersIndexed 落库，
@@ -524,19 +563,42 @@ class ReaderViewModel(
                 baseReadingMillis = progress?.totalReadingMillis ?: 0L
                 firstReadAtMs = progress?.firstReadAt ?: 0L
                 charsReadBase = progress?.charsReadTotal ?: 0L
+                // 首次打开（无进度）时尊重 EPUB landmarks/guide 正文起点；TXT/FB2 恒 null
+                val preferredStart = if (progress == null && pendingReopenAnchor < 0L && initialAnchor < 0L) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { parser.preferredStartOffset(uri) }.getOrNull()
+                    }
+                } else {
+                    null
+                }
+                paperPageLabels = withContext(Dispatchers.IO) {
+                    runCatching { parser.pageLabels(uri) }.getOrNull()
+                }
+                // 样式/结构 span（EPUB）：打开时加载一次，构建 spread 时按行切片挂载
+                val spans = withContext(Dispatchers.IO) {
+                    runCatching { parser.textSpans(uri) }.getOrNull()
+                }
+                textSpans = spans
+                imageLineSpans = spans.orEmpty()
+                    .filter { it.type == TextSpanType.IMAGE }
+                    .associateBy { it.start }
+                bookUri = uri
+                bookParser = parser
                 anchorOffset.value = when {
                     pendingReopenAnchor >= 0L ->
                         pendingReopenAnchor.coerceAtMost(opened.charCount).also {
                             pendingReopenAnchor = -1L
                         }
                     initialAnchor >= 0L -> initialAnchor.coerceAtMost(opened.charCount)
-                    else -> progress?.charOffset ?: 0L
+                    else -> progress?.charOffset
+                        ?: preferredStart?.coerceAtMost(opened.charCount)
+                        ?: 0L
                 }
                 charsReadTracker.jump(anchorOffset.value)
                 _uiState.update {
                     it.copy(bookTitle = book.title, totalChars = opened.charCount)
                 }
-                maybeScanChaptersInBackground(uri, charsetOverride, opened)
+                maybeScanChaptersInBackground(uri, charsetOverride, opened, parser)
                 watchLiveIndexCompletion(opened)
                 collectViewport()
             } catch (t: Throwable) {
@@ -553,6 +615,7 @@ class ReaderViewModel(
         uri: Uri,
         charsetOverride: java.nio.charset.Charset?,
         opened: BookContent,
+        parser: BookParser,
     ) {
         val liveIndexing = (opened as? com.llzx373.foldreader.core.format.txt.TxtBookContent)
             ?.indexProgress != null
@@ -810,6 +873,7 @@ class ReaderViewModel(
             ),
         )
         val key = PaginatorKey(bookId, widthPx, heightPx, density, scaledDensity, capped, avoidance)
+        lastPageWidthPx = widthPx
         return Paginator(
             content = source,
             config = capped,
@@ -822,6 +886,7 @@ class ReaderViewModel(
             diskCache = if (sharedCache) pageDiskCache else null,
             diskKey = if (sharedCache) key else null,
             avoidance = avoidance,
+            images = imageLineSpans,
         )
     }
 
@@ -932,7 +997,63 @@ class ReaderViewModel(
         } else {
             null
         }
-        return PageSpread(leftPage, rightPage)
+        // span 渲染期挂载（不进任何分页缓存）+ 图片位图预取（IO，未就绪则画占位灰框）
+        val left = attachSpans(leftPage)
+        val right = rightPage?.let { attachSpans(it) }
+        prefetchImages(left)
+        right?.let { prefetchImages(it) }
+        return PageSpread(left, right)
+    }
+
+    /** 把落在各行区间内的样式 span 截断/拆段挂到行上；无 span 的书零开销返回原页。 */
+    private fun attachSpans(page: Page): Page {
+        val spans = textSpans ?: return page
+        if (spans.isEmpty()) return page
+        val styled = spans.any { it.type != TextSpanType.IMAGE }
+        if (!styled) return page
+        return page.copy(
+            lines = page.lines.map { line ->
+                if (line.imagePath != null || line.text.isEmpty()) {
+                    line
+                } else {
+                    line.copy(
+                        spans = sliceSpansForLine(spans, line.charStart, line.charStart + line.text.length),
+                    )
+                }
+            },
+        )
+    }
+
+    /** spread 内图片行的位图预取：缺失时 IO 解码（按行框尺寸降采样）进 LRU。 */
+    private suspend fun prefetchImages(page: Page) {
+        for (line in page.lines) {
+            val path = line.imagePath ?: continue
+            if (imageBitmapCache.get(path) != null) continue
+            val uri = bookUri ?: return
+            val parser = bookParser ?: return
+            val file = withContext(Dispatchers.IO) {
+                runCatching { parser.imageFile(uri, path) }.getOrNull()
+            } ?: continue
+            val targetH = (line.heightPx ?: 0f).toInt().coerceAtLeast(64)
+            val targetW = lastPageWidthPx.takeIf { it > 0 } ?: (targetH * 3)
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching { decodeSampled(file, targetW, targetH) }.getOrNull()
+            } ?: continue
+            imageBitmapCache.put(path, bitmap)
+        }
+    }
+
+    /** 按目标尺寸降采样解码（inSampleSize 2 的幂，解码后不小于目标）。 */
+    private fun decodeSampled(file: java.io.File, targetW: Int, targetH: Int): Bitmap? {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= targetW && bounds.outHeight / (sample * 2) >= targetH) {
+            sample *= 2
+        }
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        return android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
     }
 
     private suspend fun currentSpreadFrom(anchor: Long): PageSpread? {
@@ -1036,7 +1157,7 @@ class ReaderViewModel(
         val p = paginatorFor(edge) ?: return
         val next = withContext(Dispatchers.Default) {
             if (forward) p.pageAfter(pages.last().charStart) else p.pageBefore(pages.first().charStart)
-        } ?: return
+        }?.let { attachSpans(it).also { attached -> prefetchImages(attached) } } ?: return
         _uiState.update {
             it.copy(scrollPages = if (forward) it.scrollPages + next else listOf(next) + it.scrollPages)
         }
@@ -1227,6 +1348,9 @@ class ReaderViewModel(
                 inChapterFraction = inChapterFraction(
                     chapters, chapterIndexAt(chapters, spread.left.charStart), spread.left.charStart,
                 ),
+                paperPageLabel = paperPageLabels?.let {
+                    pageLabelAt(it, spread.left.charStart)?.label
+                },
             )
         }
         schedulePrefetch(spread)
@@ -1321,6 +1445,12 @@ class ReaderViewModel(
         /** 后台每多排多少页就把页边界增量落盘一次。 */
         private const val INCREMENTAL_PERSIST_PAGES = 64
 
+        /** 内嵌图片位图 LRU 容量（字节数）。 */
+        private const val IMAGE_CACHE_BYTES = 16 * 1024 * 1024
+
+        /** 弹注读取窗口：远大于截取上限，保证段落过滤后仍有足够内容。 */
+        private const val NOTE_EXCERPT_READ_CHARS = 2_000L
+
         fun factory(
             container: AppContainer,
             bookId: Long,
@@ -1332,7 +1462,7 @@ class ReaderViewModel(
                     bookId = bookId,
                     bookshelfRepository = container.bookshelfRepository,
                     bookPrefsRepository = container.bookPrefsRepository,
-                    parser = container.txtBookParser,
+                    parsers = container.bookParsers,
                     fontManager = container.fontManager,
                     pageDiskCache = container.pageDiskCache,
                     initialAnchor = initialAnchor,

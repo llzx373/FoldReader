@@ -1,8 +1,10 @@
 package com.llzx373.foldreader.feature.bookshelf
 
+import android.graphics.BitmapFactory
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +19,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object BookCoverPalette {
     val palette = listOf(
@@ -61,6 +70,8 @@ fun BookCover(
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
     bookId: Long = 0L,
+    /** 真实封面图片路径（EPUB 导入时提取）；null 或解码失败时用标题占位封面。 */
+    coverPath: String? = null,
 ) {
     val sharedModifier =
         if (sharedTransitionScope != null && animatedVisibilityScope != null && bookId != 0L) {
@@ -78,42 +89,73 @@ fun BookCover(
         shape = MaterialTheme.shapes.largeIncreased,
         color = BookCoverPalette.colorFor(title),
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(12.dp)
-                    .background(Color.Black.copy(alpha = 0.18f)),
+        val coverBitmap = coverPath?.let { rememberCoverBitmap(it) }
+        if (coverBitmap != null) {
+            Image(
+                bitmap = coverBitmap,
+                contentDescription = title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(start = 16.dp)
-                    .width(1.dp)
-                    .background(Color.White.copy(alpha = 0.45f)),
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = 26.dp, top = 14.dp, end = 10.dp, bottom = 10.dp),
-            ) {
-                Text(
-                    text = title.take(2),
-                    color = Color.White,
-                    fontSize = 30.sp,
-                    lineHeight = 34.sp,
-                    fontWeight = FontWeight.Bold,
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(12.dp)
+                        .background(Color.Black.copy(alpha = 0.18f)),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = title,
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(start = 16.dp)
+                        .width(1.dp)
+                        .background(Color.White.copy(alpha = 0.45f)),
                 )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 26.dp, top = 14.dp, end = 10.dp, bottom = 10.dp),
+                ) {
+                    Text(
+                        text = title.take(2),
+                        color = Color.White,
+                        fontSize = 30.sp,
+                        lineHeight = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = title,
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+private fun rememberCoverBitmap(path: String): ImageBitmap? {
+    val bitmap by produceState<ImageBitmap?>(null, path) {
+        value = withContext(Dispatchers.IO) { decodeCover(path) }
+    }
+    return bitmap
+}
+
+/** 解码封面并按 ~480x640 目标降采样，防止大图占内存；失败返回 null 走占位封面。 */
+private fun decodeCover(path: String): ImageBitmap? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= 480 && bounds.outHeight / (sample * 2) >= 640) {
+        sample *= 2
+    }
+    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+        ?.asImageBitmap()
+}.getOrNull()

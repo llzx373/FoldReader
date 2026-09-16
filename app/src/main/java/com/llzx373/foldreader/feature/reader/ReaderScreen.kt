@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -49,9 +50,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -106,6 +111,7 @@ import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.core.reader.SpreadGeom
 import com.llzx373.foldreader.feature.bookshelf.BookCover
@@ -175,6 +181,8 @@ fun ReaderScreen(
     var editingAnnotation by remember {
         mutableStateOf<com.llzx373.foldreader.core.data.db.AnnotationEntity?>(null)
     }
+    // 脚注弹注：noteref 点按命中的目标 charOffset；非 null 时弹窗加载并展示注释内容
+    var notePopupTarget by remember { mutableStateOf<Long?>(null) }
     val leftLineBoxes = remember {
         mutableStateOf<List<com.llzx373.foldreader.core.reader.LineBox>?>(null)
     }
@@ -722,8 +730,10 @@ fun ReaderScreen(
     val hingeDp = with(density) { (splitRightPx - splitLeftPx).toDp() }
     val rightDp = with(density) { (size.width - splitRightPx).toDp() }
 
-    // 触摸点 → 字符光标位；dual 时按铰链分区，局部坐标扣页偏移
-    fun hitCaret(offset: Offset): Long? {
+    // 触摸点 → (行几何, 页内局部坐标)；dual 时按铰链分区，局部坐标扣页偏移
+    fun hitBoxes(
+        offset: Offset,
+    ): Triple<List<com.llzx373.foldreader.core.reader.LineBox>, Float, Float>? {
         if (size.width <= 0) return null
         val relX = offset.x - contentRect.left
         val relY = offset.y - contentRect.top + autoScrollY
@@ -744,7 +754,17 @@ fun ReaderScreen(
             else -> return null // 铰链区
         }
         val boxes = (if (isLeft) leftLineBoxes.value else rightLineBoxes.value) ?: return null
-        return com.llzx373.foldreader.core.reader.caretAt(boxes, localX, relY)
+        return Triple(boxes, localX, relY)
+    }
+
+    // 触摸点 → 字符光标位
+    fun hitCaret(offset: Offset): Long? = hitBoxes(offset)?.let { (boxes, x, y) ->
+        com.llzx373.foldreader.core.reader.caretAt(boxes, x, y)
+    }
+
+    // 触摸点 → 链接命中（LINK/NOTEREF span）
+    fun hitLink(offset: Offset): LinkHit? = hitBoxes(offset)?.let { (boxes, x, y) ->
+        com.llzx373.foldreader.core.reader.linkHitAt(boxes, x, y)
     }
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page?): List<TextRangeSpan> {
@@ -870,8 +890,11 @@ fun ReaderScreen(
         androidx.compose.runtime.mutableStateMapOf<Long, List<com.llzx373.foldreader.core.reader.LineBox>>()
     }
 
-    // 滚动模式：内容区坐标 → 字符光标位（跨 LazyColumn 项；双栏按列分区）
-    fun scrollCaretAt(relX: Float, relY: Float): Long? {
+    // 滚动模式：内容区坐标 → (行几何, 页内局部坐标)（跨 LazyColumn 项；双栏按列分区）
+    fun scrollBoxesAt(
+        relX: Float,
+        relY: Float,
+    ): Triple<List<com.llzx373.foldreader.core.reader.LineBox>, Float, Float>? {
         val info = scrollListState.layoutInfo
         val item = info.visibleItemsInfo
             .firstOrNull { relY >= it.offset && relY < it.offset + it.size } ?: return null
@@ -880,7 +903,7 @@ fun ReaderScreen(
         if (!scrollDual) {
             val page = pages.getOrNull(item.index) ?: return null
             val boxes = scrollLineBoxes[page.charStart] ?: return null
-            return com.llzx373.foldreader.core.reader.caretAt(boxes, relX, localY)
+            return Triple(boxes, relX, localY)
         }
         val leftDpPx = with(density) { leftDp.toPx() }
         val hingePx = with(density) { hingeDp.toPx() }
@@ -891,17 +914,44 @@ fun ReaderScreen(
             relX < leftDpPx -> {
                 val boxes = scrollLineBoxes[leftPage.charStart] ?: return null
                 val inset = (leftDpPx - spreadPageWidthPx).coerceAtLeast(0f) / 2f
-                com.llzx373.foldreader.core.reader.caretAt(boxes, relX - inset, localY)
+                Triple(boxes, relX - inset, localY)
             }
             rightPage != null && relX > leftDpPx + hingePx -> {
                 val boxes = scrollLineBoxes[rightPage.charStart] ?: return null
                 val inset = (rightDpPx - spreadPageWidthPx).coerceAtLeast(0f) / 2f
-                com.llzx373.foldreader.core.reader.caretAt(
-                    boxes, relX - leftDpPx - hingePx - inset, localY,
-                )
+                Triple(boxes, relX - leftDpPx - hingePx - inset, localY)
             }
             else -> null
         }
+    }
+
+    // 滚动模式：内容区坐标 → 字符光标位
+    fun scrollCaretAt(relX: Float, relY: Float): Long? = scrollBoxesAt(relX, relY)
+        ?.let { (boxes, x, y) -> com.llzx373.foldreader.core.reader.caretAt(boxes, x, y) }
+
+    // 滚动模式：内容区坐标 → 链接命中
+    fun scrollLinkHitAt(relX: Float, relY: Float): LinkHit? = scrollBoxesAt(relX, relY)
+        ?.let { (boxes, x, y) -> com.llzx373.foldreader.core.reader.linkHitAt(boxes, x, y) }
+
+    // 链接点按消费：内部跳转 / 外部浏览器 / 脚注弹注。
+    // 返回 false = 不消费（锚点不可解析等），点按继续走划线查看/翻页热区。
+    fun consumeLink(hit: LinkHit?): Boolean {
+        when (hit) {
+            null -> return false
+            is LinkHit.Internal -> scope.launch {
+                viewModel.seekToOffset(hit.targetOffset)
+                if (scrollMode) viewModel.enterScrollMode()
+            }
+            is LinkHit.External -> runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(hit.url)))
+            }
+            is LinkHit.Note -> {
+                // 锚点越界（注释在 linear="no" 等未收录部分）：不消费，按普通点按处理
+                if (hit.targetOffset < 0 || hit.targetOffset >= uiState.totalChars) return false
+                notePopupTarget = hit.targetOffset
+            }
+        }
+        return true
     }
 
 
@@ -953,10 +1003,11 @@ fun ReaderScreen(
                         return@detectTapGestures
                     }
                     if (scrollMode) {
-                        val caret = scrollCaretAt(
-                            offset.x - contentRect.left,
-                            offset.y - contentRect.top,
-                        )
+                        val relX = offset.x - contentRect.left
+                        val relY = offset.y - contentRect.top
+                        // 链接/脚注引用点按优先（命中即消费，不弹菜单）
+                        if (consumeLink(scrollLinkHitAt(relX, relY))) return@detectTapGestures
+                        val caret = scrollCaretAt(relX, relY)
                         if (caret != null) {
                             val ann = annotations.firstOrNull {
                                 caret >= it.startCharOffset && caret < it.endCharOffset
@@ -969,6 +1020,8 @@ fun ReaderScreen(
                         menuVisible = true
                         return@detectTapGestures
                     }
+                    // 链接/脚注引用点按优先（先于划线查看与翻页热区）
+                    if (consumeLink(hitLink(offset))) return@detectTapGestures
                     // 点击已有划线 → 查看/编辑（先于翻页热区）
                     val caret = hitCaret(offset)
                     if (caret != null) {
@@ -1334,6 +1387,7 @@ fun ReaderScreen(
                                 pageWidthDp = pageWidthDp,
                                 rightTopPadPx = rightTopPadPx,
                                 modifier = Modifier.fillMaxSize(),
+                                imageProvider = viewModel.imageProvider,
                             )
                             SpreadContent(
                                 spread = spread,
@@ -1346,6 +1400,7 @@ fun ReaderScreen(
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
                                 rightTopPadPx = rightTopPadPx,
+                                imageProvider = viewModel.imageProvider,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
@@ -1369,6 +1424,7 @@ fun ReaderScreen(
                             innerPadPx = innerPadPx,
                             pageWidthDp = pageWidthDp,
                             rightTopPadPx = rightTopPadPx,
+                            imageProvider = viewModel.imageProvider,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer { translationY = -autoScrollY },
@@ -1392,6 +1448,7 @@ fun ReaderScreen(
                                 innerPadPx = innerPadPx,
                                 pageWidthDp = pageWidthDp,
                                 rightTopPadPx = rightTopPadPx,
+                                imageProvider = viewModel.imageProvider,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer { translationX = animX.value },
@@ -1593,7 +1650,12 @@ fun ReaderScreen(
                 null
             }
             val progressText = if (prefs.showPageProgress) formatPercent(uiState.progressFraction) else null
-            val leftFooter = listOfNotNull(pageNumberLabel, progressText)
+            val paperPageText = if (prefs.showPageProgress) {
+                uiState.paperPageLabel?.let { "纸书 P.$it" }
+            } else {
+                null
+            }
+            val leftFooter = listOfNotNull(pageNumberLabel, paperPageText, progressText)
                 .joinToString("  ")
                 .ifEmpty { null }
             val rightFooter = listOfNotNull(
@@ -1828,6 +1890,47 @@ fun ReaderScreen(
             )
         }
 
+        // 脚注弹注：noteref 点按后展示目标处内容；目标读不到内容时静默降级为直接跳转
+        notePopupTarget?.let { target ->
+            val excerpt by produceState<String?>(initialValue = null, target) {
+                val loaded = viewModel.noteExcerptAt(target)
+                if (loaded == null) {
+                    notePopupTarget = null
+                    viewModel.seekToOffset(target)
+                    if (scrollMode) viewModel.enterScrollMode()
+                } else {
+                    value = loaded
+                }
+            }
+            val noteText = excerpt
+            if (noteText != null) {
+                AlertDialog(
+                    onDismissRequest = { notePopupTarget = null },
+                    title = { Text("注释") },
+                    text = {
+                        Text(
+                            text = noteText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.text,
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            notePopupTarget = null
+                            scope.launch {
+                                viewModel.seekToOffset(target)
+                                if (scrollMode) viewModel.enterScrollMode()
+                            }
+                        }) { Text("跳转到注释") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { notePopupTarget = null }) { Text("关闭") }
+                    },
+                )
+            }
+        }
+
         if (annotationsVisible) {
             AnnotationListDialog(
                 annotations = annotations,
@@ -1892,6 +1995,7 @@ private fun SpreadContent(
     selectionColor: Color = Color.Unspecified,
     onLeftGeometry: (List<com.llzx373.foldreader.core.reader.LineBox>) -> Unit = {},
     onRightGeometry: (List<com.llzx373.foldreader.core.reader.LineBox>) -> Unit = {},
+    imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
 ) {
     val selectionSpanFor: (com.llzx373.foldreader.core.reader.Page?) -> TextRangeSpan? = { page ->
         val sel = selection
@@ -1914,6 +2018,7 @@ private fun SpreadContent(
             highlights = leftHighlights,
             selection = selectionSpanFor(spread.left),
             onGeometry = onLeftGeometry,
+            imageProvider = imageProvider,
         )
         return
     }
@@ -1932,6 +2037,7 @@ private fun SpreadContent(
                 highlights = leftHighlights,
                 selection = selectionSpanFor(spread.left),
                 onGeometry = onLeftGeometry,
+                imageProvider = imageProvider,
             )
         }
         Box(modifier = Modifier.width(hingeDp).fillMaxHeight())
@@ -1951,6 +2057,7 @@ private fun SpreadContent(
                     highlights = rightHighlights,
                     selection = selectionSpanFor(right),
                     onGeometry = onRightGeometry,
+                    imageProvider = imageProvider,
                 )
             }
         }
@@ -2148,6 +2255,7 @@ private fun ScrollContent(
                                 .selectionGesture(row.first().charStart, leftInset),
                             highlights = spansFor(row[0]),
                             onGeometry = { lineBoxes[row[0].charStart] = it },
+                            imageProvider = viewModel.imageProvider,
                         )
                     }
                     Box(modifier = Modifier.width(hingeDp).fillMaxHeight())
@@ -2169,6 +2277,7 @@ private fun ScrollContent(
                                     ),
                                 highlights = spansFor(right),
                                 onGeometry = { lineBoxes[right.charStart] = it },
+                                imageProvider = viewModel.imageProvider,
                             )
                         }
                     }
@@ -2186,6 +2295,7 @@ private fun ScrollContent(
                         .selectionGesture(page.charStart, 0f),
                     highlights = spansFor(page),
                     onGeometry = { lineBoxes[page.charStart] = it },
+                    imageProvider = viewModel.imageProvider,
                 )
             }
         }

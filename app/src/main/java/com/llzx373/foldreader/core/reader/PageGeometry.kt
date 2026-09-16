@@ -52,6 +52,8 @@ fun buildLineBoxes(
     var yTop = topPadPx
     page.lines.forEachIndexed { index, line ->
         if (line.isParagraphStart && index > 0) yTop += paragraphSpacingPx
+        // 图片行用缩放后实际行高；文本行恒为 lineHeightPx（纯文本路径逐像素不变）
+        val effectiveLineHeightPx = line.heightPx ?: lineHeightPx
         val x0 = leftPadPx + if (line.isParagraphStart && !hasLeadingIndent(line.text)) indentPx else 0f
         val widths = FloatArray(line.text.length) { i -> measure(line.text[i].toString()) }
         val gap = if (justify && !line.isParagraphEnd && line.text.length > 1) {
@@ -62,8 +64,8 @@ fun buildLineBoxes(
         } else {
             0f
         }
-        boxes += LineBox(line, x0, yTop, lineHeightPx, widths, gap)
-        yTop += lineHeightPx
+        boxes += LineBox(line, x0, yTop, effectiveLineHeightPx, widths, gap)
+        yTop += effectiveLineHeightPx
     }
     return boxes
 }

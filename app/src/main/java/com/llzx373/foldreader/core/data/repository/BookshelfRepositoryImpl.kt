@@ -24,6 +24,10 @@ class BookshelfRepositoryImpl(
     private val bookmarkDao: BookmarkDao,
     private val annotationDao: AnnotationDao,
     private val sessionDao: ReadingSessionDao,
+    /** 非 TXT 压平缓存目录；删除书籍时按 contentHash 一并清理（TXT 无此文件，删除为 no-op）。 */
+    private val convertedDir: java.io.File? = null,
+    /** 封面目录；删除书籍时按 coverPath 一并清理。 */
+    private val coversDir: java.io.File? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -56,7 +60,25 @@ class BookshelfRepositoryImpl(
             annotationDao.deleteByBookIds(bookIds)
         }
         bookIds.forEach { id ->
-            bookDao.getById(id)?.cleanedFilePath?.let { java.io.File(it).delete() }
+            val book = bookDao.getById(id)
+            book?.cleanedFilePath?.let { java.io.File(it).delete() }
+            book?.coverPath?.let { java.io.File(it).delete() }
+            if (book != null && convertedDir != null && book.contentHash.isNotBlank()) {
+                java.io.File(convertedDir, "${book.contentHash}.txt").delete()
+                java.io.File(convertedDir, "${book.contentHash}.toc").delete()
+                java.io.File(convertedDir, "${book.contentHash}.anchors").delete()
+                java.io.File(convertedDir, "${book.contentHash}.pages").delete()
+                java.io.File(convertedDir, "${book.contentHash}.spans").delete()
+                java.io.File(convertedDir, "${book.contentHash}.version").delete()
+                java.io.File(convertedDir, "${book.contentHash}.images").deleteRecursively()
+            }
+            if (book != null && coversDir != null && book.coverPath == null &&
+                book.contentHash.isNotBlank()
+            ) {
+                // 兜底：coverPath 缺失（如旧版本导入的书）时按 contentHash 前缀清
+                coversDir.listFiles { f -> f.name.startsWith("${book.contentHash}.") }
+                    ?.forEach { it.delete() }
+            }
         }
         bookDao.deleteByIds(bookIds)
     }

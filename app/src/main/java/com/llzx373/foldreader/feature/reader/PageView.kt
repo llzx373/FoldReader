@@ -39,6 +39,8 @@ fun PageView(
     highlights: List<TextRangeSpan> = emptyList(),
     selection: TextRangeSpan? = null,
     onGeometry: (List<LineBox>) -> Unit = {},
+    /** 图片行位图查询（仅查缓存）；null 或未命中画占位灰框。 */
+    imageProvider: ((imagePath: String) -> android.graphics.Bitmap?)? = null,
 ) {
     val density = LocalDensity.current.density
     val scaledDensity = density * LocalDensity.current.fontScale
@@ -56,6 +58,8 @@ fun PageView(
             extraTopPadPx = extraTopPadPx,
             highlights = highlights,
             selection = selection,
+            accentColorArgb = colors.accent.toArgb(),
+            imageProvider = imageProvider,
         )
         onGeometry(boxes)
     }

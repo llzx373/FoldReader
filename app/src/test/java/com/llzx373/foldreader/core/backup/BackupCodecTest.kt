@@ -249,6 +249,143 @@ class BackupCodecTest {
         assertTrue(targetBookPrefs.rows.isEmpty())
     }
 
+    @Test
+    fun `v3 备份恢复分组且空分组恢复为未分组`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 1, hash = "hashA").copy(groupName = "科幻"),
+                book(id = 2, hash = "hashB"),
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 7, hash = "hashA"),
+                book(id = 8, hash = "hashB").copy(groupName = "旧组"),
+            ),
+        )
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(json)
+
+        assertEquals(2, result.restoredBooks)
+        assertEquals(
+            listOf(listOf(7L) to "科幻", listOf(8L) to null),
+            targetBooks.groupCalls,
+        )
+    }
+
+    @Test
+    fun `v2 旧备份无分组字段时不改动现有分组`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 2,
+              "books": [
+                {"title": "书hashA", "contentHash": "hashA"}
+              ]
+            }
+        """.trimIndent()
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(book(id = 7, hash = "hashA").copy(groupName = "旧组")),
+        )
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(legacy)
+
+        assertEquals(1, result.restoredBooks)
+        assertTrue(targetBooks.groupCalls.isEmpty())
+    }
+
+    @Test
+    fun `v4 备份恢复 EPUB 扩展元数据且空值恢复为 null`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 1, hash = "hashA").copy(
+                    description = "简介",
+                    publisher = "出版社",
+                    language = "zh-CN",
+                    pubDate = "2020-01-02",
+                    subjects = "科幻\n短篇",
+                    identifier = "isbn:9787020002207",
+                    seriesName = "银河纪元",
+                    seriesIndex = "3",
+                ),
+                book(id = 2, hash = "hashB"),
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 7, hash = "hashA"),
+                book(id = 8, hash = "hashB").copy(description = "旧简介", publisher = "旧社"),
+            ),
+        )
+        BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(json)
+
+        val restored = targetBooks.books.first { it.id == 7L }
+        assertEquals("简介", restored.description)
+        assertEquals("出版社", restored.publisher)
+        assertEquals("zh-CN", restored.language)
+        assertEquals("2020-01-02", restored.pubDate)
+        assertEquals("科幻\n短篇", restored.subjects)
+        assertEquals("isbn:9787020002207", restored.identifier)
+        assertEquals("银河纪元", restored.seriesName)
+        assertEquals("3", restored.seriesIndex)
+        // 源书无扩展元数据 → 导出为 null → 恢复时清掉本地值
+        val cleared = targetBooks.books.first { it.id == 8L }
+        assertNull(cleared.description)
+        assertNull(cleared.publisher)
+    }
+
+    @Test
+    fun `v3 旧备份无扩展元数据字段时保持本地值`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 3,
+              "books": [
+                {"title": "书hashA", "contentHash": "hashA", "groupName": "科幻"}
+              ]
+            }
+        """.trimIndent()
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(book(id = 7, hash = "hashA").copy(description = "本地简介")),
+        )
+        BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(legacy)
+
+        assertEquals("本地简介", targetBooks.books.single().description)
+        assertEquals(listOf(listOf(7L) to "科幻"), targetBooks.groupCalls)
+    }
+
     private fun book(id: Long, hash: String) = BookEntity(
         id = id,
         title = "书$hash",
@@ -347,6 +484,7 @@ class BackupCodecTest {
         val progress = mutableListOf<ReadingProgressEntity>()
         val bookmarks = mutableListOf<BookmarkEntity>()
         val annotations = mutableListOf<AnnotationEntity>()
+        val groupCalls = mutableListOf<Pair<List<Long>, String?>>()
 
         override fun observeBookshelf(): Flow<List<BookEntity>> = flowOf(books.toList())
         override fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>> = flowOf(emptyList())
@@ -357,14 +495,20 @@ class BackupCodecTest {
             books.find { it.fileUri == fileUri }
         override suspend fun findByContentHash(contentHash: String): BookEntity? =
             books.find { it.contentHash == contentHash }
-        override suspend fun upsertBook(book: BookEntity): Long = book.id
+        override suspend fun upsertBook(book: BookEntity): Long {
+            books.removeAll { it.id == book.id }
+            books += book
+            return book.id
+        }
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) = Unit
         override fun observeGroupNames(): Flow<List<String>> = flowOf(emptyList())
         override fun observeBookshelfWithProgressInGroup(
             groupName: String?,
         ): Flow<List<BookWithProgress>> = flowOf(emptyList())
-        override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) = Unit
+        override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
+            groupCalls += bookIds to groupName
+        }
         override suspend fun clearGroup(groupName: String) = Unit
 
         override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =

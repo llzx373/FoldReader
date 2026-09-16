@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.reader.averageCharsPerMinute
 import com.llzx373.foldreader.core.reader.formatDurationZh
@@ -74,8 +77,23 @@ fun BookDetailDialog(
                     "未开始"
                 }
                 val totalMillis = progress?.totalReadingMillis ?: 0L
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     DetailRow("作者", book.author ?: "未知作者")
+                    book.seriesName?.let { series ->
+                        DetailRow(
+                            "丛书",
+                            series + (book.seriesIndex?.takeIf { it.isNotBlank() }
+                                ?.let { " #$it" } ?: ""),
+                        )
+                    }
+                    book.publisher?.let { DetailRow("出版社", it) }
+                    book.pubDate?.let { DetailRow("出版日期", it) }
+                    book.language?.let { DetailRow("语言", it) }
+                    book.identifier?.let { DetailRow("ISBN / 标识", it) }
+                    book.subjects?.let { subjects ->
+                        DetailRow("标签", subjects.split("\n").joinToString("、"))
+                    }
+                    book.description?.let { DetailRow("简介", it) }
                     DetailRow("分组", book.groupName ?: "未分组")
                     DetailRow("总字数", "%,d 字".format(book.totalChars))
                     DetailRow("阅读进度", percent)
@@ -101,7 +119,12 @@ fun BookDetailDialog(
                     DetailRow(
                         label = "编码",
                         value = book.encoding.ifBlank { "自动检测" },
-                        onClick = { showEncodingPicker = true },
+                        // 非 TXT 格式固定 UTF-8（压平产物），不提供编码切换
+                        onClick = if (book.format == BookFormat.TXT) {
+                            { showEncodingPicker = true }
+                        } else {
+                            null
+                        },
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     TextButton(
