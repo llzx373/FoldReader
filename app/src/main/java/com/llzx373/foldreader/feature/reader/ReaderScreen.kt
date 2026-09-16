@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.BatteryManager
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
@@ -36,8 +37,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,6 +47,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -88,6 +90,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
@@ -98,12 +101,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.core.reader.SpreadGeom
@@ -115,9 +120,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 private val INNER_SPINE_PAD = 12.dp
 private val SPINE_OVERLAY_WIDTH = 32.dp
@@ -543,17 +546,64 @@ fun ReaderScreen(
             !readerTransition.isRunning)
 
     var barsRestoreRequested by remember { mutableStateOf(false) }
-    val statusBarInsets = WindowInsets.statusBars
+    val localView = LocalView.current
+    val localLayoutDirection = LocalLayoutDirection.current
+    val systemBarInsets = WindowInsets.systemBars
 
-    // 离开阅读页（返回书架/去设置）前：先恢复系统栏，等 inset 真正下发再导航，
-    // 目标页组合的第一帧即最终布局；200ms 超时兜底（极少数设备状态栏 inset 恒为 0）
+    // 离开阅读页（返回书架/去设置）前：先把系统栏恢复为常驻（BEHAVIOR_DEFAULT + show），
+    // 再等全部四边 inset 到达"完全可见"目标值并稳定（显隐动画逐帧派发，各边可能
+    // 先后到位：竖屏 bottom 先到、横屏 right 后到、状态栏 top 也可能晚一帧），
+    // 之后导航——目标页首帧即最终布局，不会被晚到的 inset 挤压。
+    // 阅读页正文不消费系统栏 inset，恢复过程对当前画面无影响。
     fun leaveReader(navigate: () -> Unit) {
         if (barsRestoreRequested) return
         barsRestoreRequested = true
+        val window = (localView.context as? Activity)?.window
+        if (window == null) {
+            navigate()
+            return
+        }
+        val controller = WindowCompat.getInsetsController(window, localView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+        controller.show(WindowInsetsCompat.Type.systemBars())
+        // ignoringVisibility 不受当前显隐影响，拿到的是"完全可见"时的目标值
+        val expected = ViewCompat.getRootWindowInsets(localView)
+            ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars())
+            ?.let { InsetsSnapshot(it.left, it.top, it.right, it.bottom) }
+        if (expected == null) {
+            navigate()
+            return
+        }
+        val gate = BarsRestoreGate(expected)
+        ReturnTrace.log("leaveReader: bars shown, expected=$expected")
         scope.launch {
-            withTimeoutOrNull(200L) {
-                snapshotFlow { statusBarInsets.getTop(density) > 0 }.first { it }
+            // 逐帧轮询而非 snapshotFlow：inset 稳定后 snapshotFlow 不再发射（去重），
+            // "连续两帧不变"永远等不到第二帧，门控会退化成盲等超时——慢设备上
+            // inset 动画晚于超时落地，目标页仍被挤压（横屏右缘导航栏即如此）
+            var frames = 0
+            val start = SystemClock.uptimeMillis()
+            var passed = false
+            // 正常 5 帧内（~100ms）即达标；超时只在厂商 inset 派发异常时触发，届时宁可
+            // 多等也不要带着未落地的 inset 导航（那正是书架整体右跳的来源）
+            while (SystemClock.uptimeMillis() - start < 800L) {
+                val snap = InsetsSnapshot(
+                    systemBarInsets.getLeft(density, localLayoutDirection),
+                    systemBarInsets.getTop(density),
+                    systemBarInsets.getRight(density, localLayoutDirection),
+                    systemBarInsets.getBottom(density),
+                )
+                frames++
+                ReturnTrace.log("leaveReader gate frame#$frames $snap")
+                if (gate.onFrame(snap)) {
+                    passed = true
+                    break
+                }
+                withFrameNanos { }
             }
+            ReturnTrace.log(
+                if (passed) "leaveReader: gate passed after $frames frames, navigate"
+                else "leaveReader: gate TIMEOUT($frames frames), navigate——若书架仍有跳动，看这里",
+            )
             navigate()
         }
     }
@@ -618,7 +668,14 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(uiState.spread) { autoScrollY = 0f }
+    LaunchedEffect(uiState.spread) {
+        autoScrollY = 0f
+        if (uiState.spread != null) {
+            // 等下一帧真正绘制后再放行 VM 的后台重活（全书分页、整页位图预渲染）
+            withFrameNanos { }
+            viewModel.noteFirstFrameRendered()
+        }
+    }
     LaunchedEffect(scrollMode, uiState.layoutConfig, size.height) {
         if (scrollMode) return@LaunchedEffect
         viewModel.autoScrollTicks.collect { delta ->
@@ -2127,11 +2184,22 @@ private fun SystemBarEffects(menuVisible: Boolean, keepScreenOn: Boolean) {
         val window = (view.context as? Activity)?.window ?: return@DisposableEffect onDispose {}
         val controller = WindowCompat.getInsetsController(window, view)
         if (menuVisible) {
+            // 不碰 behavior：退出路径由 leaveReader 先复位为 BEHAVIOR_DEFAULT 再 show，
+            // 常驻栏 inset 在导航前到位；菜单期保持 transient 覆盖层，菜单布局不被推动
             controller.show(WindowInsetsCompat.Type.systemBars())
         } else {
+            // transient 模式：系统栏以覆盖层形式显隐，不改变 app 的 WindowInsets，
+            // 阅读期间滑动唤出/隐藏系统栏都不会引发正文重排
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
         }
-        onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
+        onDispose {
+            // behavior 是窗口级状态：不复位的话，transient 模式 show 出的系统栏
+            // 会在几秒后自动隐藏（书架/设置页系统栏自己消失）
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
     DisposableEffect(keepScreenOn) {
         val window = (view.context as? Activity)?.window ?: return@DisposableEffect onDispose {}

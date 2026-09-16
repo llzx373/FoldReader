@@ -202,6 +202,12 @@
 - [x] BookEntity 增加分组字段；ReadingProgressEntity 增加已读字符数
 - [x] 进度/书签/标注外键改显式级联（支持删除时保留本地数据）
 
+**导航与转场**
+- [x] 阅读页改由 `ReaderOverlay` 全窗口覆盖层渲染（`SharedTransitionLayout` 内、外壳之外）：外壳 rail 形态与路由解耦，消除进书时书架左移与退书时封面/按钮整体右跳（详见 `docs/返回书架右跳分析.md`）
+- [x] 退出阅读页统一走 `leaveReader` + `BarsRestoreGate`（四边 inset 到达目标值并连续两帧稳定才导航，800ms 超时兜底）；禁止用 `NavigationSuiteScaffoldState.snapTo` 切换导航组件
+- [x] 覆盖层按 entry 提供 ViewModel/SavedState/Lifecycle owner；占位目的地转场时长 ≥ 覆盖层退场动画（避免 entry 先销毁导致 `viewModel()` 崩溃）
+- [x] 返回跳动帧级诊断（`core/debug/ReturnTrace`，仅 debug）：layoutType / innerPadding 四边值 / shell slot / content pos
+
 **排版与布局**
 - [x] Paginator 独立左右边距；字距度量/绘制链一致；Kinsoku 连续避头；超长段假段首
 - [x] 滚动模式双页退化为双栏连续文本（spread 行语义）
