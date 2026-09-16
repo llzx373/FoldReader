@@ -3,7 +3,12 @@ package com.llzx373.foldreader.ui
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -30,9 +35,12 @@ import androidx.navigation.compose.rememberNavController
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.feature.reader.ExtraOverReferenceInsets
 import com.llzx373.foldreader.feature.reader.ReaderOverlay
+import com.llzx373.foldreader.feature.reader.ShellInsets
 import com.llzx373.foldreader.navigation.FoldReaderNavHost
 import com.llzx373.foldreader.navigation.Routes
+import kotlinx.coroutines.delay
 
 private val topLevelRoutes = listOf(Routes.BOOKSHELF, Routes.SETTINGS)
 
@@ -79,45 +87,85 @@ fun FoldReaderApp() {
     // 进书时封面共享元素需要与书架同一份标题（阅读页加载态用它承接飞入封面）
     var readerCoverTitle by remember { mutableStateOf<String?>(null) }
 
+    // 离开阅读页后的一小段窗口内，抑制"超出沉浸前实测快照的额外 inset"：
+    // 真机上每次系统栏显隐变化（hide/show）之后，平台都会补报一次挖孔侧边 inset（140px），
+    // 约 500ms 后才消失；书架若在这段窗口内首帧布局，就会先窄后宽 → 右边缘外扩、整体右跳。
+    // 门控（等 inset 到位再导航）堵不住它，因为该 inset 出现得比 show() 晚约 50ms。
+    var suppressExtraInsets by remember { mutableStateOf(false) }
+    var wasInReader by remember { mutableStateOf(false) }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute == Routes.READER) {
+            wasInReader = true
+            suppressExtraInsets = false
+        } else if (wasInReader) {
+            wasInReader = false
+            suppressExtraInsets = true
+            ReturnTrace.log("shell: suppressExtraInsets on (reference=${ShellInsets.visibleReference()})")
+            delay(1200L)
+            suppressExtraInsets = false
+            ReturnTrace.log("shell: suppressExtraInsets off")
+        }
+    }
+    val shellInsetReference = ShellInsets.visibleReference()
+
     SharedTransitionLayout {
         Box(modifier = Modifier.fillMaxSize()) {
-            NavigationSuiteScaffold(
-                navigationSuiteItems = {
-                    item(
-                        selected = currentRoute == Routes.BOOKSHELF,
-                        onClick = { navController.navigateTopLevel(Routes.BOOKSHELF) },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        label = { Text("书架") },
-                    )
-                    item(
-                        selected = currentRoute == Routes.SETTINGS,
-                        onClick = { navController.navigateTopLevel(Routes.SETTINGS) },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                        label = { Text("设置") },
-                    )
-                },
-                layoutType = layoutType,
-            ) {
-                FoldReaderNavHost(
-                    navController = navController,
-                    foldableUiState = foldableUiState,
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    onOpenBook = { bookId, title ->
-                        readerCoverTitle = title
-                        navController.navigate(Routes.reader(bookId))
-                    },
-                    onOpenBookAt = { bookId, anchor, title ->
-                        readerCoverTitle = title
-                        navController.navigate(Routes.reader(bookId, anchor))
-                    },
-                    // 外壳 content 槽的实测位置/尺寸（= rail 宽度 + 剩余宽度；不受 NavHost 内部
-                    // 转场缩放影响）。返回跳动即此值变化，是本次重构要求"恒定"的观测量。
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .onGloballyPositioned {
-                            ReturnTrace.log("shell: slot pos=${it.positionInWindow()} size=${it.size}")
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (suppressExtraInsets && shellInsetReference != null) {
+                            Modifier.consumeWindowInsets(
+                                ExtraOverReferenceInsets(
+                                    live = WindowInsets.systemBars.union(WindowInsets.displayCutout),
+                                    reference = shellInsetReference,
+                                ),
+                            )
+                        } else {
+                            Modifier
                         },
-                )
+                    ),
+            ) {
+                NavigationSuiteScaffold(
+                    navigationSuiteItems = {
+                        item(
+                            selected = currentRoute == Routes.BOOKSHELF,
+                            onClick = { navController.navigateTopLevel(Routes.BOOKSHELF) },
+                            icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                            label = { Text("书架") },
+                        )
+                        item(
+                            selected = currentRoute == Routes.SETTINGS,
+                            onClick = { navController.navigateTopLevel(Routes.SETTINGS) },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                            label = { Text("设置") },
+                        )
+                    },
+                    layoutType = layoutType,
+                ) {
+                    FoldReaderNavHost(
+                        navController = navController,
+                        foldableUiState = foldableUiState,
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        onOpenBook = { bookId, title ->
+                            readerCoverTitle = title
+                            navController.navigate(Routes.reader(bookId))
+                        },
+                        onOpenBookAt = { bookId, anchor, title ->
+                            readerCoverTitle = title
+                            navController.navigate(Routes.reader(bookId, anchor))
+                        },
+                        // 外壳 content 槽的实测位置/尺寸（= rail 宽度 + 剩余宽度；不受 NavHost
+                        // 内部转场缩放影响）。返回跳动即此值变化，是要求"恒定"的观测量。
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned {
+                                ReturnTrace.log(
+                                    "shell: slot pos=${it.positionInWindow()} size=${it.size}",
+                                )
+                            },
+                    )
+                }
             }
             ReaderOverlay(
                 navController = navController,

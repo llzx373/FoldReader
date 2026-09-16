@@ -1,6 +1,9 @@
 package com.llzx373.foldreader.feature.reader
 
 import android.view.View
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
@@ -65,4 +68,34 @@ object ShellInsets {
         val insets = root.getInsets(type)
         return InsetsSnapshot(insets.left, insets.top, insets.right, insets.bottom)
     }
+}
+
+/**
+ * "超出参考快照的额外 inset"——按四边取 `max(0, 实时 - 参考)`。
+ *
+ * 真机（Xiaomi 阔折叠内屏横屏）实测：**每次系统栏显隐变化（`hide`/`show`）之后，
+ * 平台都会补报一次挖孔侧边 inset（140px=50.9dp），约 500ms 后才消失**。它出现得比
+ * 门控的采样更晚（`show()` 后 ~50ms 才出现），所以"等 inset 到位再导航"堵不住：
+ * 书架首帧正是在这段窗口内布局的（content 2004），500ms 后恢复（2144）→ 右边缘外扩、右跳。
+ *
+ * 做法：把这份"额外量"在**外壳根节点**消费掉（rail 与各页 Scaffold 都按参考态布局），
+ * 于是返回窗口内书架的首帧就是终局；额外量归零后本对象自然失效（`max(0, …)`），
+ * 因此不需要精确掐时间。只在"刚离开阅读页后的一小段窗口"启用，避免长期影响
+ * （例如旋转后合法的新 inset 会被误抑制）。
+ */
+class ExtraOverReferenceInsets(
+    private val live: WindowInsets,
+    private val reference: InsetsSnapshot,
+) : WindowInsets {
+    override fun getLeft(density: Density, layoutDirection: LayoutDirection): Int =
+        (live.getLeft(density, layoutDirection) - reference.left).coerceAtLeast(0)
+
+    override fun getTop(density: Density): Int =
+        (live.getTop(density) - reference.top).coerceAtLeast(0)
+
+    override fun getRight(density: Density, layoutDirection: LayoutDirection): Int =
+        (live.getRight(density, layoutDirection) - reference.right).coerceAtLeast(0)
+
+    override fun getBottom(density: Density): Int =
+        (live.getBottom(density) - reference.bottom).coerceAtLeast(0)
 }
