@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.format.ContentHasher
 import com.llzx373.foldreader.core.format.EncodingDetection
@@ -46,20 +47,23 @@ class ImportBookUseCase(
     suspend fun import(
         uri: Uri,
         options: TextCleaner.CleanOptions = TextCleaner.CleanOptions(),
+        source: BookSource = BookSource.IMPORT,
         onProgress: (Float) -> Unit = {},
-    ): Result = import(uri.toString(), options, onProgress)
+    ): Result = import(uri.toString(), options, source, onProgress)
 
     suspend fun import(
         uriKey: String,
         options: TextCleaner.CleanOptions = TextCleaner.CleanOptions(),
+        source: BookSource = BookSource.IMPORT,
         onProgress: (Float) -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
-        runCatching { doImport(uriKey, options, onProgress) }.getOrElse { Result.Failure(it.message) }
+        runCatching { doImport(uriKey, options, source, onProgress) }.getOrElse { Result.Failure(it.message) }
     }
 
     private suspend fun doImport(
         uriKey: String,
         options: TextCleaner.CleanOptions,
+        source: BookSource,
         onProgress: (Float) -> Unit,
     ): Result {
         if (options.isNoop) {
@@ -83,7 +87,7 @@ class ImportBookUseCase(
                 val contentHash = hashOf(channel)
                 bookshelfRepository.findByContentHash(contentHash)
                     ?.let { return Result.DuplicateSameHash(it.id, it.title) }
-                return insert(uriKey, headText, contentHash, detection, cleanedFilePath = null)
+                return insert(uriKey, headText, contentHash, detection, cleanedFilePath = null, source)
             }
 
             val tmp = File(cleanedDir, ".tmp-${UUID.randomUUID()}.txt")
@@ -96,7 +100,7 @@ class ImportBookUseCase(
                 if (!target.exists() && !tmp.renameTo(target)) {
                     throw java.io.IOException("清洗副本写入失败: ${target.absolutePath}")
                 }
-                return insert(uriKey, headText, cleanedHash, detection, target.absolutePath)
+                return insert(uriKey, headText, cleanedHash, detection, target.absolutePath, source)
             } finally {
                 tmp.delete()
             }
@@ -152,6 +156,7 @@ class ImportBookUseCase(
         contentHash: String,
         detection: EncodingDetection,
         cleanedFilePath: String?,
+        source: BookSource,
     ): Result {
         val baseName = displayNameOf(uriKey)
             ?.substringBeforeLast('.')
@@ -169,6 +174,7 @@ class ImportBookUseCase(
                 importedAt = System.currentTimeMillis(),
                 lastReadAt = null,
                 cleanedFilePath = cleanedFilePath,
+                source = source,
             ),
         )
         return Result.Imported(bookId, title, detection.confidence)

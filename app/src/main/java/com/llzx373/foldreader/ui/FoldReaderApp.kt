@@ -2,13 +2,18 @@ package com.llzx373.foldreader.ui
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -29,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -42,7 +48,7 @@ import com.llzx373.foldreader.navigation.FoldReaderNavHost
 import com.llzx373.foldreader.navigation.Routes
 import kotlinx.coroutines.delay
 
-private val topLevelRoutes = listOf(Routes.BOOKSHELF, Routes.SETTINGS)
+private val topLevelRoutes = listOf(Routes.BOOKSHELF, Routes.FILE_BROWSER, Routes.SETTINGS)
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -135,6 +141,12 @@ fun FoldReaderApp() {
                             label = { Text("书架") },
                         )
                         item(
+                            selected = currentRoute == Routes.FILE_BROWSER,
+                            onClick = { navController.navigateTopLevel(Routes.FILE_BROWSER) },
+                            icon = { NavFolderIcon() },
+                            label = { Text("浏览") },
+                        )
+                        item(
                             selected = currentRoute == Routes.SETTINGS,
                             onClick = { navController.navigateTopLevel(Routes.SETTINGS) },
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
@@ -182,5 +194,28 @@ private fun NavHostController.navigateTopLevel(route: String) {
         popUpTo(graph.startDestinationId) { saveState = true }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+// material-icons-core 没有文件夹图标，Canvas 自绘（画法同书架的分组图标）
+@Composable
+private fun NavFolderIcon() {
+    val tint = androidx.compose.material3.LocalContentColor.current
+    Canvas(modifier = Modifier.size(24.dp)) {
+        val w = size.width
+        val h = size.height
+        val corner = CornerRadius(h * 0.1f, h * 0.1f)
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.08f, h * 0.2f),
+            size = Size(w * 0.42f, h * 0.18f),
+            cornerRadius = corner,
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.08f, h * 0.32f),
+            size = Size(w * 0.84f, h * 0.52f),
+            cornerRadius = corner,
+        )
     }
 }

@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.debug.ReturnTrace
@@ -716,6 +717,22 @@ private fun FolderIcon(contentDescription: String) {
 }
 
 @Composable
+private fun ExternalSourceBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier,
+    ) {
+        Text(
+            text = "外",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
+@Composable
 private fun EmptyBookshelf(onImportClick: () -> Unit) {
     EmptyState(
         title = "书架空空如也",
@@ -859,6 +876,12 @@ private fun BookGridItem(
                         .align(Alignment.TopEnd)
                         .padding(6.dp),
                 )
+            } else if (book.source == BookSource.EXTERNAL) {
+                ExternalSourceBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp),
+                )
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -946,13 +969,18 @@ private fun BookList(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BookCover(
-                        title = book.title,
-                        modifier = Modifier.width(46.dp),
-                        sharedTransitionScope = sharedTransitionScope,
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        bookId = book.id,
-                    )
+                    Box {
+                        BookCover(
+                            title = book.title,
+                            modifier = Modifier.width(46.dp),
+                            sharedTransitionScope = sharedTransitionScope,
+                            animatedVisibilityScope = animatedVisibilityScope,
+                            bookId = book.id,
+                        )
+                        if (book.source == BookSource.EXTERNAL) {
+                            ExternalSourceBadge(modifier = Modifier.align(Alignment.TopEnd))
+                        }
+                    }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(

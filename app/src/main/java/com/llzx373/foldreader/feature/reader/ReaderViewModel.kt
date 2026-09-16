@@ -152,6 +152,8 @@ class ReaderViewModel(
     private val pageMutex = Mutex()
     private val anchorOffset = MutableStateFlow(0L)
     private val viewport = MutableStateFlow<SpreadViewport?>(null)
+    /** 实时索引封口（或失败收尾）时 +1，驱动 collectViewport 用最终 charCount 重排一次。 */
+    private val contentRevision = MutableStateFlow(0)
     private val pendingSave = MutableStateFlow<Long?>(null)
     private val timer = ReadingTimer()
     private val speedTracker = ReadingSpeedTracker()
@@ -535,6 +537,7 @@ class ReaderViewModel(
                     it.copy(bookTitle = book.title, totalChars = opened.charCount)
                 }
                 maybeScanChaptersInBackground(uri, charsetOverride, opened)
+                watchLiveIndexCompletion(opened)
                 collectViewport()
             } catch (t: Throwable) {
                 _uiState.update { it.copy(loading = false, error = t.message ?: "打开失败") }
@@ -562,6 +565,23 @@ class ReaderViewModel(
             if (chapters.isEmpty()) {
                 runCatching { bookshelfRepository.saveChapters(bookId, scanned) }
             }
+        }
+    }
+
+    /**
+     * 实时索引（无快照首开时后台异步建偏移索引）封口后收尾：
+     * charCount 从 0 长到终值，这里刷新 totalChars 并触发一次重排，
+     * 否则首帧之后进度百分比、总页数、翻页/预取都停在 totalChars=0 的状态。
+     */
+    private fun watchLiveIndexCompletion(opened: BookContent) {
+        val live = opened as? com.llzx373.foldreader.core.format.txt.TxtBookContent
+        if (live?.indexProgress == null) return
+        viewModelScope.launch {
+            // 等索引封口（总数不可能超过 MAX_VALUE，即等到 complete/失败为止）
+            runCatching { live.awaitCharsAbove(Long.MAX_VALUE) }
+            if (content !== live) return@launch
+            _uiState.update { it.copy(totalChars = live.charCount) }
+            contentRevision.update { it + 1 }
         }
     }
 
@@ -685,7 +705,8 @@ class ReaderViewModel(
                         a.fontKey == b.fontKey &&
                         a.autoIndentEnabled == b.autoIndentEnabled
                 },
-        ) { v, _, p -> v to p }.collectLatest { (v, p) ->
+            contentRevision,
+        ) { v, _, p, _ -> v to p }.collectLatest { (v, p) ->
             val source = content ?: return@collectLatest
             try {
                 val config = buildLayoutConfig(p)
@@ -945,10 +966,18 @@ class ReaderViewModel(
     suspend fun adjacentSpread(forward: Boolean): PageSpread? {
         val current = _uiState.value.spread ?: return null
         val dual = pageMutex.withLock { dualActive }
-        val total = _uiState.value.totalChars
+        val source = content
+        var total = source?.charCount ?: _uiState.value.totalChars
         val anchor = when {
             forward && dual -> current.right?.charEnd ?: return null
-            forward -> if (current.left.charEnd < total) current.left.charEnd else return null
+            forward -> {
+                if (current.left.charEnd >= total && source != null && !source.isCharCountFinal) {
+                    // 实时索引还在增长：等它越过当前页尾再判断是否真到文末
+                    source.awaitCharsAbove(current.left.charEnd)
+                    total = source.charCount
+                }
+                if (current.left.charEnd < total) current.left.charEnd else return null
+            }
             else -> {
                 val left = paginatorFor(current.left.charStart - 1) ?: return null
                 val one = withContext(Dispatchers.Default) {
@@ -1222,7 +1251,8 @@ class ReaderViewModel(
             val snapshot = pageMutex.withLock { paginatorLeft to dualActive }
             val paginator = snapshot.first ?: return@launch
             val dual = snapshot.second
-            val total = _uiState.value.totalChars
+            // 用实时 charCount：索引增长期间也能向后排预取
+            val total = content?.charCount ?: _uiState.value.totalChars
             var next: PageSpread? = null
             var prev: PageSpread? = null
             withContext(Dispatchers.Default) {

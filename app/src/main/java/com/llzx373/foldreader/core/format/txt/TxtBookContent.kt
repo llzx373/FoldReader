@@ -23,6 +23,10 @@ class TxtBookContent(
 
     override val charCount: Long get() = offsetIndex.totalChars
 
+    override val isCharCountFinal: Boolean get() = offsetIndex.isComplete
+
+    override suspend fun awaitCharsAbove(offset: Long) = offsetIndex.awaitTotalCharsAbove(offset)
+
     override suspend fun read(range: LongRange): String = withContext(Dispatchers.IO) {
         val start = range.first.coerceAtLeast(0L)
         val requestedEnd = if (range.last == Long.MAX_VALUE) Long.MAX_VALUE else range.last + 1

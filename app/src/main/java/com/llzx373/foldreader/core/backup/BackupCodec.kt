@@ -52,6 +52,7 @@ class BackupCodec(
                 .put("fileUri", book.fileUri)
                 .put("contentHash", book.contentHash)
                 .put("format", book.format.name)
+                .put("source", book.source.name)
                 .put("totalChars", book.totalChars)
                 .put("encoding", book.encoding)
                 .put("importedAt", book.importedAt)

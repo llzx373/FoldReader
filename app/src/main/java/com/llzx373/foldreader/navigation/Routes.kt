@@ -3,6 +3,7 @@ package com.llzx373.foldreader.navigation
 object Routes {
     const val BOOKSHELF = "bookshelf"
     const val READER = "reader/{bookId}?anchor={anchor}"
+    const val FILE_BROWSER = "file_browser"
     const val SETTINGS = "settings"
 
     const val ARG_BOOK_ID = "bookId"

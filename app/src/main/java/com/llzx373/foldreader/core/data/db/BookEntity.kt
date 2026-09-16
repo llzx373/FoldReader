@@ -1,10 +1,13 @@
 package com.llzx373.foldreader.core.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
 enum class BookFormat { TXT }
+
+enum class BookSource { IMPORT, EXTERNAL }
 
 @Entity(
     tableName = "books",
@@ -23,4 +26,5 @@ data class BookEntity(
     val lastReadAt: Long?,
     val groupName: String? = null,
     val cleanedFilePath: String? = null,
+    @ColumnInfo(defaultValue = "IMPORT") val source: BookSource = BookSource.IMPORT,
 )

@@ -120,7 +120,12 @@ class Paginator(
 
     suspend fun pageAfter(offset: Long): Page? {
         val current = pageAt(offset)
-        if (current.charEnd >= content.charCount) return null
+        if (current.charEnd >= content.charCount) {
+            if (content.isCharCountFinal) return null
+            // 实时索引尚未推进到页尾之后：等索引增长/封口，封口后仍到顶才是真文末
+            content.awaitCharsAbove(current.charEnd)
+            if (current.charEnd >= content.charCount) return null
+        }
         return pageAt(current.charEnd)
     }
 
@@ -256,7 +261,13 @@ class Paginator(
         fun pushBack(line: PageLine) = pending.addFirst(line)
 
         private suspend fun loadParagraph() {
-            if (pos >= content.charCount) return
+            if (pos >= content.charCount) {
+                // 实时索引的书 charCount 从 0 增长：未到终值时等索引推进，
+                // 否则会把"索引还没建好"误判成文末，排出空页上屏
+                if (content.isCharCountFinal) return
+                content.awaitCharsAbove(pos)
+                if (pos >= content.charCount) return
+            }
             val paragraphStart = pos == 0L || content.read(pos - 1 until pos) == "\n"
             val windowEnd = minOf(pos + SCAN_CHARS, content.charCount)
             val window = content.read(pos until windowEnd)

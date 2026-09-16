@@ -3,8 +3,13 @@ package com.llzx373.foldreader.core.reader
 import android.graphics.Typeface
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.ChapterScanner
+import com.llzx373.foldreader.core.format.OffsetIndex
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,6 +19,21 @@ private class StringBookContent(private val text: String) : BookContent {
     override suspend fun read(range: LongRange): String {
         val from = range.first.coerceIn(0, text.length.toLong()).toInt()
         val to = (range.last + 1).coerceIn(0, text.length.toLong()).toInt()
+        return text.substring(from, maxOf(from, to))
+    }
+}
+
+/** 模拟实时索引期间的内容源：charCount 随 OffsetIndex 增长，封口前不是终值。 */
+private class LiveIndexBookContent(
+    private val text: String,
+    private val index: OffsetIndex,
+) : BookContent {
+    override val charCount: Long get() = index.totalChars
+    override val isCharCountFinal: Boolean get() = index.isComplete
+    override suspend fun awaitCharsAbove(offset: Long) = index.awaitTotalCharsAbove(offset)
+    override suspend fun read(range: LongRange): String {
+        val from = range.first.coerceIn(0, index.totalChars).toInt()
+        val to = (range.last + 1).coerceIn(0, index.totalChars).toInt()
         return text.substring(from, maxOf(from, to))
     }
 }
@@ -371,5 +391,56 @@ class PaginatorTest {
         val text = "正文一段\n另一段"
         indentPaginator(text, autoIndentEnabled = false, measurer = recorder).pageAt(0)
         assertEquals(listOf(0, 0), recorder.seen)
+    }
+
+    private fun livePaginator(content: BookContent) = Paginator(
+        content = content,
+        config = LayoutConfig(
+            fontSizeSp = 10f,
+            lineSpacingMultiplier = 1f,
+            paragraphSpacingEm = 0.4f,
+            marginLeftDp = 0f,
+            marginTopDp = 0f,
+            marginRightDp = 0f,
+            marginBottomDp = 0f,
+            firstLineIndentChars = 0,
+            maxLineChars = 40,
+        ),
+        measurer = FixedWidthMeasurer(),
+        widthPx = 200,
+        heightPx = 100,
+        density = 1f,
+        scaledDensity = 1f,
+    )
+
+    @Test
+    fun `live index paginator waits for chars instead of emitting empty page`() = runBlocking {
+        val text = "第一章 风起\n" + "字".repeat(5000)
+        val index = OffsetIndex(blockChars = OffsetIndex.DEFAULT_BLOCK_CHARS)
+        val p = livePaginator(LiveIndexBookContent(text, index))
+
+        val deferred = async { p.pageAt(0) }
+        delay(200)
+        // 索引未推进：分页必须挂起等待，而不是把 charCount=0 当文末排出空页
+        assertFalse(deferred.isCompleted)
+
+        index.appendBlock(4096, 4096)
+        index.appendBlock(text.length - 4096, text.length.toLong())
+        index.markComplete()
+
+        val page = withTimeout(5_000) { deferred.await() }
+        assertTrue(page.charEnd > 0L)
+        assertTrue(page.lines.isNotEmpty())
+        assertEquals("第一章 风起", page.lines.first().text)
+        assertTrue(page.lines.drop(1).all { line -> line.text.all { it == '字' } })
+    }
+
+    @Test
+    fun `completed empty index yields empty page without hanging`() = runBlocking {
+        val index = OffsetIndex(blockChars = OffsetIndex.DEFAULT_BLOCK_CHARS)
+        index.markComplete()
+        val page = withTimeout(5_000) { livePaginator(LiveIndexBookContent("", index)).pageAt(0) }
+        assertTrue(page.lines.isEmpty())
+        assertEquals(0L, page.charEnd)
     }
 }

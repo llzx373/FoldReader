@@ -9,6 +9,7 @@ import com.llzx373.foldreader.core.data.db.RoomOffsetIndexStore
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.repository.BookshelfRepositoryImpl
+import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.SettingsRepositoryImpl
 import com.llzx373.foldreader.core.foldable.FoldableStateProvider
@@ -40,6 +41,7 @@ class AppContainer(context: Context) {
         sessionDao = database.readingSessionDao(),
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
+    val fileBrowserRootsStore = FileBrowserRootsStore(context)
     val bookPrefsRepository = BookPrefsRepository(
         bookPrefsDao = database.bookPrefsDao(),
         settingsRepository = settingsRepository,

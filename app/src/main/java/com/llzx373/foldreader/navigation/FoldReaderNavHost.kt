@@ -16,10 +16,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.feature.bookshelf.BookshelfScreen
+import com.llzx373.foldreader.feature.filebrowser.FileBrowserScreen
 import com.llzx373.foldreader.feature.settings.SettingsScreen
 
 /**
- * 顶层目的地（书架/设置）的 NavHost。
+ * 顶层目的地（书架/浏览/设置）的 NavHost。
  *
  * 阅读页在这里**只占位**：它需要整窗宽高（不能被外壳 content 槽的 rail 宽度约束），
  * 所以画面由同一 [SharedTransitionScope] 下的 `ReaderOverlay` 全窗口层渲染。
@@ -76,6 +77,19 @@ fun FoldReaderNavHost(
             popExitTransition = { readerPlaceholderExit },
         ) {
             // 故意留空：仅保留压栈、参数与返回语义
+        }
+        composable(
+            route = Routes.FILE_BROWSER,
+            enterTransition = {
+                slideInVertically(initialOffsetY = { it / 12 }, animationSpec = offsetSpring) +
+                    fadeIn(fadeSpring)
+            },
+            popExitTransition = {
+                slideOutVertically(targetOffsetY = { it / 12 }, animationSpec = offsetSpring) +
+                    fadeOut(fadeSpring)
+            },
+        ) {
+            FileBrowserScreen(onOpenBook = onOpenBook)
         }
         composable(
             route = Routes.SETTINGS,
