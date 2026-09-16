@@ -38,16 +38,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -90,7 +87,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
@@ -556,14 +552,27 @@ fun ReaderScreen(
 
     var barsRestoreRequested by remember { mutableStateOf(false) }
     val localView = LocalView.current
-    val localLayoutDirection = LocalLayoutDirection.current
-    val systemBarInsets = WindowInsets.systemBars
+
+    // 进阅读页即记一次"系统栏可见"的外壳 inset：此刻系统栏一定可见（转场期间不隐藏），
+    // 比"沉浸前一刻"更早、更稳（避免厂商提前派发沉浸期才有的 displayCutout inset）
+    DisposableEffect(localView) {
+        ShellInsets.rememberVisibleReference(localView)
+        ReturnTrace.log(
+            "reader enter: reference=${ShellInsets.visibleReference()} " +
+                "systemBars=${ShellInsets.systemBars(localView)} cutout=${ShellInsets.cutout(localView)}",
+        )
+        onDispose { }
+    }
 
     // 离开阅读页（返回书架/去设置）前：先把系统栏恢复为常驻（BEHAVIOR_DEFAULT + show），
-    // 再等全部四边 inset 到达"完全可见"目标值并稳定（显隐动画逐帧派发，各边可能
-    // 先后到位：竖屏 bottom 先到、横屏 right 后到、状态栏 top 也可能晚一帧），
-    // 之后导航——目标页首帧即最终布局，不会被晚到的 inset 挤压。
-    // 阅读页正文不消费系统栏 inset，恢复过程对当前画面无影响。
+    // 再等外壳真正参与布局的 inset（systemBars ∪ displayCutout）回到"系统栏可见时的实测值"
+    // 并连续两帧稳定，之后才导航——目标页首帧即最终布局。
+    //
+    // 两个坑（都踩过）：
+    //  1) 只看 systemBars 不够：挖孔屏横屏下 displayCutout 的侧边 inset 会晚 ~500ms 才消失，
+    //     书架首帧会按带挖孔 inset 的宽度布局、随后右边缘外扩（封面/右上动作整体右跳）；
+    //  2) 只看 ignoringVisibility 不够：displayCutout 的值不受显隐影响，平台会返回"沉浸中"
+    //     的那个值，门控照样提前放行。所以以沉浸前的实测快照为准（ShellInsets.visibleReference）。
     fun leaveReader(navigate: () -> Unit) {
         if (barsRestoreRequested) return
         barsRestoreRequested = true
@@ -575,16 +584,13 @@ fun ReaderScreen(
         val controller = WindowCompat.getInsetsController(window, localView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
         controller.show(WindowInsetsCompat.Type.systemBars())
-        // ignoringVisibility 不受当前显隐影响，拿到的是"完全可见"时的目标值
-        val expected = ViewCompat.getRootWindowInsets(localView)
-            ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars())
-            ?.let { InsetsSnapshot(it.left, it.top, it.right, it.bottom) }
-        if (expected == null) {
-            navigate()
-            return
-        }
+        val reference = ShellInsets.visibleReference()
+        val expected = reference ?: ShellInsets.ignoringVisibility(localView)
         val gate = BarsRestoreGate(expected)
-        ReturnTrace.log("leaveReader: bars shown, expected=$expected")
+        ReturnTrace.log(
+            "leaveReader: bars shown reference=$reference expected=$expected " +
+                "systemBars=${ShellInsets.systemBars(localView)} cutout=${ShellInsets.cutout(localView)}",
+        )
         scope.launch {
             // 逐帧轮询而非 snapshotFlow：inset 稳定后 snapshotFlow 不再发射（去重），
             // "连续两帧不变"永远等不到第二帧，门控会退化成盲等超时——慢设备上
@@ -595,14 +601,9 @@ fun ReaderScreen(
             // 正常 5 帧内（~100ms）即达标；超时只在厂商 inset 派发异常时触发，届时宁可
             // 多等也不要带着未落地的 inset 导航（那正是书架整体右跳的来源）
             while (SystemClock.uptimeMillis() - start < 800L) {
-                val snap = InsetsSnapshot(
-                    systemBarInsets.getLeft(density, localLayoutDirection),
-                    systemBarInsets.getTop(density),
-                    systemBarInsets.getRight(density, localLayoutDirection),
-                    systemBarInsets.getBottom(density),
-                )
+                val snap = ShellInsets.current(localView)
                 frames++
-                ReturnTrace.log("leaveReader gate frame#$frames $snap")
+                ReturnTrace.log("leaveReader gate frame#$frames shell=$snap")
                 if (gate.onFrame(snap)) {
                     passed = true
                     break
@@ -610,8 +611,13 @@ fun ReaderScreen(
                 withFrameNanos { }
             }
             ReturnTrace.log(
-                if (passed) "leaveReader: gate passed after $frames frames, navigate"
-                else "leaveReader: gate TIMEOUT($frames frames), navigate——若书架仍有跳动，看这里",
+                if (passed) {
+                    "leaveReader: gate passed after $frames frames, navigate"
+                } else {
+                    "leaveReader: gate TIMEOUT($frames frames) shell=${ShellInsets.current(localView)} " +
+                        "systemBars=${ShellInsets.systemBars(localView)} " +
+                        "cutout=${ShellInsets.cutout(localView)}，navigate——若书架仍有跳动，看这里"
+                },
             )
             navigate()
         }
@@ -2197,6 +2203,13 @@ private fun SystemBarEffects(menuVisible: Boolean, keepScreenOn: Boolean) {
             // 常驻栏 inset 在导航前到位；菜单期保持 transient 覆盖层，菜单布局不被推动
             controller.show(WindowInsetsCompat.Type.systemBars())
         } else {
+            // 沉浸之前先把"系统栏可见"的外壳 inset 记账：返回门控以它为期望值
+            // （displayCutout 在沉浸期间会上报额外的侧边 inset，平台不会随 show 立即清掉）
+            ShellInsets.rememberVisibleReference(view)
+            ReturnTrace.log(
+                "reader immersive: reference=${ShellInsets.visibleReference()} " +
+                    "systemBars=${ShellInsets.systemBars(view)} cutout=${ShellInsets.cutout(view)}",
+            )
             // transient 模式：系统栏以覆盖层形式显隐，不改变 app 的 WindowInsets，
             // 阅读期间滑动唤出/隐藏系统栏都不会引发正文重排
             controller.systemBarsBehavior =

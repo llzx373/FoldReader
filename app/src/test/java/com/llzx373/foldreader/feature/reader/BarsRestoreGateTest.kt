@@ -110,8 +110,29 @@ class BarsRestoreGateTest {
     }
 
     @Test
-    fun `左侧导航栏布局 left 到位才算完成`() {
-        // RTL / 部分设备导航栏在左
+    fun `挖孔侧边 inset 晚消失时不放行（真机返回右跳的根因序列）`() {
+        // 真机 Xiaomi 阔折叠内屏横屏实测：
+        //   沉浸中      systemBars=(0,0,0,0)   displayCutout=(0,0,140,0)
+        //   show 之后   systemBars=(0,140,0,0) displayCutout=(0,0,140,0)  ← 停留约 500ms
+        //   ~500ms 后   displayCutout=(0,0,0,0)
+        // 门控比较的是 systemBars ∪ displayCutout（外壳布局的依据），所以这 500ms 必须等满；
+        // 旧实现只看 systemBars，会在第二帧就放行 → 书架首帧带 140px 右 inset，随后右边缘
+        // 外扩（content 2004→2144），即"封面与右上/右下按钮整体向右跳"。
+        val expected = InsetsSnapshot(0, 140, 0, 0) // 沉浸前实测的"系统栏可见"快照
+        val gate = BarsRestoreGate(expected)
+        val results = gate.feedAll(
+            InsetsSnapshot(0, 0, 0, 0),
+            InsetsSnapshot(0, 140, 0, 140),
+            InsetsSnapshot(0, 140, 0, 140), // 稳定但 ≠ 参考值：不得放行
+            InsetsSnapshot(0, 140, 0, 140),
+            InsetsSnapshot(0, 140, 0, 0),
+            InsetsSnapshot(0, 140, 0, 0), // 连续第二帧才放行
+        )
+        assertEquals(listOf(false, false, false, false, false, true), results)
+    }
+
+    @Test
+    fun `左侧导航栏布局 left 到位才算完成`() {        // RTL / 部分设备导航栏在左
         val expected = InsetsSnapshot(96, 24, 0, 0)
         val gate = BarsRestoreGate(expected)
         val results = gate.feedAll(
