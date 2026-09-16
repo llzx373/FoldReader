@@ -190,6 +190,15 @@ fun ReaderScreen(
     var windowOffsetY by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
 
+    // 阅读页几何变化（尺寸/窗口偏移/双页判定）：诊断"进书首帧是否就是终局尺寸"，
+    // 覆盖层化之后这里应只出现一次（不再先窄后宽重排）
+    LaunchedEffect(size, windowOffsetX, windowOffsetY) {
+        if (size != IntSize.Zero) {
+            ReturnTrace.log(
+                "reader: size=$size offset=(${windowOffsetX.toInt()},${windowOffsetY.toInt()})",
+            )
+        }
+    }
     val layoutMode = resolvePageLayoutMode(
         posture = foldableUiState.posture,
         widthCategory = foldableUiState.widthCategory,

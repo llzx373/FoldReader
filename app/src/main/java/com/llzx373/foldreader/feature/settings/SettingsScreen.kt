@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.feature.settings
 
+import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,8 +40,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.FoldReaderApplication
@@ -47,6 +52,7 @@ import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.format.ChapterRules
 import com.llzx373.foldreader.core.format.txt.UriChannels
@@ -69,6 +75,8 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showAdRulesDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
+    var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
+    val clipboard = LocalClipboardManager.current
 
     val fontPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -349,6 +357,45 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("诊断（返回跳动 / 折叠适配）")
+            SwitchSetting("记录诊断日志", logEnabled) { enabled ->
+                logEnabled = enabled
+                DiagnosticLog.setEnabled(context, enabled)
+            }
+            ListItem(
+                headlineContent = { Text("在日志中打标记") },
+                supportingContent = { Text("复现「跳一下」的前后各点一次，日志里会出现醒目分隔线，便于圈定区间") },
+                modifier = Modifier.clickable {
+                    DiagnosticLog.mark("手动标记")
+                    Toast.makeText(context, "已打标记", Toast.LENGTH_SHORT).show()
+                },
+            )
+            ListItem(
+                headlineContent = { Text("分享日志文件") },
+                supportingContent = {
+                    Text("导出到 cache 后走系统分享（微信/邮件/网盘均可）；失败会自动复制到剪贴板")
+                },
+                modifier = Modifier.clickable { shareDiagnosticLog(context) },
+            )
+            ListItem(
+                headlineContent = { Text("复制日志到剪贴板") },
+                supportingContent = { Text("直接粘贴到聊天窗口发我；内容含设备/屏幕/折叠形态与逐帧布局") },
+                modifier = Modifier.clickable {
+                    val text = DiagnosticLog.snapshot(context)
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "日志已复制（${text.length} 字符）", Toast.LENGTH_SHORT).show()
+                },
+            )
+            ListItem(
+                headlineContent = { Text("清空日志") },
+                supportingContent = { Text("删掉已落盘的日志与崩溃转储") },
+                modifier = Modifier.clickable {
+                    DiagnosticLog.clear()
+                    Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("关于")
             ListItem(
                 headlineContent = { Text("FoldReader") },
@@ -422,6 +469,36 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 private fun defaultBackupFileName(): String {
     val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
     return "foldreader-backup-$stamp.json"
+}
+
+/** 导出诊断日志并走系统分享；分享不可用时退回剪贴板 */
+private fun shareDiagnosticLog(context: Context) {
+    val file = DiagnosticLog.export(context)
+    if (file == null) {
+        Toast.makeText(context, "导出失败，请改用「复制日志到剪贴板」", Toast.LENGTH_LONG).show()
+        return
+    }
+    val uri = runCatching {
+        FileProvider.getUriForFile(
+            context,
+            context.packageName + DiagnosticLog.FILE_PROVIDER_SUFFIX,
+            file,
+        )
+    }.getOrNull()
+    if (uri == null) {
+        Toast.makeText(context, "导出失败，请改用「复制日志到剪贴板」", Toast.LENGTH_LONG).show()
+        return
+    }
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, "FoldReader 诊断日志")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, "分享诊断日志")) }
+        .onFailure {
+            Toast.makeText(context, "没有可分享的应用，请改用「复制日志到剪贴板」", Toast.LENGTH_LONG).show()
+        }
 }
 
 @Composable

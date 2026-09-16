@@ -207,6 +207,7 @@
 - [x] 退出阅读页统一走 `leaveReader` + `BarsRestoreGate`（四边 inset 到达目标值并连续两帧稳定才导航，800ms 超时兜底）；禁止用 `NavigationSuiteScaffoldState.snapTo` 切换导航组件
 - [x] 覆盖层按 entry 提供 ViewModel/SavedState/Lifecycle owner；占位目的地转场时长 ≥ 覆盖层退场动画（避免 entry 先销毁导致 `viewModel()` 崩溃）
 - [x] 返回跳动帧级诊断（`core/debug/ReturnTrace`，仅 debug）：layoutType / innerPadding 四边值 / shell slot / content pos
+- [x] 应用内诊断日志（`core/debug/DiagnosticLog`）：落盘 `files/diagnostics/return-trace.log` + 崩溃转储；设置页「诊断」可开关/打标记/分享/复制/清空（真机无需 adb）
 
 **排版与布局**
 - [x] Paginator 独立左右边距；字距度量/绘制链一致；Kinsoku 连续避头；超长段假段首

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 诊断日志导出目录（cacheDir/diagnostics），仅供 FileProvider 分享 -->
+    <cache-path
+        name="diagnostics"
+        path="diagnostics/" />
+</paths>

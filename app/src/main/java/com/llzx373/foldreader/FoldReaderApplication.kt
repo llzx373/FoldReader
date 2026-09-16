@@ -94,6 +94,8 @@ class FoldReaderApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 诊断日志先初始化（崩溃处理器 + return-trace.log 落盘），再装容器
+        com.llzx373.foldreader.core.debug.DiagnosticLog.init(this)
         container = AppContainer(this)
         registerActivityLifecycleCallbacks(container.foldableStateProvider.activityLifecycleCallbacks)
     }

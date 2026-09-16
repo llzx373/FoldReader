@@ -14,6 +14,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,24 @@ fun FoldReaderApp() {
     // animateFloatAsState 占位动画，切换时同样会逐帧挤压内容。）
     val layoutType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(adaptiveInfo)
     ReturnTrace.log("recompose: route=$currentRoute layoutType=$layoutType")
+
+    // 环境变化（旋转 / 折叠展开 / 半折 / 尺寸类别）逐次记录：真机折叠适配问题时
+    // 这几行能直接对齐"当时是什么形态、什么窗口尺寸"，不用靠猜
+    val sizeClass = adaptiveInfo.windowSizeClass
+    val envKey = buildString {
+        append(sizeClass.minWidthDp).append('x').append(sizeClass.minHeightDp)
+        append('|').append(posture.posture)
+        append('|').append(posture.hingeOrientation)
+        append('|').append(posture.hingeBounds)
+        append('|').append(layoutType)
+    }
+    LaunchedEffect(envKey) {
+        ReturnTrace.log(
+            "env: minWidth=${sizeClass.minWidthDp}dp minHeight=${sizeClass.minHeightDp}dp " +
+                "posture=${posture.posture} hinge=${posture.hingeOrientation} " +
+                "hingeBounds=${posture.hingeBounds} layoutType=$layoutType",
+        )
+    }
 
     // 进书时封面共享元素需要与书架同一份标题（阅读页加载态用它承接飞入封面）
     var readerCoverTitle by remember { mutableStateOf<String?>(null) }
