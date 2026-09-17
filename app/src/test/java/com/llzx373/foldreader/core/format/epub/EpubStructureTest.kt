@@ -24,7 +24,7 @@ class EpubStructureTest {
     }
 
     @Test
-    fun `EPUB2 解析 NCX 目录 嵌套拍平且丢弃 fragment`() {
+    fun `EPUB2 解析 NCX 目录 嵌套按文档序拍平并保留 fragment 与层级`() {
         val structure = parse(TestEpubs.epub2())
         assertEquals("测试之书", structure.title)
         assertEquals("作者甲", structure.creator)
@@ -35,7 +35,10 @@ class EpubStructureTest {
         assertEquals(
             listOf(
                 EpubStructure.TocEntry("第一章", "OEBPS/text/ch1.xhtml"),
-                EpubStructure.TocEntry("第一章 第一节", "OEBPS/text/ch1.xhtml", fragment = "s1"),
+                // 嵌套 navPoint 保留一级层级，展示层据此缩进
+                EpubStructure.TocEntry(
+                    "第一章 第一节", "OEBPS/text/ch1.xhtml", fragment = "s1", depth = 1,
+                ),
                 EpubStructure.TocEntry("第二章", "OEBPS/text/ch2.xhtml"),
             ),
             structure.toc,
@@ -43,14 +46,14 @@ class EpubStructureTest {
     }
 
     @Test
-    fun `EPUB3 解析 NAV 目录`() {
+    fun `EPUB3 解析 NAV 目录 嵌套 ol 保留层级`() {
         val structure = parse(TestEpubs.epub3())
         assertEquals("三版之书", structure.title)
         assertEquals("作者乙", structure.creator)
         assertEquals(
             listOf(
                 EpubStructure.TocEntry("甲章", "OEBPS/text/ch1.xhtml"),
-                EpubStructure.TocEntry("乙章", "OEBPS/text/ch2.xhtml"),
+                EpubStructure.TocEntry("乙章", "OEBPS/text/ch2.xhtml", depth = 1),
             ),
             structure.toc,
         )

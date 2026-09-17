@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -29,6 +30,8 @@ data class ChapterEntity(
     val title: String,
     val charStart: Long,
     val charEnd: Long,
+    /** 目录层级（0 为顶层），仅用于目录面板缩进；不影响跳转与进度。 */
+    @ColumnInfo(defaultValue = "0") val depth: Int = 0,
 )
 
 @Dao

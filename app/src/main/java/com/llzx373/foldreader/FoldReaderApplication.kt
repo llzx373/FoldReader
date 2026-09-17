@@ -43,6 +43,7 @@ class AppContainer(context: Context) {
                 com.llzx373.foldreader.core.data.db.MIGRATION_10_11,
                 com.llzx373.foldreader.core.data.db.MIGRATION_11_12,
                 com.llzx373.foldreader.core.data.db.MIGRATION_12_13,
+                com.llzx373.foldreader.core.data.db.MIGRATION_13_14,
             )
             .build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */

@@ -224,6 +224,17 @@ fun chapterProgressText(index: Int, count: Int, inChapter: Float): String? {
 }
 
 /**
+ * 是否需要兜底补扫章节。
+ *
+ * TXT 的 `parseChapters` 是一次全量索引扫描，实时索引正在跑时再排一遍纯属浪费；
+ * EPUB/FB2 只读压平产物旁的 `.toc` sidecar，很便宜。而章节只在「本次确实新压平」时才回填，
+ * 一旦那次写库失败（异常此前被静默吞掉），用户看到的就是「没有目录」，
+ * 且要等下一次打开才可能补上——所以这两种格式必须照常兜底，在本次打开内自愈。
+ */
+fun shouldScanChaptersInBackground(liveIndexing: Boolean, cheapChapterScan: Boolean): Boolean =
+    !liveIndexing || cheapChapterScan
+
+/**
  * [offset] 所属章节序号：取最后一个 `charStart <= offset` 的章节（章节按 charStart 升序）。
  * 二分查找：原实现用 `indexOfLast` 线性扫，滚动时每翻一页要调 4 次、搜索分组时每个命中调 1 次，
  * 章节多时是主线程热点。offset 落在首章之前时返回 0（与原 `coerceAtLeast(0)` 一致）。

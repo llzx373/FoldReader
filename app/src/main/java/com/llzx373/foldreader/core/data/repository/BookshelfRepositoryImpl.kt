@@ -112,11 +112,11 @@ class BookshelfRepositoryImpl(
         progressDao.upsert(progress)
 
     override suspend fun getChapters(bookId: Long): List<Chapter> =
-        chapterDao.getForBook(bookId).map { Chapter(it.title, it.charStart, it.charEnd) }
+        chapterDao.getForBook(bookId).map { Chapter(it.title, it.charStart, it.charEnd, it.depth) }
 
     override fun observeChapters(bookId: Long): Flow<List<Chapter>> =
         chapterDao.observeForBook(bookId).map { list ->
-            list.map { Chapter(it.title, it.charStart, it.charEnd) }
+            list.map { Chapter(it.title, it.charStart, it.charEnd, it.depth) }
         }
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
@@ -129,6 +129,7 @@ class BookshelfRepositoryImpl(
                     title = chapter.title,
                     charStart = chapter.charStart,
                     charEnd = chapter.charEnd,
+                    depth = chapter.depth,
                 )
             },
         )

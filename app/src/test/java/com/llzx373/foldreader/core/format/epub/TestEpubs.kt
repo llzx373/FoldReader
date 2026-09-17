@@ -304,6 +304,49 @@ internal object TestEpubs {
         "OEBPS/text/ch2.xhtml" to CH2_XHTML,
     )
 
+    /**
+     * 合并型合集的目录形态（epubmerge 把多本单行本塞进一个 zip 就是这个结构）：
+     * 一级 navPoint 装书名、二级装章节，且两者指向**同一文件的不同锚点**（否则会被
+     * 同偏移去重掉，测不到层级）。用于验证 [Chapter.depth] 能一路传到展示层。
+     */
+    fun nestedNcxToc(): LinkedHashMap<String, String> = linkedMapOf(
+        "META-INF/container.xml" to CONTAINER,
+        "OEBPS/content.opf" to """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>合并合集</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+  </spine>
+</package>""",
+        "OEBPS/toc.ncx" to """<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <navMap>
+    <navPoint id="b1" playOrder="1">
+      <navLabel><text>第一本</text></navLabel>
+      <content src="text/ch1.xhtml#c1"/>
+      <navPoint id="b1c1" playOrder="2">
+        <navLabel><text>第一章</text></navLabel>
+        <content src="text/ch1.xhtml#mid"/>
+      </navPoint>
+    </navPoint>
+    <navPoint id="b2" playOrder="3">
+      <navLabel><text>第二本</text></navLabel>
+      <content src="text/ch2.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>""",
+        "OEBPS/text/ch1.xhtml" to ANCHORED_CH1_XHTML,
+        "OEBPS/text/ch2.xhtml" to CH2_XHTML,
+    )
+
     /** 无 TOC（无 NAV、无 NCX）：上层退化为按 spine 项分章。 */
     fun noToc(): LinkedHashMap<String, String> = linkedMapOf(
         "META-INF/container.xml" to CONTAINER,

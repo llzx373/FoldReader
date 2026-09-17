@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
     ],
-    version = 13,
+    version = 14,
     // 10 → 11 起都涉及 AutoMigration 覆盖不了的结构调整（索引增删 / 列改名 / 换模型），
     // 均为手写 SQL，见 FoldReaderMigrations。
     autoMigrations = [

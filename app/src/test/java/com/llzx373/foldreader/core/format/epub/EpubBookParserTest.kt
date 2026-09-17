@@ -108,6 +108,44 @@ class EpubBookParserTest {
         }
     }
 
+    /**
+     * 合并型合集（一个 zip 塞多本书）的书名是顶层、章节在下一层。
+     * 层级若不透传，目录面板会变成一串分不清主次的平铺条目。
+     */
+    @Test
+    fun `嵌套 NCX 的目录层级被保留`() {
+        val epub = tempEpub(TestEpubs.nestedNcxToc())
+        val parser = newParserFor(tempDir())
+
+        val chapters = parser.ensureFlattenedFile(epub).chapters
+
+        assertEquals(listOf("第一本", "第一章", "第二本"), chapters.map { it.title })
+        assertEquals(listOf(0, 1, 0), chapters.map { it.depth })
+        // 层级只是展示信息，章节边界仍按字符偏移严格递增
+        assertEquals(chapters.map { it.charStart }.sorted(), chapters.map { it.charStart })
+    }
+
+    @Test
+    fun `EPUB3 嵌套 ol 的目录层级被保留`() {
+        val epub = tempEpub(TestEpubs.epub3())
+        val parser = newParserFor(tempDir())
+
+        val chapters = parser.ensureFlattenedFile(epub).chapters
+
+        assertEquals(listOf("甲章", "乙章"), chapters.map { it.title })
+        assertEquals(listOf(0, 1), chapters.map { it.depth })
+    }
+
+    @Test
+    fun `无目录时兜底章节的层级为 0`() {
+        val epub = tempEpub(TestEpubs.noToc())
+        val parser = newParserFor(tempDir())
+
+        val chapters = parser.ensureFlattenedFile(epub).chapters
+
+        assertEquals(listOf(0, 0), chapters.map { it.depth })
+    }
+
     @Test
     fun `无 TOC 时退化为按 spine 项分章`() {
         val epub = tempEpub(TestEpubs.noToc())

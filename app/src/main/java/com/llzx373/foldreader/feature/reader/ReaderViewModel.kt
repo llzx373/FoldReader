@@ -19,6 +19,7 @@ import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.BookParser
 import com.llzx373.foldreader.core.format.BookParsers
@@ -657,7 +658,13 @@ class ReaderViewModel(
                 _uiState.update {
                     it.copy(bookTitle = book.title, totalChars = opened.charCount)
                 }
-                maybeScanChaptersInBackground(uri, charsetOverride, opened, parser)
+                maybeScanChaptersInBackground(
+                    uri = uri,
+                    charsetOverride = charsetOverride,
+                    opened = opened,
+                    parser = parser,
+                    cheapChapterScan = book.format != BookFormat.TXT,
+                )
                 watchLiveIndexCompletion(opened)
                 collectViewport()
             } catch (t: Throwable) {
@@ -667,25 +674,29 @@ class ReaderViewModel(
     }
 
     /**
-     * 兜底补扫章节：索引快照有效（无后台索引在跑）但章节表为空，
-     * 说明上次扫描结果没落库；首帧上屏后闲时补扫一次。
+     * 兜底补扫章节：章节表为空说明此前那次回填没落库（写库异常曾被静默吞掉）。
+     * 首帧上屏后闲时补扫一次，让「没有目录」在**本次打开内**就自愈。
      */
     private fun maybeScanChaptersInBackground(
         uri: Uri,
         charsetOverride: java.nio.charset.Charset?,
         opened: BookContent,
         parser: BookParser,
+        /** EPUB/FB2 的 parseChapters 只读 .toc sidecar（便宜）；TXT 是一次全量索引扫描（贵）。 */
+        cheapChapterScan: Boolean,
     ) {
         val liveIndexing = (opened as? com.llzx373.foldreader.core.format.txt.TxtBookContent)
             ?.indexProgress != null
-        if (liveIndexing) return
+        if (!shouldScanChaptersInBackground(liveIndexing, cheapChapterScan)) return
         viewModelScope.launch(Dispatchers.IO) {
             firstFrameRendered.filter { it }.first()
             if (chapters.isNotEmpty()) return@launch
-            val scanned = runCatching { parser.parseChapters(uri, charsetOverride) }.getOrNull()
-                ?: return@launch
+            val scanned = runCatching { parser.parseChapters(uri, charsetOverride) }
+                .onFailure { DiagnosticLog.line("章节补扫失败 bookId=$bookId: ${it.message}") }
+                .getOrNull() ?: return@launch
             if (chapters.isEmpty()) {
                 runCatching { bookshelfRepository.saveChapters(bookId, scanned) }
+                    .onFailure { DiagnosticLog.line("章节补写失败 bookId=$bookId: ${it.message}") }
             }
         }
     }

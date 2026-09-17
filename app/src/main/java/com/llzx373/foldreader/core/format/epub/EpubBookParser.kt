@@ -243,27 +243,29 @@ class EpubBookParser(
         anchors: Map<String, Long> = emptyMap(),
         totalChars: Long,
     ): List<Chapter> {
-        // start → title；TOC 按文档序拍平，同一偏移（锚点重复/同文件多点）保留先出现的标题
-        val points = LinkedHashMap<Long, String>()
+        // start → (title, depth)；TOC 按文档序拍平，同一偏移（锚点重复/同文件多点）保留先出现的标题
+        val points = LinkedHashMap<Long, Pair<String, Int>>()
         val toc = structure.toc
         if (!toc.isNullOrEmpty()) {
             for (entry in toc) {
                 val start = resolveTargetOffset(entry, itemStarts, anchors) ?: continue
                 if (start < 0L || start >= totalChars) continue
-                points.putIfAbsent(start, entry.label)
+                points.putIfAbsent(start, entry.label to entry.depth)
             }
         } else {
             for ((file, start) in itemStarts) {
                 val name = file.substringAfterLast('/').substringBeforeLast('.')
-                points.putIfAbsent(start, name.ifBlank { file })
+                points.putIfAbsent(start, name.ifBlank { file } to 0)
             }
         }
         val starts = points.keys.sorted()
         val chapters = starts.mapIndexed { index, start ->
+            val (title, depth) = points.getValue(start)
             Chapter(
-                title = points.getValue(start),
+                title = title,
                 charStart = start,
                 charEnd = if (index + 1 < starts.size) starts[index + 1] else totalChars,
+                depth = depth,
             )
         }.filter { it.charEnd > it.charStart }
         if (chapters.isNotEmpty()) return chapters

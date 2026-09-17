@@ -71,7 +71,13 @@ class EpubStructure(
 
     data class SpineItem(val file: String, val mediaType: String?, val linear: Boolean = true)
 
-    data class TocEntry(val label: String, val targetFile: String, val fragment: String? = null)
+    /** [depth] 为导航文档里的嵌套层级（0 为顶层）：合并型 EPUB（一个 zip 里塞多本书）靠它区分书名与章节。 */
+    data class TocEntry(
+        val label: String,
+        val targetFile: String,
+        val fragment: String? = null,
+        val depth: Int = 0,
+    )
 
     data class GuideRef(val type: String, val title: String?, val targetFile: String, val fragment: String?)
 
@@ -367,6 +373,8 @@ class EpubStructure(
             val pageList = ArrayList<TocEntry>()
             // navKind 栈：0=不在 nav 内；否则为 epub:type（toc/landmarks/page-list/其他）
             val navStack = ArrayDeque<String>()
+            // <ol> 嵌套深度：合并型 EPUB 用一级 <ol> 装书名、二级装章节
+            var olDepth = 0
             var linkDepth = 0
             var linkHref: String? = null
             var linkType: String? = null
@@ -385,6 +393,8 @@ class EpubStructure(
                                 navStack.addLast(
                                     parser.getAttributeValue(null, "epub:type").orEmpty(),
                                 )
+                            } else if (navStack.isNotEmpty() && name == "ol") {
+                                olDepth++
                             } else if (navStack.isNotEmpty() && name == "a") {
                                 linkDepth = 1
                                 linkHref = parser.getAttributeValue(null, "href")
@@ -402,8 +412,9 @@ class EpubStructure(
                                     val label = linkLabel.toString().trim()
                                     if (href != null && label.isNotEmpty()) {
                                         val (file, fragment) = splitHref(navDir, href)
+                                        val depth = (olDepth - 1).coerceAtLeast(0)
                                         when (navStack.lastOrNull()) {
-                                            "toc" -> toc += TocEntry(label, file, fragment)
+                                            "toc" -> toc += TocEntry(label, file, fragment, depth)
                                             "landmarks" -> landmarks +=
                                                 EpubStructure.NavLink(linkType, file, fragment)
                                             "page-list" -> pageList += TocEntry(label, file, fragment)
@@ -412,8 +423,12 @@ class EpubStructure(
                                     linkHref = null
                                     linkType = null
                                 }
+                            } else if (name == "ol" && navStack.isNotEmpty()) {
+                                olDepth = (olDepth - 1).coerceAtLeast(0)
                             } else if (name == "nav" && navStack.isNotEmpty()) {
                                 navStack.removeLast()
+                                // 畸形 NAV（缺 </ol>）兜底：nav 结束即把深度归零，免得污染后续
+                                if (navStack.isEmpty()) olDepth = 0
                             }
                         }
                     }
@@ -441,6 +456,8 @@ class EpubStructure(
             val pageEntries = ArrayList<Pair<Int, TocEntry>>()
             val stack = ArrayDeque<NcxPoint>()
             var seq = 0
+            // navPoint 的嵌套深度（pageTarget 不算）：合并型 EPUB 用一级 navPoint 装书名、二级装章节
+            var navPointDepth = 0
             zip.getInputStream(entry).use { input ->
                 val parser = newPullParser(newParser)
                 parser.setInput(input, "UTF-8")
@@ -448,7 +465,10 @@ class EpubStructure(
                 while (event != XmlPullParser.END_DOCUMENT) {
                     when (event) {
                         XmlPullParser.START_TAG -> when (parser.name.lowercase()) {
-                            "navpoint" -> stack.addLast(NcxPoint(order = seq++))
+                            "navpoint" -> {
+                                stack.addLast(NcxPoint(order = seq++, depth = navPointDepth))
+                                navPointDepth++
+                            }
                             "pagetarget" -> stack.addLast(NcxPoint(order = seq++, isPage = true))
                             "navlabel" -> stack.lastOrNull()?.inLabel = true
                             "content" -> stack.lastOrNull()?.let { point ->
@@ -462,14 +482,24 @@ class EpubStructure(
                         }
                         XmlPullParser.END_TAG -> when (parser.name.lowercase()) {
                             "navlabel" -> stack.lastOrNull()?.inLabel = false
-                            "navpoint", "pagetarget" -> stack.removeLastOrNull()?.let { point ->
+                            "pagetarget" -> stack.removeLastOrNull()?.let { point ->
                                 val label = point.label.toString().trim()
                                 val src = point.src
                                 if (src != null && label.isNotEmpty()) {
                                     val (file, fragment) = splitHref(ncxDir, src)
-                                    val entry2 = TocEntry(label, file, fragment)
-                                    if (point.isPage) pageEntries += point.order to entry2
-                                    else tocEntries += point.order to entry2
+                                    pageEntries += point.order to TocEntry(label, file, fragment)
+                                }
+                            }
+                            "navpoint" -> {
+                                navPointDepth = (navPointDepth - 1).coerceAtLeast(0)
+                                stack.removeLastOrNull()?.let { point ->
+                                    val label = point.label.toString().trim()
+                                    val src = point.src
+                                    if (src != null && label.isNotEmpty()) {
+                                        val (file, fragment) = splitHref(ncxDir, src)
+                                        tocEntries += point.order to
+                                            TocEntry(label, file, fragment, point.depth)
+                                    }
                                 }
                             }
                         }
@@ -486,6 +516,7 @@ class EpubStructure(
         private class NcxPoint(
             val order: Int,
             val isPage: Boolean = false,
+            val depth: Int = 0,
             val label: StringBuilder = StringBuilder(),
             var src: String? = null,
             var inLabel: Boolean = false,

@@ -37,6 +37,11 @@ data class Chapter(
     val title: String,
     val charStart: Long,
     val charEnd: Long,
+    /**
+     * 目录层级，0 为顶层。只用于展示缩进 —— 不影响阅读、跳转或进度（锚点始终是字符偏移）。
+     * TXT 启发式章节与无目录书的兜底都是 0。
+     */
+    val depth: Int = 0,
 )
 
 interface BookContent {

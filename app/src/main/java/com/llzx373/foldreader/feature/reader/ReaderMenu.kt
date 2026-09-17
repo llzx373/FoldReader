@@ -544,7 +544,13 @@ fun ChapterListDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onSelect(index) }
-                                    .padding(vertical = 10.dp),
+                                    .padding(
+                                        // 目录层级缩进：合并型 EPUB（一个 zip 塞多本书）靠它区分书名与章节。
+                                        // 封顶 4 级，免得对话框宽度被吃光。
+                                        start = (CHAPTER_INDENT_DP * chapter.depth.coerceAtMost(4)).dp,
+                                        top = 10.dp,
+                                        bottom = 10.dp,
+                                    ),
                             )
                         }
                     }
@@ -553,6 +559,9 @@ fun ChapterListDialog(
         },
     )
 }
+
+/** 目录每级缩进步长（dp），配合 [Chapter.depth] 使用。 */
+private const val CHAPTER_INDENT_DP = 14
 
 val pageTurnModes: List<PageTurnMode> = listOf(
     PageTurnMode.SIMULATION,

@@ -64,3 +64,15 @@ val MIGRATION_12_13: Migration = object : Migration(12, 13) {
         db.execSQL("ALTER TABLE `books` ADD COLUMN `contentPreparedAt` INTEGER")
     }
 }
+
+/**
+ * v13 → v14：`chapters` 新增 `depth`（目录层级，仅用于目录面板缩进）。
+ *
+ * 旧行填 0 即"顶层"——对单层目录的书完全正确；对合并型 EPUB（一个 zip 塞多本书）
+ * 会暂时失去层级，下次重建目录（打开书时按压平缓存回填）即恢复。
+ */
+val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `chapters` ADD COLUMN `depth` INTEGER NOT NULL DEFAULT 0")
+    }
+}

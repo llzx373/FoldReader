@@ -321,6 +321,21 @@ class ReaderLogicTest {
         }
     }
 
+    /**
+     * 章节兜底补扫的判定：过去只要在实时索引就一律跳过，导致
+     * 「章节没写进库」这种状态在首次打开时无法自愈（用户看到的就是没有目录）。
+     */
+    @Test
+    fun `章节兜底补扫：TXT 实时索引期间跳过 便宜的重扫照常`() {
+        // 没有实时索引：什么格式都扫
+        assertTrue(shouldScanChaptersInBackground(liveIndexing = false, cheapChapterScan = false))
+        assertTrue(shouldScanChaptersInBackground(liveIndexing = false, cheapChapterScan = true))
+
+        // 实时索引期间：TXT 贵，跳过；EPUB/FB2 只读 sidecar，照常兜底
+        assertFalse(shouldScanChaptersInBackground(liveIndexing = true, cheapChapterScan = false))
+        assertTrue(shouldScanChaptersInBackground(liveIndexing = true, cheapChapterScan = true))
+    }
+
     @Test
     fun `chapterIndexAt 随机用例与线性实现等价`() {
         fun linear(list: List<Chapter>, offset: Long): Int =
