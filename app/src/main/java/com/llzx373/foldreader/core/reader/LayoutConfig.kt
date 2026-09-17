@@ -1,9 +1,12 @@
 package com.llzx373.foldreader.core.reader
 
 import android.graphics.Typeface
+import androidx.compose.runtime.Immutable
 
 enum class PageTextAlignment { JUSTIFY, LEFT }
 
+/** 不可变排版参数；持有 [Typeface] 使编译器无法自行判定，需显式声明。 */
+@Immutable
 data class LayoutConfig(
     val fontSizeSp: Float = 18f,
     val lineSpacingMultiplier: Float = 1.5f,

@@ -239,12 +239,29 @@
 - [x] 构建：release 开启 R8（`optimization.enable` + minify + 资源压缩）
 - [x] 测试基建：引入 Robolectric（Paint 字宽 / BitmapFactory / 真实 SQLite 迁移 / Compose 用例）
 
-### M5.8 性能专项·第二批（高风险，待第一批验证通过后做）
-- [ ] 滚动模式：拆分单一大 `uiState` 为独立 State，`scrollPages` 改 `SnapshotStateList`，一次批量预取 N 页
-- [ ] 滚动模式：`spansFor` 按偏移二分 + `derivedStateOf`，消除每个 item 全量扫标注
-- [ ] Compose 稳定性：`Page`/`PageLine`/`LineBox`/`ReaderColors`/`LayoutConfig` 加 `@Immutable`（编译器配置不生效，见说明书）
-- [ ] EPUB/FB2 增量压平：首章先出，其余后台续写
+### M5.8 性能专项·第二批（滚动模式，已完成）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v1.4 性能专项·第二批」。
+
+- [x] 拆分 `ReaderUiState`：位置展示态独立为 `ReadingPosition` 流，滚动不再让整棵阅读树重组
+- [x] 页眉页脚抽成 `ReaderCornerChrome` 自行订阅；菜单/目录/桌面模式在可见性判断内订阅
+- [x] `scrollPages` 改 `SnapshotStateList`（追加前插 O(1)，只失效 LazyColumn items）
+- [x] `scrollExtend` 一次批量预取 5 页（`collectScrollPages`），先入列表再异步解图片
+- [x] `spansFor` 改 `AnnotationIndex`（二分 + 前缀最大结束偏移提前终止）
+- [x] 双栏 `chunked(2)` 改 `derivedStateOf` 缓存
+- [x] `positionAt` 收敛重复的 `chapterIndexAt` 调用
+- [x] `Page`/`PageLine`/`LineBox`/`RangeSegment`/`LayoutConfig`/`ReaderColors`/`PageSpread`/`ReadingPosition` 加 `@Immutable`
+
+### M5.9 性能专项·第三批（待定）
+- [ ] EPUB/FB2 增量压平：首章先出，其余后台续写——**存在三个待决风险**：
+      ① 生长中文件需要「持续读到 EOF 后等待追加」的索引循环；
+      ② sidecar（样式 span / 纸书页码 / 链接锚点）必须整本压平完才能定稿，
+      首开期间会缺少富文本与纸书页码，需完成后回填并重排（用户可见一次样式跳变）；
+      ③ 无真机无法验证收益与回归。建议先真机测出「大 EPUB 首开耗时」再决定是否做。
+- [ ] 引入 `kotlinx.collections.immutable` 把 `PageView`/`SpreadContent` 的 `List` 形参换成 `ImmutableList`，使其可跳过重组
+- [ ] `ScrollContent` 函数引用改 `remember` 包裹（当前收益有限）
 - [ ] 真机验证 release 包（R8 后的 Room 迁移、EPUB 解析、字体加载路径）
+- [ ] 真机验证滚动流畅度（本次改动的核心收益需要 profile 确认）
 
 ---
 

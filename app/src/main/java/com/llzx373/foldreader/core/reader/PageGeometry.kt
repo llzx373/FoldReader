@@ -1,9 +1,14 @@
 package com.llzx373.foldreader.core.reader
 
+import androidx.compose.runtime.Immutable
+
 /**
  * 页内行几何：与 PageView 绘制共用同一套坐标计算，
  * 保证划线渲染与长按/手柄命中测试完全一致（两端对齐附加字距也包含在内）。
+ *
+ * [charWidths] 虽为数组，但只在构造时填一次、之后只读，故可声明为不可变。
  */
+@Immutable
 class LineBox(
     val line: PageLine,
     val x0: Float,
@@ -25,6 +30,7 @@ class LineBox(
     val yBottom: Float get() = yTop + lineHeightPx
 }
 
+@Immutable
 data class RangeSegment(
     val lineIndex: Int,
     val xStart: Float,

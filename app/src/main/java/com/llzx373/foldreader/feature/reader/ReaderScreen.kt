@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -61,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -95,6 +97,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -109,6 +112,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.LinkHit
@@ -155,6 +159,8 @@ fun ReaderScreen(
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkedOffsets = remember(bookmarks) { bookmarks.map { it.charOffset }.toSet() }
     val annotations by viewModel.annotations.collectAsState()
+    // 标注按区间建索引：每个可见页都全量扫标注列表在标注多时是笔固定开销
+    val annotationIndex = remember(annotations) { AnnotationIndex(annotations) }
     val shiftedAnnotationIds by viewModel.shiftedAnnotationIds.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
@@ -769,18 +775,14 @@ fun ReaderScreen(
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page?): List<TextRangeSpan> {
         if (page == null) return emptyList()
-        val spans = annotations.mapNotNull { ann ->
-            if (ann.endCharOffset > page.charStart && ann.startCharOffset < page.charEnd) {
-                TextRangeSpan(
-                    ann.startCharOffset,
-                    ann.endCharOffset,
-                    Color(ann.color.toInt()),
-                    underline = ann.style ==
-                        com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
-                )
-            } else {
-                null
-            }
+        val spans = annotationIndex.overlapping(page.charStart, page.charEnd).map { ann ->
+            TextRangeSpan(
+                ann.startCharOffset,
+                ann.endCharOffset,
+                Color(ann.color.toInt()),
+                underline = ann.style ==
+                    com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
+            )
         }
         val hit = searchHighlight
         return if (hit != null && hit.second > page.charStart && hit.first < page.charEnd) {
@@ -900,7 +902,7 @@ fun ReaderScreen(
         val item = info.visibleItemsInfo
             .firstOrNull { relY >= it.offset && relY < it.offset + it.size } ?: return null
         val localY = relY - item.offset
-        val pages = uiState.scrollPages
+        val pages = viewModel.scrollPages
         if (!scrollDual) {
             val page = pages.getOrNull(item.index) ?: return null
             val boxes = scrollLineBoxes[page.charStart] ?: return null
@@ -1600,6 +1602,8 @@ fun ReaderScreen(
         }
 
         if (tabletop != null && !uiState.loading && uiState.error == null) {
+            // 在可见性判断内订阅：不可见时不读，也就不会被阅读位置变化牵连
+            val position by viewModel.readingPosition.collectAsState()
             TabletopDivider(
                 colors = colors,
                 modifier = Modifier
@@ -1608,7 +1612,7 @@ fun ReaderScreen(
             )
             TabletopPanel(
                 prefs = prefs,
-                progressFraction = uiState.progressFraction,
+                progressFraction = position.progressFraction,
                 colors = colors,
                 autoPageStatus = autoPageStatus,
                 onPrevPage = { viewModel.noteManualInteraction(); turn(false) },
@@ -1641,90 +1645,19 @@ fun ReaderScreen(
         }
 
         if (!uiState.loading && uiState.error == null) {
-            val pageNumberLabel = if (prefs.showPageNumber) {
-                pageNumberText(
-                    leftPage = uiState.pageNumber,
-                    hasRightPage = spreadDual && uiState.spread?.right != null,
-                    totalPages = uiState.totalPages,
-                )
-            } else {
-                null
-            }
-            val progressText = if (prefs.showPageProgress) formatPercent(uiState.progressFraction) else null
-            val paperPageText = if (prefs.showPageProgress) {
-                uiState.paperPageLabel?.let { "纸书 P.$it" }
-            } else {
-                null
-            }
-            val leftFooter = listOfNotNull(pageNumberLabel, paperPageText, progressText)
-                .joinToString("  ")
-                .ifEmpty { null }
-            val rightFooter = listOfNotNull(
-                if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
-                if (prefs.showTime) time else null,
-            ).joinToString("  ")
-
-            if (spreadDual) {
-                if (prefs.showChapterTitle) {
-                    CornerLabel(
-                        text = uiState.chapterTitle,
-                        colors = colors,
-                        endAligned = false,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .statusBarsPadding()
-                            .width(leftDp),
-                    )
-                }
-                CornerLabel(
-                    text = uiState.bookTitle,
-                    colors = colors,
-                    endAligned = true,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .statusBarsPadding()
-                        .width(rightDp),
-                )
-                if (leftFooter != null) {
-                    CornerLabel(
-                        text = leftFooter,
-                        colors = colors,
-                        endAligned = false,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .navigationBarsPadding()
-                            .width(leftDp),
-                    )
-                }
-                CornerLabel(
-                    text = rightFooter,
-                    colors = colors,
-                    endAligned = true,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .width(rightDp),
-                )
-            } else {
-                if (prefs.showChapterTitle) {
-                    ReaderHeader(
-                        chapterTitle = uiState.chapterTitle,
-                        colors = colors,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding(),
-                    )
-                }
-                ReaderFooter(
-                    leftText = leftFooter,
-                    batteryText = if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
-                    timeText = if (prefs.showTime) time else null,
-                    colors = colors,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding(),
-                )
-            }
+            ReaderCornerChrome(
+                viewModel = viewModel,
+                bookTitle = uiState.bookTitle,
+                spreadDual = spreadDual,
+                hasRightPage = uiState.spread?.right != null,
+                totalPages = uiState.totalPages,
+                leftDp = leftDp,
+                rightDp = rightDp,
+                colors = colors,
+                prefs = prefs,
+                battery = battery,
+                time = time,
+            )
         }
 
         brightnessHint?.let { value ->
@@ -1740,9 +1673,10 @@ fun ReaderScreen(
         }
 
         if (menuVisible) {
+            val position by viewModel.readingPosition.collectAsState()
             ReaderTopBar(
                 bookTitle = uiState.bookTitle,
-                chapterTitle = uiState.chapterTitle,
+                chapterTitle = position.chapterTitle,
                 colors = colors,
                 onBack = { leaveReader(onBack) },
                 dualPage = uiState.dualPage,
@@ -1756,12 +1690,12 @@ fun ReaderScreen(
             )
             ReaderMenuPanel(
                 prefs = prefs,
-                progressFraction = uiState.progressFraction,
+                progressFraction = position.progressFraction,
                 displayPageTurnMode = effectiveMode,
                 chapterProgress = chapterProgressText(
-                    index = uiState.chapterIndex,
-                    count = uiState.chapterCount,
-                    inChapter = uiState.inChapterFraction,
+                    index = position.chapterIndex,
+                    count = position.chapterCount,
+                    inChapter = position.inChapterFraction,
                 ),
                 colors = colors,
                 onSeekFraction = { f ->
@@ -1815,9 +1749,10 @@ fun ReaderScreen(
         }
 
         if (catalogVisible) {
+            val position by viewModel.readingPosition.collectAsState()
             ChapterListDialog(
                 chapters = viewModel.chapterList(),
-                currentIndex = uiState.chapterIndex,
+                currentIndex = position.chapterIndex,
                 remainingText = viewModel.remainingTimeText(),
                 colors = colors,
                 onSelect = { index ->
@@ -2065,6 +2000,115 @@ private fun SpreadContent(
     }
 }
 
+/**
+ * 常驻页眉页脚：页眉章节名/书名、页脚页码/纸书页/进度/电量/时间。
+ *
+ * 单独成 Composable 是为了在这里订阅 [ReaderViewModel.readingPosition]：
+ * 阅读位置每跨一页都会变，若在 ReaderScreen 顶层读取，整棵阅读树都会跟着重组。
+ * 其余参数都是翻页/改版式才会变的值，正常滚动期间保持不变。
+ */
+@Composable
+private fun BoxScope.ReaderCornerChrome(
+    viewModel: ReaderViewModel,
+    bookTitle: String,
+    spreadDual: Boolean,
+    hasRightPage: Boolean,
+    totalPages: Int,
+    leftDp: Dp,
+    rightDp: Dp,
+    colors: ReaderColors,
+    prefs: ReadingPreferences,
+    battery: Int,
+    time: String,
+) {
+    val position by viewModel.readingPosition.collectAsState()
+
+    val pageNumberLabel = if (prefs.showPageNumber) {
+        pageNumberText(
+            leftPage = position.pageNumber,
+            hasRightPage = spreadDual && hasRightPage,
+            totalPages = totalPages,
+        )
+    } else {
+        null
+    }
+    val progressText = if (prefs.showPageProgress) formatPercent(position.progressFraction) else null
+    val paperPageText = if (prefs.showPageProgress) {
+        position.paperPageLabel?.let { "纸书 P.$it" }
+    } else {
+        null
+    }
+    val leftFooter = listOfNotNull(pageNumberLabel, paperPageText, progressText)
+        .joinToString("  ")
+        .ifEmpty { null }
+    val rightFooter = listOfNotNull(
+        if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
+        if (prefs.showTime) time else null,
+    ).joinToString("  ")
+
+    if (spreadDual) {
+        if (prefs.showChapterTitle) {
+            CornerLabel(
+                text = position.chapterTitle,
+                colors = colors,
+                endAligned = false,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .width(leftDp),
+            )
+        }
+        CornerLabel(
+            text = bookTitle,
+            colors = colors,
+            endAligned = true,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .width(rightDp),
+        )
+        if (leftFooter != null) {
+            CornerLabel(
+                text = leftFooter,
+                colors = colors,
+                endAligned = false,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .width(leftDp),
+            )
+        }
+        CornerLabel(
+            text = rightFooter,
+            colors = colors,
+            endAligned = true,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .width(rightDp),
+        )
+    } else {
+        if (prefs.showChapterTitle) {
+            ReaderHeader(
+                chapterTitle = position.chapterTitle,
+                colors = colors,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding(),
+            )
+        }
+        ReaderFooter(
+            leftText = leftFooter,
+            batteryText = if (prefs.showBattery && battery >= 0) "电量 $battery%" else null,
+            timeText = if (prefs.showTime) time else null,
+            colors = colors,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        )
+    }
+}
+
 @Composable
 private fun CornerLabel(
     text: String,
@@ -2105,24 +2149,21 @@ private fun ScrollContent(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val annotations by viewModel.annotations.collectAsState()
+    val annotationIndex = remember(annotations) { AnnotationIndex(annotations) }
     val searchHighlight by viewModel.searchHighlight.collectAsState()
     var extending by remember { mutableStateOf(false) }
     val density = LocalDensity.current
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page): List<TextRangeSpan> {
-        val spans = annotations.mapNotNull { ann ->
-            if (ann.endCharOffset > page.charStart && ann.startCharOffset < page.charEnd) {
-                TextRangeSpan(
-                    ann.startCharOffset,
-                    ann.endCharOffset,
-                    Color(ann.color.toInt()),
-                    underline = ann.style ==
-                        com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
-                )
-            } else {
-                null
-            }
-        }.toMutableList()
+        val spans = annotationIndex.overlapping(page.charStart, page.charEnd).mapTo(ArrayList(4)) { ann ->
+            TextRangeSpan(
+                ann.startCharOffset,
+                ann.endCharOffset,
+                Color(ann.color.toInt()),
+                underline = ann.style ==
+                    com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
+            )
+        }
         val sel = selection
         if (sel != null) {
             val selEnd = if (sel.end > sel.start) sel.end else sel.start + 1
@@ -2140,7 +2181,7 @@ private fun ScrollContent(
 
     LaunchedEffect(listState, dualColumns) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
-            val pages = uiState.scrollPages
+            val pages = viewModel.scrollPages
             val lastIndex = if (dualColumns) (pages.size + 1) / 2 - 1 else pages.lastIndex
             val page = (if (dualColumns) pages.getOrNull(index * 2) else pages.getOrNull(index))
                 ?: return@collect
@@ -2225,6 +2266,9 @@ private fun ScrollContent(
     }
 
     val itemHeight = with(density) { pageHeight.toDp() }
+    // derivedStateOf：只在 scrollPages 真正变化时重算，避免每次重组都整表 chunked 拷贝一份。
+    // 必须放在 LazyColumn 之外——LazyListScope 不是 Composable 作用域，那里不能调 remember。
+    val dualRows by remember { derivedStateOf { viewModel.scrollPages.chunked(2) } }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         if (dualColumns) {
             val leftDpPx = with(density) { leftDp.toPx() }
@@ -2232,7 +2276,7 @@ private fun ScrollContent(
             val rightDpPx = with(density) { rightDp.toPx() }
             val pageWidthPx = with(density) { pageWidthDp.toPx() }
             items(
-                uiState.scrollPages.chunked(2),
+                dualRows,
                 key = { it.first().charStart },
             ) { row ->
                 Row(
@@ -2285,7 +2329,7 @@ private fun ScrollContent(
                 }
             }
         } else {
-            items(uiState.scrollPages, key = { it.charStart }) { page ->
+            items(viewModel.scrollPages, key = { it.charStart }) { page ->
                 PageView(
                     page = page,
                     config = uiState.layoutConfig,

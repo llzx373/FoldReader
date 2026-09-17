@@ -1,7 +1,13 @@
 package com.llzx373.foldreader.core.reader
 
+import androidx.compose.runtime.Immutable
 import com.llzx373.foldreader.core.format.TextSpan
 
+/**
+ * Compose 稳定性：全字段 val、集合不做就地修改，声明为不可变后
+ * 接收它的 Composable 才可能跳过重组（编译器无法自行证明这一点）。
+ */
+@Immutable
 data class PageLine(
     val charStart: Long,
     val charEnd: Long,
@@ -21,6 +27,7 @@ data class PageLine(
     val spans: List<TextSpan> = emptyList(),
 )
 
+@Immutable
 data class Page(
     val charStart: Long,
     val charEnd: Long,

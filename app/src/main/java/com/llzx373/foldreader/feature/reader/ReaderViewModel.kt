@@ -2,6 +2,9 @@ package com.llzx373.foldreader.feature.reader
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -34,6 +37,7 @@ import com.llzx373.foldreader.core.reader.Paginator
 import com.llzx373.foldreader.core.reader.PaginatorKey
 import com.llzx373.foldreader.core.reader.PaginatorStore
 import com.llzx373.foldreader.core.reader.StaticLayoutTextMeasurer
+import com.llzx373.foldreader.core.reader.collectScrollPages
 import com.llzx373.foldreader.core.reader.decodeSampledImage
 import com.llzx373.foldreader.core.reader.renderSpreadToBitmap
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
@@ -63,6 +67,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+@Immutable
 data class PageSpread(
     val left: Page,
     val right: Page?,
@@ -75,6 +80,10 @@ data class SpreadGeometry(
     val heightPx: Int,
 )
 
+/**
+ * 阅读页的**结构态**：只在打开、翻页、改版式、折叠切换时变。
+ * 滚动/翻页过程中每页都变的展示态见 [ReadingPosition]。
+ */
 data class ReaderUiState(
     val loading: Boolean = true,
     val error: String? = null,
@@ -82,16 +91,26 @@ data class ReaderUiState(
     val totalChars: Long = 0,
     val spread: PageSpread? = null,
     val dualPage: Boolean = false,
+    val layoutConfig: LayoutConfig = LayoutConfig(),
+    val totalPages: Int = 0,
+    val spreadGeometry: SpreadGeometry? = null,
+)
+
+/**
+ * 阅读位置展示态：每跨一页都会变。
+ *
+ * 与 [ReaderUiState] 分开是因为滚动模式下它每页都更新——留在同一个 data class 里，
+ * 每跨一页都会让读取 uiState 的整棵阅读树重组。独立成流后只有真正显示它的
+ * 页眉/页脚/菜单订阅，且订阅点都放在各自的 Composable 或可见性判断之内。
+ */
+@Immutable
+data class ReadingPosition(
+    val progressFraction: Float = 0f,
     val chapterTitle: String = "",
     val chapterIndex: Int = 0,
     val chapterCount: Int = 0,
-    val progressFraction: Float = 0f,
-    val layoutConfig: LayoutConfig = LayoutConfig(),
-    val scrollPages: List<Page> = emptyList(),
-    val totalPages: Int = 0,
     val pageNumber: Int = 0,
     val inChapterFraction: Float = -1f,
-    val spreadGeometry: SpreadGeometry? = null,
     /** 当前位置对应的纸书页码（EPUB page-list）；无 page-list 的书为 null。 */
     val paperPageLabel: String? = null,
 )
@@ -121,6 +140,17 @@ class ReaderViewModel(
 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
+
+    private val _readingPosition = MutableStateFlow(ReadingPosition())
+    val readingPosition: StateFlow<ReadingPosition> = _readingPosition.asStateFlow()
+
+    /**
+     * 滚动模式页流。用快照列表而非 `StateFlow<List<Page>>` 的原因：
+     *  - 追加/前插是 O(1)，不必整表拷贝（原实现每加一页都重建整个 List）；
+     *  - 读取它的只有 LazyColumn 的 items，变更只失效那一段，不会连累整棵阅读树重组。
+     * 写入均发生在主线程（调用方协程上下文）。
+     */
+    val scrollPages: SnapshotStateList<Page> = mutableStateListOf()
 
     // stateIn 初值是默认偏好，真正的每书偏好异步到达；分页与 viewport 必须等首次真实值，
     // 否则进书会先按默认偏好（AUTO）排版再跳变（单页闪成双页或反之）。
@@ -804,7 +834,7 @@ class ReaderViewModel(
                 // 重分页开始：旧分页的预取目标全部作废，防止被 turn() 消费后污染 uiState
                 _prevSpread.value = null
                 _nextSpread.value = null
-                val wasScrolling = _uiState.value.scrollPages.isNotEmpty()
+                val wasScrolling = scrollPages.isNotEmpty()
                 val anchor = anchorOffset.value
                 val t0 = System.nanoTime()
                 val prepared = withContext(Dispatchers.Default) {
@@ -956,7 +986,7 @@ class ReaderViewModel(
         _nextSpread.value = null
         val spread = withContext(Dispatchers.Default) { spreadFrom(exact, dual, anchorOffset.value) }
         showSpread(spread, countCharsRead = false)
-        if (_uiState.value.scrollPages.isNotEmpty()) enterScrollMode()
+        if (scrollPages.isNotEmpty()) enterScrollMode()
     }
 
     /** 目标越过临时起点（向前翻回起点之前）时，立即切回精确分页器同步补排前缀。 */
@@ -1162,20 +1192,37 @@ class ReaderViewModel(
     fun enterScrollMode() {
         val current = _uiState.value.spread ?: return
         charsReadTracker.jump(current.left.charStart)
-        _uiState.update { it.copy(scrollPages = listOf(current.left)) }
+        scrollPages.clear()
+        scrollPages.add(current.left)
     }
 
+    /**
+     * 到边后按 [SCROLL_PREFETCH_PAGES] 页成批取：原来一次只补一页，快速滑动时
+     * 常出现「已经滑到列表尾、下一页还没排出来」的空窗。
+     * 取出的页先入列表，图片解码再异步补（未就绪时该行画占位灰框）。
+     */
     suspend fun scrollExtend(forward: Boolean) {
-        val pages = _uiState.value.scrollPages
-        if (pages.isEmpty()) return
-        val edge = if (forward) pages.last().charStart else pages.first().charStart - 1
+        val count = scrollPages.size
+        if (count == 0) return
+        val edge = if (forward) scrollPages[count - 1].charStart else scrollPages[0].charStart - 1
         val p = paginatorFor(edge) ?: return
-        val next = withContext(Dispatchers.Default) {
-            if (forward) p.pageAfter(pages.last().charStart) else p.pageBefore(pages.first().charStart)
-        }?.let { attachSpans(it).also { attached -> prefetchImages(attached) } } ?: return
-        _uiState.update {
-            it.copy(scrollPages = if (forward) it.scrollPages + next else listOf(next) + it.scrollPages)
+        val fetched = withContext(Dispatchers.Default) {
+            collectScrollPages(
+                startCursor = edge,
+                limit = SCROLL_PREFETCH_PAGES,
+                next = { cursor -> if (forward) p.pageAfter(cursor) else p.pageBefore(cursor) },
+                advance = { page -> if (forward) page.charEnd else page.charStart - 1 },
+            )
         }
+        if (fetched.isEmpty()) return
+        val attached = fetched.map { attachSpans(it) }
+        if (forward) {
+            scrollPages.addAll(attached)
+        } else {
+            // 向前取到的顺序是「由近及远」，前插要倒过来才是正确阅读顺序
+            scrollPages.addAll(0, attached.asReversed())
+        }
+        attached.forEach { prefetchImages(it) }
     }
 
     fun scrollAnchorTo(charStart: Long) {
@@ -1183,23 +1230,32 @@ class ReaderViewModel(
         charsReadTracker.advance(charStart)
         trackSpeed(charStart)
         pendingSave.value = charStart
-        _uiState.update {
-            it.copy(
-                progressFraction = progressPercentOf(charStart, it.totalChars),
-                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, charStart))?.title.orEmpty(),
-                chapterIndex = chapterIndexAt(chapters, charStart),
-                chapterCount = chapters.size,
-                pageNumber = (paginatorLeft?.pageIndexOf(charStart) ?: -1) + 1,
-                inChapterFraction = inChapterFraction(chapters, chapterIndexAt(chapters, charStart), charStart),
-            )
-        }
+        // 只更新阅读位置流：写 uiState 会让整棵阅读树每跨一页重组一次
+        _readingPosition.value = positionAt(charStart, _uiState.value.totalChars)
+    }
+
+    /**
+     * 按锚点算出当前位置展示态。chapterIndexAt 只算一次——
+     * 原实现同一次更新里对同一锚点重复调用 3~4 次。
+     */
+    private fun positionAt(anchor: Long, totalChars: Long): ReadingPosition {
+        val chapterIndex = chapterIndexAt(chapters, anchor)
+        return ReadingPosition(
+            progressFraction = progressPercentOf(anchor, totalChars),
+            chapterTitle = chapters.getOrNull(chapterIndex)?.title.orEmpty(),
+            chapterIndex = chapterIndex,
+            chapterCount = chapters.size,
+            pageNumber = (paginatorLeft?.pageIndexOf(anchor) ?: -1) + 1,
+            inChapterFraction = inChapterFraction(chapters, chapterIndex, anchor),
+            paperPageLabel = paperPageLabels?.let { pageLabelAt(it, anchor)?.label },
+        )
     }
 
     suspend fun chapterAt(index: Int): Chapter? = chapters.getOrNull(index)
 
     suspend fun seekChapter(delta: Int) {
         if (chapters.isEmpty()) return
-        val idx = (_uiState.value.chapterIndex + delta).coerceIn(0, chapters.lastIndex)
+        val idx = (_readingPosition.value.chapterIndex + delta).coerceIn(0, chapters.lastIndex)
         chapters.getOrNull(idx)?.let { seekToOffset(it.charStart) }
     }
 
@@ -1339,15 +1395,16 @@ class ReaderViewModel(
         if (timer.isRunning) speedTracker.feed(offset, System.currentTimeMillis())
     }
 
-    /** 章节表更新后按当前位置刷新章节标题/序号/章内进度。 */
+    /** 章节表更新后按当前位置刷新章节标题/序号/章内进度（页码等由分页器算出的值保持不变）。 */
     private fun refreshChapterState() {
         val anchor = _uiState.value.spread?.left?.charStart ?: anchorOffset.value
-        _uiState.update {
+        val chapterIndex = chapterIndexAt(chapters, anchor)
+        _readingPosition.update {
             it.copy(
-                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, anchor))?.title.orEmpty(),
-                chapterIndex = chapterIndexAt(chapters, anchor),
+                chapterTitle = chapters.getOrNull(chapterIndex)?.title.orEmpty(),
+                chapterIndex = chapterIndex,
                 chapterCount = chapters.size,
-                inChapterFraction = inChapterFraction(chapters, chapterIndexAt(chapters, anchor), anchor),
+                inChapterFraction = inChapterFraction(chapters, chapterIndex, anchor),
             )
         }
     }
@@ -1361,19 +1418,9 @@ class ReaderViewModel(
                 dualPage = dual,
                 layoutConfig = config,
                 spreadGeometry = geom,
-                progressFraction = progressPercentOf(spread.left.charStart, it.totalChars),
-                chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, spread.left.charStart))?.title.orEmpty(),
-                chapterIndex = chapterIndexAt(chapters, spread.left.charStart),
-                chapterCount = chapters.size,
-                pageNumber = (paginatorLeft?.pageIndexOf(spread.left.charStart) ?: -1) + 1,
-                inChapterFraction = inChapterFraction(
-                    chapters, chapterIndexAt(chapters, spread.left.charStart), spread.left.charStart,
-                ),
-                paperPageLabel = paperPageLabels?.let {
-                    pageLabelAt(it, spread.left.charStart)?.label
-                },
             )
         }
+        _readingPosition.value = positionAt(spread.left.charStart, _uiState.value.totalChars)
         schedulePrefetch(spread)
     }
 
@@ -1465,6 +1512,9 @@ class ReaderViewModel(
 
         /** 后台每多排多少页就把页边界增量落盘一次。 */
         private const val INCREMENTAL_PERSIST_PAGES = 64
+
+        /** 滚动模式到边时一次预取的页数：覆盖快速滑动的视口推进速度。 */
+        private const val SCROLL_PREFETCH_PAGES = 5
 
         /** 内嵌图片位图 LRU 容量（字节数）。 */
         private const val IMAGE_CACHE_BYTES = 16 * 1024 * 1024

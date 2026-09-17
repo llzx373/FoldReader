@@ -1,8 +1,10 @@
 package com.llzx373.foldreader.feature.reader
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 
+@Immutable
 data class ReaderColors(
     val background: Color,
     val text: Color,
