@@ -1,9 +1,15 @@
 package com.llzx373.foldreader.core.data.db
 
-import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 
+/**
+ * 应用尚在预发布阶段：**只保证新安装，不保留任何 schema 历史与迁移**。
+ *
+ * 因此没有 `autoMigrations`，也没有手写 `Migration`——schema 变更时直接重置基线
+ * （清库/重装即可，不需要在代码里留兼容路径）。`version` 恒为 1，每次变更重新导出
+ * 同名 schema 快照。
+ */
 @Database(
     entities = [
         BookEntity::class,
@@ -16,20 +22,7 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
     ],
-    version = 14,
-    // 10 → 11 起都涉及 AutoMigration 覆盖不了的结构调整（索引增删 / 列改名 / 换模型），
-    // 均为手写 SQL，见 FoldReaderMigrations。
-    autoMigrations = [
-        AutoMigration(from = 1, to = 2),
-        AutoMigration(from = 2, to = 3),
-        AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5),
-        AutoMigration(from = 5, to = 6),
-        AutoMigration(from = 6, to = 7),
-        AutoMigration(from = 7, to = 8),
-        AutoMigration(from = 8, to = 9),
-        AutoMigration(from = 9, to = 10),
-    ],
+    version = 1,
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {

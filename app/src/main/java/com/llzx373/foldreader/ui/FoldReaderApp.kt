@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -41,6 +42,7 @@ import androidx.navigation.compose.rememberNavController
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.core.foldable.isPortraitWindow
 import com.llzx373.foldreader.feature.reader.ExtraOverReferenceInsets
 import com.llzx373.foldreader.feature.reader.ReaderOverlay
 import com.llzx373.foldreader.feature.reader.ShellInsets
@@ -60,9 +62,14 @@ fun FoldReaderApp() {
     val container = (LocalContext.current.applicationContext as FoldReaderApplication).container
     val posture by container.foldableStateProvider.posture.collectAsState()
     val adaptiveInfo = currentWindowAdaptiveInfoV2()
+    // 窗口方向取真实尺寸：WindowSizeClass 的 minWidthDp/minHeightDp 是断点下限（宽 600/840/…），
+    // 拿它们比大小会把阔折叠竖持（608×860dp 落成 600×480）判成横向。
+    val configuration = LocalConfiguration.current
+    val windowPortrait = isPortraitWindow(configuration.screenWidthDp, configuration.screenHeightDp)
     val foldableUiState = FoldableUiState(
         posture = posture,
         windowSizeClass = adaptiveInfo.windowSizeClass,
+        windowPortrait = windowPortrait,
     )
 
     // 外壳导航组件形态与路由无关：阅读页由 ReaderOverlay 全窗口渲染，不再从 content 槽进出。
@@ -77,6 +84,8 @@ fun FoldReaderApp() {
     val sizeClass = adaptiveInfo.windowSizeClass
     val envKey = buildString {
         append(sizeClass.minWidthDp).append('x').append(sizeClass.minHeightDp)
+        append('|').append(configuration.screenWidthDp).append('x').append(configuration.screenHeightDp)
+        append('|').append(windowPortrait)
         append('|').append(posture.posture)
         append('|').append(posture.hingeOrientation)
         append('|').append(posture.hingeBounds)
@@ -84,7 +93,9 @@ fun FoldReaderApp() {
     }
     LaunchedEffect(envKey) {
         ReturnTrace.log(
-            "env: minWidth=${sizeClass.minWidthDp}dp minHeight=${sizeClass.minHeightDp}dp " +
+            "env: window=${configuration.screenWidthDp}x${configuration.screenHeightDp}dp " +
+                "portrait=$windowPortrait " +
+                "minWidth=${sizeClass.minWidthDp}dp minHeight=${sizeClass.minHeightDp}dp " +
                 "posture=${posture.posture} hinge=${posture.hingeOrientation} " +
                 "hingeBounds=${posture.hingeBounds} layoutType=$layoutType",
         )

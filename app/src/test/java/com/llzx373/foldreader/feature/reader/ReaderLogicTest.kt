@@ -126,61 +126,95 @@ class ReaderLogicTest {
     }
 
     @Test
-    fun `page turn mode cycling covers all four modes`() {
-        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.NONE,
-            nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER))
-        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.SCROLL,
-            nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.NONE))
-        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.SIMULATION,
-            nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SCROLL))
-        assertEquals(com.llzx373.foldreader.core.data.settings.PageTurnMode.COVER,
-            nextPageTurnMode(com.llzx373.foldreader.core.data.settings.PageTurnMode.SIMULATION))
+    fun `page turn mode cycling covers all three modes`() {
+        assertEquals(PageTurnMode.NONE, nextPageTurnMode(PageTurnMode.COVER))
+        assertEquals(PageTurnMode.SCROLL, nextPageTurnMode(PageTurnMode.NONE))
+        assertEquals(PageTurnMode.COVER, nextPageTurnMode(PageTurnMode.SCROLL))
     }
+
+    private val flatVerticalHinge = FoldingPosture(
+        posture = Posture.FLAT,
+        hingeBounds = Rect(500f, 0f, 520f, 1800f),
+        hingeOrientation = HingeOrientation.VERTICAL,
+    )
+
+    private val flatHorizontalHinge = FoldingPosture(
+        posture = Posture.FLAT,
+        hingeBounds = Rect(0f, 500f, 1000f, 500f),
+        hingeOrientation = HingeOrientation.HORIZONTAL,
+    )
 
     @Test
     fun `dual page mode resolution`() {
-        val flatVertical = FoldingPosture(
-            posture = Posture.FLAT,
-            hingeBounds = Rect(500f, 0f, 520f, 1800f),
-            hingeOrientation = HingeOrientation.VERTICAL,
-        )
-        val flatHorizontal = flatVertical.copy(hingeOrientation = HingeOrientation.HORIZONTAL)
+        val flatVertical = flatVerticalHinge
+        val flatHorizontal = flatVerticalHinge.copy(hingeOrientation = HingeOrientation.HORIZONTAL)
         val halfOpened = flatVertical.copy(posture = Posture.HALF_OPENED)
         val closed = FoldingPosture.Closed
 
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(flatVertical, WidthCategory.COMPACT, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(flatHorizontal, WidthCategory.COMPACT, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(halfOpened, WidthCategory.COMPACT, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(halfOpened, WidthCategory.EXPANDED, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(closed, WidthCategory.COMPACT, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(closed, WidthCategory.EXPANDED, DualPageMode.AUTO))
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(closed, WidthCategory.EXPANDED, DualPageMode.AUTO,
-                wideScreenDualPage = true))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(closed, WidthCategory.MEDIUM, DualPageMode.AUTO,
-                wideScreenDualPage = true))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            flatVertical, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            flatHorizontal, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            halfOpened, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            halfOpened, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            closed, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            closed, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            closed, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.AUTO,
+            wideScreenDualPage = true))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            closed, WidthCategory.MEDIUM, windowPortrait = false, pref = DualPageMode.AUTO,
+            wideScreenDualPage = true))
 
         // FLAT 时部分设备上报零面积铰链 bounds（折痕不遮挡），只要 FoldingFeature 存在即双页
         val zeroWidthHinge = flatVertical.copy(hingeBounds = Rect(500f, 0f, 500f, 1800f))
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(zeroWidthHinge, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            zeroWidthHinge, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
         val zeroHeightHinge = flatHorizontal.copy(hingeBounds = Rect(0f, 500f, 1000f, 500f))
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(zeroHeightHinge, WidthCategory.COMPACT, DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            zeroHeightHinge, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.AUTO))
 
-        assertEquals(PageLayoutMode.DUAL,
-            resolvePageLayoutMode(closed, WidthCategory.COMPACT, DualPageMode.FORCE_DUAL))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(halfOpened, WidthCategory.EXPANDED, DualPageMode.FORCE_DUAL))
-        assertEquals(PageLayoutMode.SINGLE,
-            resolvePageLayoutMode(flatVertical, WidthCategory.EXPANDED, DualPageMode.FORCE_SINGLE))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            closed, WidthCategory.COMPACT, windowPortrait = false, pref = DualPageMode.FORCE_DUAL))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            halfOpened, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.FORCE_DUAL))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            flatVertical, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.FORCE_SINGLE))
+    }
+
+    /**
+     * 阔折叠展开后竖着拿：它上报水平铰链，且竖持宽度常常仍在 EXPANDED 断点之上，
+     * 于是"FLAT + 铰链"与"EXPANDED + 宽屏双页"两条路都会判成双页——每页只剩半幅宽，
+     * 窄到无法成行。方向必须是双页的前置条件。
+     */
+    @Test
+    fun `竖持退回单页`() {
+        // 展开 + 铰链：竖持单页，横持照旧双页
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            flatHorizontalHinge, WidthCategory.EXPANDED, windowPortrait = true,
+            pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            flatHorizontalHinge, WidthCategory.EXPANDED, windowPortrait = false,
+            pref = DualPageMode.AUTO))
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            flatVerticalHinge, WidthCategory.MEDIUM, windowPortrait = true, pref = DualPageMode.AUTO))
+
+        // 无铰链宽屏 + "宽屏双页"开关：竖持同样退回单页
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            FoldingPosture.Closed, WidthCategory.EXPANDED, windowPortrait = true,
+            pref = DualPageMode.AUTO, wideScreenDualPage = true))
+
+        // "强制双页"是用户的显式选择，不受方向限制
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            FoldingPosture.Closed, WidthCategory.COMPACT, windowPortrait = true,
+            pref = DualPageMode.FORCE_DUAL))
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            flatHorizontalHinge, WidthCategory.EXPANDED, windowPortrait = true,
+            pref = DualPageMode.FORCE_DUAL))
     }
 
     @Test
@@ -222,24 +256,6 @@ class ReaderLogicTest {
         assertFalse(isDualColumnScroll(PageLayoutMode.DUAL, scrollMode = false, tabletopActive = false))
         assertFalse(isDualColumnScroll(PageLayoutMode.SINGLE, scrollMode = true, tabletopActive = false))
         assertFalse(isDualColumnScroll(PageLayoutMode.DUAL, scrollMode = true, tabletopActive = true))
-    }
-
-    @Test
-    fun `effective page turn mode matrix`() {
-        // 未显式设置：双页姿态默认仿真，单页默认覆盖（忽略存储值）
-        assertEquals(PageTurnMode.SIMULATION,
-            effectivePageTurnMode(PageTurnMode.COVER, explicit = false, dualPage = true))
-        assertEquals(PageTurnMode.COVER,
-            effectivePageTurnMode(PageTurnMode.COVER, explicit = false, dualPage = false))
-        assertEquals(PageTurnMode.SIMULATION,
-            effectivePageTurnMode(PageTurnMode.SCROLL, explicit = false, dualPage = true))
-        // 显式设置后：一切姿态用用户值
-        assertEquals(PageTurnMode.SCROLL,
-            effectivePageTurnMode(PageTurnMode.SCROLL, explicit = true, dualPage = true))
-        assertEquals(PageTurnMode.SIMULATION,
-            effectivePageTurnMode(PageTurnMode.SIMULATION, explicit = true, dualPage = false))
-        assertEquals(PageTurnMode.NONE,
-            effectivePageTurnMode(PageTurnMode.NONE, explicit = true, dualPage = true))
     }
 
     @Test

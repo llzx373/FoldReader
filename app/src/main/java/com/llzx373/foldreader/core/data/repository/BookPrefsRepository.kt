@@ -39,7 +39,7 @@ class BookPrefsRepository(
         bookPrefsDao.upsert(transform(current))
     }
 
-    /** 全局翻页模式变更同步到所有已落库的书：覆盖每书模式并复位降级旗标。 */
+    /** 全局翻页模式变更同步到所有已落库的书：覆盖每书模式。 */
     suspend fun applyGlobalPageTurnMode(mode: PageTurnMode) {
         bookPrefsDao.applyGlobalPageTurnMode(mode.name)
     }

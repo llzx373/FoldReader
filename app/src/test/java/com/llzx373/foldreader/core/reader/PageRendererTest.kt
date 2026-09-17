@@ -4,10 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import com.llzx373.foldreader.feature.reader.PageSpread
-import com.llzx373.foldreader.feature.reader.ReaderColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
@@ -169,57 +165,5 @@ class PageRendererTest {
         val light = drawInto(page, config, textColor = 0xFFFFFFFF.toInt())
 
         assertSame(dark, light)
-    }
-
-    @Test
-    fun `离屏对页位图渲染复用同一几何缓存且不为空白`() {
-        val colors = ReaderColors(
-            background = Color(0xFFFFFFFF),
-            text = Color(0xFF000000),
-            accent = Color(0xFF33691E),
-        )
-        val spread = PageSpread(left = testPage(0L), right = null)
-        val geom = SpreadGeom(
-            dual = false,
-            splitLeftPx = 0f,
-            splitRightPx = 0f,
-            leftInsetPx = 0f,
-            rightInsetPx = 0f,
-            innerPadPx = 0f,
-            pageWidthPx = 600f,
-        )
-
-        // 先在线程内画一次，再走离屏位图路径：两条路径必须一致
-        val inline = drawInto(spread.left)
-        val bitmap = renderSpreadToBitmap(
-            spread = spread,
-            config = config,
-            colors = colors,
-            geom = geom,
-            leftHighlights = emptyList(),
-            rightHighlights = emptyList(),
-            density = 2f,
-            scaledDensity = 2f,
-            widthPx = 600,
-            heightPx = 800,
-        )
-
-        assertEquals(600, bitmap.width)
-        assertEquals(800, bitmap.height)
-        assertEquals(Bitmap.Config.RGB_565, bitmap.config)
-        // 文本已画上：与纯背景色不同的像素必然存在
-        val background = colors.background.toArgb()
-        var painted = 0
-        var untouched = 0
-        for (x in 0 until bitmap.width step 7) {
-            for (y in 0 until bitmap.height step 7) {
-                if (bitmap.getPixel(x, y) != background) painted++ else untouched++
-            }
-        }
-        // 两个方向都要断言：只断言 painted>0 在 legacy 图形模式（drawColor 也是空操作、
-        // 位图保持全透明）下会假通过；只断言 untouched>0 则正文没画上也发现不了。
-        assertTrue("离屏渲染应画出正文，实际非背景像素 $painted", painted > 0)
-        assertTrue("离屏渲染应铺满背景，实际背景像素 $untouched", untouched > 0)
-        assertTrue(inline.isNotEmpty())
     }
 }

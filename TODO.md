@@ -367,14 +367,14 @@
       抓住飞行中的页面用 `curlTakeoverGrab` 虚拟起手点无缝接管
 - [x] 折痕方向取自拖动方向，"抓上角"是自然的斜向 `dir`，不需要上下翻转开关
 
-### 阶段 4 · 双页打磨（未开始，是唯一剩下的功能缺口）
+### 阶段 4 · 双页打磨（随整体放弃而作废）
 - [ ] 双页仍走旧铰链路径。换卷曲几何**不是改渲染分支就够**：现在这套卷曲模型没有
       "叶片落定到对侧"的相位（折痕扫到装订边之后卷筒只能滑出，无法在另一侧摊开），
       需要先补相位 B（卷起来之后绕中缝转到对侧、纸背用真实内容），
       再把背景改成"当前左页 + 目标右页"的两段拼接、叶片做成半页裁剪
 - [ ] 双页纸背改用真实内容（目标跨页另一半页）
 
-### 阶段 5 · 退役旧路径 + 真机（依赖阶段 4）
+### 阶段 5 · 退役旧路径 + 真机（随整体放弃而作废）
 - [ ] 双页也换完之后删除 `PageCurlShader.kt` 与铰链几何、`HingeFrameRenderTest` /
       `HingeSoftwareRenderer` / `PageCurlShaderTest`
 - [ ] 真机 profile：重折/阔折叠 120fps、`CURL_MESH_INTERVAL_PX` 定值、确认不误触发降级
@@ -383,6 +383,86 @@
 - [x] `HingeSoftwareRenderer` 与生产 AGSL 失同步修复（`7adaf5b` 改了自由边高光/暗影但没同步镜像）
 - [x] `PageTurnCompareRenderTest`：三模型并排出图（现铰链 / 同模型加透视 / 圆柱卷曲参考）
       与「只有卷曲模型保持正文不变形」的断言
+
+---
+
+## M5.13 仿真翻页：**已放弃**（只保留覆盖 / 无动画 / 上下滚动）
+
+> **决定**：放弃全部仿真翻页实现，翻页方式只保留**覆盖滑动（COVER）、无动画（NONE）、
+> 上下滚动（SCROLL）**。以"放弃现有 DB 全部向前兼容性、不考虑迁移、只考虑新安装"为前提执行。
+>
+> **放弃理由**（避免以后重复投入）：
+> 1. 三版模型（AGSL 铰链 → 圆柱卷曲 → 紧圆角+斜面）都没能达到与参考（微信读书录屏）一致的
+>    观感；核心症结是"翻起的那片纸"始终读起来像被挤出来的角/条，而不是一张摊平的纸；
+> 2. 净收益始终压不过维护成本：仿真翻页带来一整套额外状态（动画状态机、离屏位图缓存、
+>    掉帧降级、正/背纹理、透视与分层阴影），而覆盖/无动画/滚动三种模式已经够用；
+> 3. 已验证模型**无法用简单调参收敛**（透视、阴影、圆心半径都试过），继续投入的边际收益极低。
+>
+> **历史**：完整实现保留在提交 `9a0c0ad`（单页仿真翻页改为卷曲几何）。任何时候
+> `git show 9a0c0ad` 都能取回。
+
+### 删除清单（已完成）
+- [x] 删除测试与出图工具：`CurlGeometryTest` / `CurlShadowsTest` / `CurlFrameRenderTest` /
+      `CurlSoftwareRenderer` / `PageTurnCompareRenderTest` / `HingeFrameRenderTest` /
+      `HingeSoftwareRenderer` / `PageCurlShaderTest` / `SimulationTurnTest` / `SpreadBitmapCacheTest`
+- [x] 入口：`ReaderMenu` / `SettingsScreen` 去掉"仿真"；`effectivePageTurnMode` 双页默认改 `COVER`
+- [x] `ReaderScreen`：删 sim 状态、两路 `pointerInput`、渲染分支、`maybeDegradeSimulation`
+- [x] `ReaderViewModel`：删 `curlBitmap` / `renderCurlBitmap` / `pregenCurlBitmaps` /
+      `setCurlRenderContext` / `setSimulationDegraded` / `clearBitmaps`
+- [x] 支撑件：`SimulationTurn.kt`、`SpreadBitmapCache.kt`、
+      `PageRenderer` 里的 `renderSpreadToBitmap` / `SpreadGeom`
+- [x] 铰链：`PageCurlShader.kt`
+- [x] 卷曲：`CurlGeometry.kt` / `CurlShadows.kt` / `CurlOverlay.kt`
+- [x] 偏好与持久化：`ReadingPreferences` 去掉 `SIMULATION`；`BookPrefsEntity` 去掉
+      `simulationDegraded`；`BackupCodec` 同步；`FoldReaderDatabase` 见下方「数据库基线重置」
+- [x] `ReaderTheme.pageBackColor` 删除
+- [x] 说明书 5.1 / 5.2 回到"只保留覆盖 / 无动画 / 上下滚动"（4.3、5.6 功能表、路线图、风险表一并同步）
+
+### 顺带清理（已完成）
+
+> 应用处于预发布阶段，只保证新安装 → 不再保留任何 schema 历史与迁移，
+> 也不需要"升版本 + 不写迁移"这种半吊子状态；因仿真翻页才存在的判据字段一并清掉。
+
+#### 数据库基线重置
+
+- [x] 删 `FoldReaderMigrations.kt`（`MIGRATION_10_11` ~ `MIGRATION_13_14`）与 `@Database(autoMigrations = …)`
+- [x] `FoldReaderApplication` 去掉 `addMigrations(…)`
+- [x] 删历史 schema 快照（`app/schemas/…` 的 1–14.json）与迁移/schema 测试
+      （`MigrationV11`~`V14Test` / `SchemaV5`~`V14Test`）
+- [x] `FoldReaderDatabase` 回到单一基线 `version = 1`，重新导出同名 schema 快照
+- [x] 说明书附录补 v1.8 变更说明（含"旧附录标题里的「数据库 vNN」已不对应现行 schema"）
+
+#### 仿真遗留字段：`pageTurnModeExplicit`
+
+判据原文是"用户没显式设置过就按姿态取默认（双页仿真、单页覆盖）"——仿真没了之后，
+它退化成"没设置过就用 COVER"，而默认值本来就是 COVER，恒等于直接用存储值。
+
+- [x] `ReadingPreferences` / `BookPrefsEntity` 去掉该字段（含 `BookPrefsDao` 的批量更新 SQL）
+- [x] `SettingsRepository` / `SettingsRepositoryImpl` 去掉 `setPageTurnModeExplicit`
+- [x] `BackupCodec` 导出/导入同步去掉该键
+- [x] 删 `ReaderLogic.effectivePageTurnMode`，`ReaderScreen` 直接用 `prefs.pageTurnMode`
+- [x] 测试同步（`ReadingPreferencesTest` / `BookPrefsRepositoryTest` / `BackupCodecTest` / `ReaderLogicTest`）
+
+---
+
+## M5.14 竖持退回单页（已完成）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v1.9 竖持退回单页」。
+> 起因：阔折叠展开后竖着拿，阅读页仍是左右双页，每页窄到无法成行。
+
+**根因**：`resolvePageLayoutMode` 的双页判定只看姿态与宽度类别，不看窗口方向——
+阔折叠多为上下折，展开时上报水平铰链，于是竖持照样命中"FLAT + 铰链 → 双页"
+（实测设备内屏横持 860×608dp，竖持即 608×860dp）；"EXPANDED + 宽屏双页"那条同样不带方向
+（宽度类别只按宽边算，900×1000 与 1000×900 同为 EXPANDED）。
+
+- [x] 判定加方向前置条件：自动模式下窗口**宽 ≥ 高**才允许双页（`resolvePageLayoutMode` 增 `windowPortrait`）
+- [x] `FoldableUiState` 增 `windowPortrait`，取自**真实窗口尺寸**（`LocalConfiguration` 的 `screenWidthDp`/`screenHeightDp`）——
+      不能用 `WindowSizeClass` 的 `minWidthDp`/`minHeightDp`：那是断点下限（宽 600/840/…），竖持 608×860dp 会落成 600×480，反判成横向
+- [x] `ReaderScreen` 接线；横竖切换仍走既有"尺寸变化 → 重分页 → 锚点定位"链路
+- [x] 说明书 3.1 / 5.2 / 5.4 与产品决策表同步；设置页"宽屏双页"标注仅横屏生效
+- [x] "强制双页"不受方向限制（想要竖持双页的用户仍有显式出口）
+- [x] 测试：`WindowPortraitTest`（窗口方向只看真实宽高、宽高相等不判竖向）+
+      `ReaderLogicTest` 新增「竖持退回单页」（两条误判路径 + 强制双页出口），既有横持用例逐一补 `windowPortrait = false`
 
 ---
 

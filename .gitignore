@@ -16,3 +16,6 @@ local.properties
 
 # 测试截图（658MB，不入库）
 /f30/
+
+# 本机 Command Code 配置与偏好（settings.json 是机器级权限白名单，不入库）
+/.commandcode/

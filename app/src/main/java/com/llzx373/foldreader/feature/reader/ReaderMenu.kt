@@ -564,7 +564,6 @@ fun ChapterListDialog(
 private const val CHAPTER_INDENT_DP = 14
 
 val pageTurnModes: List<PageTurnMode> = listOf(
-    PageTurnMode.SIMULATION,
     PageTurnMode.COVER,
     PageTurnMode.NONE,
     PageTurnMode.SCROLL,
@@ -626,14 +625,12 @@ fun pageTurnModeLabel(mode: PageTurnMode): String = when (mode) {
     PageTurnMode.COVER -> "覆盖"
     PageTurnMode.NONE -> "无动画"
     PageTurnMode.SCROLL -> "上下滚动"
-    PageTurnMode.SIMULATION -> "仿真"
 }
 
 fun nextPageTurnMode(mode: PageTurnMode): PageTurnMode = when (mode) {
     PageTurnMode.COVER -> PageTurnMode.NONE
     PageTurnMode.NONE -> PageTurnMode.SCROLL
-    PageTurnMode.SCROLL -> PageTurnMode.SIMULATION
-    PageTurnMode.SIMULATION -> PageTurnMode.COVER
+    PageTurnMode.SCROLL -> PageTurnMode.COVER
 }
 
 fun dualPageModeLabel(mode: DualPageMode): String = when (mode) {

@@ -6,8 +6,6 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.toArgb
 import com.llzx373.foldreader.core.format.TextSpanType
-import com.llzx373.foldreader.feature.reader.PageSpread
-import com.llzx373.foldreader.feature.reader.ReaderColors
 import com.llzx373.foldreader.feature.reader.TextRangeSpan
 
 /**
@@ -31,21 +29,8 @@ private val threadPaints = ThreadLocal.withInitial { PagePaints() }
 /** 行几何缓存：重绘时复用行宽，避免逐字符 measureText。 */
 private val lineBoxCache = LineBoxCache()
 
-/** 对页几何：双页含左右页 + 铰链空隙 + 居中 inset；单页即整页。坐标相对内容区左上角。 */
-data class SpreadGeom(
-    val dual: Boolean,
-    val splitLeftPx: Float,
-    val splitRightPx: Float,
-    val leftInsetPx: Float,
-    val rightInsetPx: Float,
-    val innerPadPx: Float,
-    val pageWidthPx: Float,
-    /** 双页右页顶端额外下移量（摄像头开孔规避），与分页器奇数序页减容同步；0 为关闭。 */
-    val rightTopPadPx: Float = 0f,
-)
-
 /**
- * 页面绘制主体（PageView 与离屏位图共用）：行布局 + 标注/选区高亮 + 逐行文字。
+ * 页面绘制主体：行布局 + 标注/选区高亮 + 逐行文字。
  * 返回行几何供命中测试复用。
  */
 fun drawPageInto(
@@ -235,81 +220,3 @@ private fun drawImageLine(
     }
 }
 
-/**
- * 把整个对页（双页含铰链空隙与居中 inset；单页即整页）渲染成位图，供翻页动画
- * 按一张完整的纸翻折。页眉页脚不烘进位图（固定悬浮层，由 Compose 叠加层绘制）。
- * 位图格式 RGB_565。
- */
-fun renderSpreadToBitmap(
-    spread: PageSpread,
-    config: LayoutConfig,
-    colors: ReaderColors,
-    geom: SpreadGeom,
-    leftHighlights: List<TextRangeSpan>,
-    rightHighlights: List<TextRangeSpan>,
-    density: Float,
-    scaledDensity: Float,
-    widthPx: Int,
-    heightPx: Int,
-    imageProvider: ((imagePath: String) -> Bitmap?)? = null,
-): Bitmap {
-    val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.RGB_565)
-    val canvas = android.graphics.Canvas(bitmap)
-    canvas.drawColor(colors.background.toArgb())
-    val accentArgb = colors.accent.toArgb()
-
-    if (!geom.dual) {
-        drawPageInto(
-            canvas = canvas,
-            page = spread.left,
-            config = config,
-            textColorArgb = colors.text.toArgb(),
-            density = density,
-            scaledDensity = scaledDensity,
-            widthPx = widthPx.toFloat(),
-            highlights = leftHighlights,
-            accentColorArgb = accentArgb,
-            imageProvider = imageProvider,
-        )
-    } else {
-        val state = canvas.save()
-        canvas.translate(geom.leftInsetPx, 0f)
-        drawPageInto(
-            canvas = canvas,
-            page = spread.left,
-            config = config,
-            textColorArgb = colors.text.toArgb(),
-            density = density,
-            scaledDensity = scaledDensity,
-            widthPx = geom.pageWidthPx,
-            innerPaddingPx = geom.innerPadPx,
-            innerOnRight = true,
-            highlights = leftHighlights,
-            accentColorArgb = accentArgb,
-            imageProvider = imageProvider,
-        )
-        canvas.restoreToCount(state)
-        spread.right?.let { right ->
-            val rightState = canvas.save()
-            canvas.translate(geom.splitRightPx + geom.rightInsetPx, 0f)
-            drawPageInto(
-                canvas = canvas,
-                page = right,
-                config = config,
-                textColorArgb = colors.text.toArgb(),
-                density = density,
-                scaledDensity = scaledDensity,
-                widthPx = geom.pageWidthPx,
-                innerPaddingPx = geom.innerPadPx,
-                innerOnRight = false,
-                extraTopPadPx = geom.rightTopPadPx,
-                highlights = rightHighlights,
-                accentColorArgb = accentArgb,
-                imageProvider = imageProvider,
-            )
-            canvas.restoreToCount(rightState)
-        }
-    }
-
-    return bitmap
-}

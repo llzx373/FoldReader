@@ -84,7 +84,6 @@ class SettingsViewModel(
         launch { settingsRepository.setDarkThemeOption(option) }
     fun updateFontKey(fontKey: String) = launch { settingsRepository.setFontKey(fontKey) }
     fun updatePageTurnMode(mode: PageTurnMode) = launch {
-        if (mode == PageTurnMode.SIMULATION) settingsRepository.setSimulationDegraded(false)
         settingsRepository.setPageTurnMode(mode)
         bookPrefsRepository.applyGlobalPageTurnMode(mode)
     }

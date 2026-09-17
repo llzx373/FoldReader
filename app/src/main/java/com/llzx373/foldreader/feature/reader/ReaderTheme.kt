@@ -11,17 +11,6 @@ data class ReaderColors(
     val accent: Color,
 )
 
-/**
- * 卷曲翻页的纸背色：由阅读主题背景派生（压暗约 6% 并极轻微偏暖），
- * 不新增设置项。单页没有物理 verso，纸背就用这个色。
- */
-fun pageBackColor(colors: ReaderColors): Color = Color(
-    red = (colors.background.red * 0.96f).coerceIn(0f, 1f),
-    green = (colors.background.green * 0.93f).coerceIn(0f, 1f),
-    blue = (colors.background.blue * 0.87f).coerceIn(0f, 1f),
-    alpha = 1f,
-)
-
 fun readerColors(
     theme: ReadingTheme,
     customBackgroundArgb: Int? = null,

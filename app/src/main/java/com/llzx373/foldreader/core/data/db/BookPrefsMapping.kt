@@ -23,7 +23,6 @@ fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
     fontKey = fontKey,
     dualPageMode = dualPageMode.name,
     pageTurnMode = pageTurnMode.name,
-    pageTurnModeExplicit = pageTurnModeExplicit,
     pageTurnHotspotRatio = pageTurnHotspotRatio,
     volumeKeyPagingEnabled = volumeKeyPagingEnabled,
     keepScreenOn = keepScreenOn,
@@ -37,7 +36,6 @@ fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
     autoPageMode = autoPageMode.name,
     autoPageIntervalSec = autoPageIntervalSec,
     autoPageSpeedPx = autoPageSpeedPx,
-    simulationDegraded = simulationDegraded,
     panelScreenOff = panelScreenOff,
     autoIndentEnabled = autoIndentEnabled,
 )
@@ -58,7 +56,6 @@ fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPre
         fontKey = fontKey,
         dualPageMode = enumOrDefault(dualPageMode, DualPageMode.AUTO),
         pageTurnMode = enumOrDefault(pageTurnMode, PageTurnMode.COVER),
-        pageTurnModeExplicit = pageTurnModeExplicit,
         pageTurnHotspotRatio = pageTurnHotspotRatio,
         volumeKeyPagingEnabled = volumeKeyPagingEnabled,
         keepScreenOn = keepScreenOn,
@@ -72,7 +69,6 @@ fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPre
         autoPageMode = enumOrDefault(autoPageMode, AutoPageMode.INTERVAL),
         autoPageIntervalSec = autoPageIntervalSec,
         autoPageSpeedPx = autoPageSpeedPx,
-        simulationDegraded = simulationDegraded,
         panelScreenOff = panelScreenOff,
         autoIndentEnabled = autoIndentEnabled,
     )

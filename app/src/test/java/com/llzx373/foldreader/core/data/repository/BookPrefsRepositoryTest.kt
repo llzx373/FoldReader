@@ -37,7 +37,6 @@ class BookPrefsRepositoryTest {
         dualPageMode = DualPageMode.FORCE_DUAL,
         wideScreenDualPage = true,
         pageTurnMode = PageTurnMode.SCROLL,
-        pageTurnModeExplicit = true,
         pageTurnHotspotRatio = 0.5f,
         volumeKeyPagingEnabled = true,
         brightnessGestureEnabled = false,
@@ -53,7 +52,6 @@ class BookPrefsRepositoryTest {
         autoPageMode = AutoPageMode.SCROLL,
         autoPageIntervalSec = 20,
         autoPageSpeedPx = 120f,
-        simulationDegraded = true,
         panelScreenOff = true,
         bookshelfGridView = false,
         customChapterRules = listOf("^第.+章$"),
@@ -142,7 +140,6 @@ class BookPrefsRepositoryTest {
         assertEquals(global.fontKey, roundTripped.fontKey)
         assertEquals(global.dualPageMode, roundTripped.dualPageMode)
         assertEquals(global.pageTurnMode, roundTripped.pageTurnMode)
-        assertEquals(global.pageTurnModeExplicit, roundTripped.pageTurnModeExplicit)
         assertEquals(global.pageTurnHotspotRatio, roundTripped.pageTurnHotspotRatio, 0.0001f)
         assertEquals(global.volumeKeyPagingEnabled, roundTripped.volumeKeyPagingEnabled)
         assertEquals(global.keepScreenOn, roundTripped.keepScreenOn)
@@ -156,7 +153,6 @@ class BookPrefsRepositoryTest {
         assertEquals(global.autoPageMode, roundTripped.autoPageMode)
         assertEquals(global.autoPageIntervalSec, roundTripped.autoPageIntervalSec)
         assertEquals(global.autoPageSpeedPx, roundTripped.autoPageSpeedPx, 0.0001f)
-        assertEquals(global.simulationDegraded, roundTripped.simulationDegraded)
         assertEquals(global.panelScreenOff, roundTripped.panelScreenOff)
     }
 
@@ -174,18 +170,16 @@ class BookPrefsRepositoryTest {
     }
 
     @Test
-    fun `全局翻页模式批量应用覆盖所有书的模式并复位降级`() = runBlocking {
+    fun `全局翻页模式批量应用覆盖所有书的模式`() = runBlocking {
         val dao = FakeBookPrefsDao()
-        dao.upsert(BookPrefsEntity(bookId = 1, pageTurnMode = "NONE", pageTurnModeExplicit = false))
-        dao.upsert(BookPrefsEntity(bookId = 2, pageTurnMode = "SCROLL", pageTurnModeExplicit = true, simulationDegraded = true))
+        dao.upsert(BookPrefsEntity(bookId = 1, pageTurnMode = "NONE"))
+        dao.upsert(BookPrefsEntity(bookId = 2, pageTurnMode = "SCROLL"))
         val repository = BookPrefsRepository(dao, FakeSettingsRepository(global))
 
-        repository.applyGlobalPageTurnMode(PageTurnMode.SIMULATION)
+        repository.applyGlobalPageTurnMode(PageTurnMode.SCROLL)
 
         dao.rows.forEach { row ->
-            assertEquals("SIMULATION", row.pageTurnMode)
-            assertTrue(row.pageTurnModeExplicit)
-            assertEquals(false, row.simulationDegraded)
+            assertEquals("SCROLL", row.pageTurnMode)
         }
     }
 
@@ -201,7 +195,7 @@ class BookPrefsRepositoryTest {
         }
         override suspend fun applyGlobalPageTurnMode(mode: String) {
             rows.replaceAll {
-                it.copy(pageTurnMode = mode, pageTurnModeExplicit = true, simulationDegraded = false)
+                it.copy(pageTurnMode = mode)
             }
         }
         override suspend fun delete(bookId: Long) {
@@ -230,7 +224,6 @@ class BookPrefsRepositoryTest {
         override suspend fun setWideScreenDualPage(enabled: Boolean) = Unit
         override suspend fun setAvoidCameraCutout(enabled: Boolean) = Unit
         override suspend fun setPageTurnMode(mode: PageTurnMode) = Unit
-        override suspend fun setPageTurnModeExplicit(explicit: Boolean) = Unit
         override suspend fun setPageTurnHotspotRatio(ratio: Float) = Unit
         override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) = Unit
         override suspend fun setBrightnessGestureEnabled(enabled: Boolean) = Unit
@@ -246,7 +239,6 @@ class BookPrefsRepositoryTest {
         override suspend fun setAutoPageMode(mode: AutoPageMode) = Unit
         override suspend fun setAutoPageIntervalSec(seconds: Int) = Unit
         override suspend fun setAutoPageSpeedPx(pxPerSecond: Float) = Unit
-        override suspend fun setSimulationDegraded(degraded: Boolean) = Unit
         override suspend fun setPanelScreenOff(enabled: Boolean) = Unit
         override suspend fun setBookshelfGridView(gridView: Boolean) = Unit
         override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) = Unit

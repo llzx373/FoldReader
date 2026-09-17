@@ -41,7 +41,6 @@ import com.llzx373.foldreader.core.reader.PaginatorStore
 import com.llzx373.foldreader.core.reader.StaticLayoutTextMeasurer
 import com.llzx373.foldreader.core.reader.collectScrollPages
 import com.llzx373.foldreader.core.reader.decodeSampledImage
-import com.llzx373.foldreader.core.reader.renderSpreadToBitmap
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
 import com.llzx373.foldreader.core.reader.sliceSpansForLine
 import kotlinx.coroutines.Dispatchers
@@ -222,70 +221,6 @@ class ReaderViewModel(
 
     private val autoPageTurnRequests = AutoPageTurnRequests()
     val autoPageTurns: kotlinx.coroutines.flow.SharedFlow<Boolean> = autoPageTurnRequests.requests
-
-    private val _prevSpread = MutableStateFlow<PageSpread?>(null)
-    val prevSpread: StateFlow<PageSpread?> = _prevSpread.asStateFlow()
-    private val _nextSpread = MutableStateFlow<PageSpread?>(null)
-    val nextSpread: StateFlow<PageSpread?> = _nextSpread.asStateFlow()
-
-    private val curlBitmapCache = SpreadBitmapCache<Bitmap>()
-
-    @Volatile
-    private var curlContext: CurlRenderContext? = null
-
-    /** UI 侧供给渲染上下文（几何/主题/抓取时刻文本）；更新后按当前对页重建预生成。 */
-    fun setCurlRenderContext(ctx: CurlRenderContext?) {
-        curlContext = ctx
-        if (ctx != null) _uiState.value.spread?.let { schedulePrefetch(it) }
-    }
-
-    fun curlBitmap(spread: PageSpread): Bitmap? {
-        val ctx = curlContext ?: return null
-        return curlBitmapCache.get(ctx.keyFor(spread, _uiState.value.layoutConfig))
-    }
-
-    /** 现场渲染（缓存命中直接返回）；渲染失败返回 null，调用方降级。 */
-    suspend fun renderCurlBitmap(spread: PageSpread): Bitmap? {
-        val ctx = curlContext ?: return null
-        val key = ctx.keyFor(spread, _uiState.value.layoutConfig)
-        curlBitmapCache.get(key)?.let { return it }
-        val bitmap = withContext(Dispatchers.Default) {
-            runCatching { renderCurlBitmapWith(ctx, spread) }.getOrNull()
-        } ?: return null
-        if (curlContext === ctx) curlBitmapCache.put(key, bitmap)
-        return bitmap
-    }
-
-    private fun renderCurlBitmapWith(ctx: CurlRenderContext, spread: PageSpread): Bitmap {
-        val (leftHighlights, rightHighlights) = ctx.highlights(spread)
-        return renderSpreadToBitmap(
-            spread = spread,
-            config = _uiState.value.layoutConfig,
-            colors = ctx.colors,
-            geom = ctx.geom,
-            leftHighlights = leftHighlights,
-            rightHighlights = rightHighlights,
-            density = ctx.density,
-            scaledDensity = ctx.scaledDensity,
-            widthPx = ctx.widthPx,
-            heightPx = ctx.heightPx,
-            imageProvider = imageProvider,
-        )
-    }
-
-    /** 闲时预生成对页位图；渲染期间上下文被替换则结果丢弃（键内容寻址，过期条目无害）。 */
-    private suspend fun pregenCurlBitmaps(spreads: List<PageSpread>) {
-        val ctx = curlContext ?: return
-        withContext(Dispatchers.Default) {
-            spreads.forEach { spread ->
-                val key = ctx.keyFor(spread, _uiState.value.layoutConfig)
-                if (curlBitmapCache.get(key) != null) return@forEach
-                val bitmap = runCatching { renderCurlBitmapWith(ctx, spread) }.getOrNull()
-                    ?: return@forEach
-                if (curlContext === ctx) curlBitmapCache.put(key, bitmap)
-            }
-        }
-    }
 
     val bookmarks: StateFlow<List<com.llzx373.foldreader.core.data.db.BookmarkEntity>> =
         bookshelfRepository.observeBookmarks(bookId)
@@ -579,7 +514,6 @@ class ReaderViewModel(
         runCatching { (content as? java.io.Closeable)?.close() }
         content = null
         paginatorStore.remove(bookId)
-        curlBitmapCache.clear()
         viewModelScope.launch {
             pageMutex.withLock { paginatorLeft = null }
             runCatching { bookshelfRepository.saveChapters(bookId, emptyList()) }
@@ -848,9 +782,6 @@ class ReaderViewModel(
                 } else {
                     v.leftWidthPx
                 }
-                // 重分页开始：旧分页的预取目标全部作废，防止被 turn() 消费后污染 uiState
-                _prevSpread.value = null
-                _nextSpread.value = null
                 val wasScrolling = scrollPages.isNotEmpty()
                 val anchor = anchorOffset.value
                 val t0 = System.nanoTime()
@@ -999,8 +930,6 @@ class ReaderViewModel(
             exactPaginator = null
             dualActive
         }
-        _prevSpread.value = null
-        _nextSpread.value = null
         val spread = withContext(Dispatchers.Default) { spreadFrom(exact, dual, anchorOffset.value) }
         showSpread(spread, countCharsRead = false)
         if (scrollPages.isNotEmpty()) enterScrollMode()
@@ -1281,32 +1210,9 @@ class ReaderViewModel(
     fun setPageTurnMode(mode: PageTurnMode) {
         viewModelScope.launch {
             bookPrefsRepository.update(bookId) {
-                it.copy(
-                    pageTurnMode = mode.name,
-                    pageTurnModeExplicit = true,
-                    simulationDegraded = if (mode == PageTurnMode.SIMULATION) {
-                        false
-                    } else {
-                        it.simulationDegraded
-                    },
-                )
+                it.copy(pageTurnMode = mode.name)
             }
         }
-    }
-
-    fun setSimulationDegraded(degraded: Boolean) {
-        viewModelScope.launch {
-            bookPrefsRepository.update(bookId) { it.copy(simulationDegraded = degraded) }
-        }
-    }
-
-    /**
-     * 系统内存紧张（onTrimMemory）时清空两类位图缓存：翻页离屏位图与插图位图，
-     * 后续翻页现场重渲染、未命中的图片行先画占位灰框再按需解码。
-     */
-    fun clearBitmaps() {
-        curlBitmapCache.clear()
-        clearImageBitmaps()
     }
 
     fun setDualPageMode(mode: DualPageMode) {
@@ -1438,7 +1344,6 @@ class ReaderViewModel(
             )
         }
         _readingPosition.value = positionAt(spread.left.charStart, _uiState.value.totalChars)
-        schedulePrefetch(spread)
     }
 
     private var paginateCount = 0
@@ -1453,46 +1358,6 @@ class ReaderViewModel(
             "ReaderPerf",
             "spread paginated in ${ms}ms (avg ${paginateTotalMs / paginateCount}ms, n=$paginateCount)",
         )
-    }
-
-    private fun schedulePrefetch(spread: PageSpread) {
-        viewModelScope.launch {
-            val snapshot = pageMutex.withLock { paginatorLeft to dualActive }
-            val paginator = snapshot.first ?: return@launch
-            val dual = snapshot.second
-            // 用实时 charCount：索引增长期间也能向后排预取
-            val total = content?.charCount ?: _uiState.value.totalChars
-            var next: PageSpread? = null
-            var prev: PageSpread? = null
-            withContext(Dispatchers.Default) {
-                runCatching {
-                    if (dual) {
-                        val r = spread.right
-                        if (r != null && r.charEnd < total) {
-                            next = spreadFrom(paginator, true, r.charEnd)
-                        }
-                        paginator.pageBefore(spread.left.charStart)?.let { p1 ->
-                            val p0 = paginator.pageBefore(p1.charStart)
-                            prev = spreadFrom(paginator, true, p0?.charStart ?: p1.charStart)
-                        }
-                    } else {
-                        if (spread.left.charEnd < total) {
-                            next = spreadFrom(paginator, false, spread.left.charEnd)
-                        }
-                        paginator.pageBefore(spread.left.charStart)?.let { p1 ->
-                            prev = spreadFrom(paginator, false, p1.charStart)
-                        }
-                    }
-                }
-            }
-            if (_uiState.value.spread == spread) {
-                _nextSpread.value = next
-                _prevSpread.value = prev
-            }
-            // 首帧上屏前不渲染整页位图（3 张整页 drawText 会跟首屏抢 CPU）
-            firstFrameRendered.filter { it }.first()
-            pregenCurlBitmaps(listOfNotNull(spread, prev, next))
-        }
     }
 
     override fun onCleared() {
@@ -1516,7 +1381,6 @@ class ReaderViewModel(
             // 关闭内容源，连带取消未完成的后台索引构建
             runCatching { (content as? java.io.Closeable)?.close() }
             content = null
-            curlBitmapCache.clear()
         }
     }
 

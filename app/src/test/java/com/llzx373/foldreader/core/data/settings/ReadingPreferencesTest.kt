@@ -34,7 +34,6 @@ class ReadingPreferencesTest {
         assertEquals(0f, defaults.letterSpacingEm, 0.0001f)
         assertEquals(ReadingTheme.GREEN, defaults.themeId)
         assertEquals(PageTurnMode.COVER, defaults.pageTurnMode)
-        assertFalse(defaults.pageTurnModeExplicit)
         assertEquals(0.3f, defaults.pageTurnHotspotRatio, 0.0001f)
         assertFalse(defaults.volumeKeyPagingEnabled)
         assertFalse(defaults.keepScreenOn)

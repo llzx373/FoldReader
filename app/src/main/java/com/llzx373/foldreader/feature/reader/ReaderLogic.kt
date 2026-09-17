@@ -2,7 +2,6 @@ package com.llzx373.foldreader.feature.reader
 
 import androidx.compose.ui.geometry.Rect
 import com.llzx373.foldreader.core.data.settings.DualPageMode
-import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.foldable.FoldingPosture
 import com.llzx373.foldreader.core.foldable.HingeOrientation
 import com.llzx373.foldreader.core.foldable.Posture
@@ -13,20 +12,6 @@ import com.llzx373.foldreader.core.reader.PageAvoidance
 enum class TapZone { PREVIOUS, MENU, NEXT }
 
 enum class PageLayoutMode { SINGLE, DUAL }
-
-/**
- * 有效翻页方式：用户显式设置过（explicit）则一切姿态用存储值；
- * 否则双页姿态默认仿真、单页默认覆盖（此时存储值不生效）。
- */
-fun effectivePageTurnMode(
-    storedMode: PageTurnMode,
-    explicit: Boolean,
-    dualPage: Boolean,
-): PageTurnMode = when {
-    explicit -> storedMode
-    dualPage -> PageTurnMode.SIMULATION
-    else -> PageTurnMode.COVER
-}
 
 data class ContentRect(
     val left: Float,
@@ -124,9 +109,18 @@ fun contentRectFor(
     }
 }
 
+/**
+ * 单页 / 双页判定。
+ *
+ * [windowPortrait] = 窗口竖向（高 > 宽）。竖持时左右并排的两页各窄成一条，双页书式在物理上
+ * 不成立，故自动模式一律单页——阔折叠展开后竖着拿正属此列：它上报水平铰链，且竖持宽度常常
+ * 仍在 EXPANDED 断点之上，只看姿态或宽度类别都会误判成双页。窗口宽 ≥ 高（横持）才进双页。
+ * "强制双页"是用户的显式选择，不受方向限制。
+ */
 fun resolvePageLayoutMode(
     posture: FoldingPosture,
     widthCategory: WidthCategory,
+    windowPortrait: Boolean,
     pref: DualPageMode,
     wideScreenDualPage: Boolean = false,
 ): PageLayoutMode {
@@ -139,6 +133,7 @@ fun resolvePageLayoutMode(
             // 零面积 bounds（折痕不遮挡内容），要求 bounds 非空会让这些设备永远单页。
             val hingePresent = posture.hingeOrientation != null
             when {
+                windowPortrait -> PageLayoutMode.SINGLE
                 posture.posture == Posture.FLAT && hingePresent -> PageLayoutMode.DUAL
                 widthCategory == WidthCategory.EXPANDED && wideScreenDualPage -> PageLayoutMode.DUAL
                 else -> PageLayoutMode.SINGLE

@@ -229,23 +229,21 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     )
                 },
             )
-            SwitchSetting("宽屏双页（无铰链设备）", prefs.wideScreenDualPage, viewModel::updateWideScreenDualPage)
+            SwitchSetting("宽屏双页（无铰链设备，仅横屏生效）", prefs.wideScreenDualPage, viewModel::updateWideScreenDualPage)
             SwitchSetting("规避摄像头位置（双页自动检测）", prefs.avoidCameraCutout, viewModel::updateAvoidCameraCutout)
             SegmentedSetting(
                 label = "翻页方式",
-                options = listOf("覆盖", "无动画", "上下滚动", "仿真"),
+                options = listOf("覆盖", "无动画", "上下滚动"),
                 selectedIndex = when (prefs.pageTurnMode) {
                     PageTurnMode.COVER -> 0
                     PageTurnMode.NONE -> 1
                     PageTurnMode.SCROLL -> 2
-                    PageTurnMode.SIMULATION -> 3
                 },
                 onSelect = { index ->
                     viewModel.updatePageTurnMode(
                         when (index) {
                             1 -> PageTurnMode.NONE
                             2 -> PageTurnMode.SCROLL
-                            3 -> PageTurnMode.SIMULATION
                             else -> PageTurnMode.COVER
                         },
                     )

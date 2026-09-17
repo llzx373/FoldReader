@@ -38,14 +38,7 @@ class AppContainer(context: Context) {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     val database: FoldReaderDatabase =
-        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db")
-            .addMigrations(
-                com.llzx373.foldreader.core.data.db.MIGRATION_10_11,
-                com.llzx373.foldreader.core.data.db.MIGRATION_11_12,
-                com.llzx373.foldreader.core.data.db.MIGRATION_12_13,
-                com.llzx373.foldreader.core.data.db.MIGRATION_13_14,
-            )
-            .build()
+        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db").build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
     val convertedDir = File(context.filesDir, "converted").apply { mkdirs() }
     /** 封面图片目录（<contentHash>.<ext>），与 converted/ 同生命周期。 */

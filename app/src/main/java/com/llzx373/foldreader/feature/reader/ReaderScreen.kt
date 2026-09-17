@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.SystemClock
@@ -20,9 +19,7 @@ import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -65,8 +62,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -82,7 +77,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
@@ -118,14 +112,12 @@ import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
-import com.llzx373.foldreader.core.reader.SpreadGeom
 import com.llzx373.foldreader.feature.bookshelf.BookCover
 import com.llzx373.foldreader.ui.EmptyState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -213,6 +205,7 @@ fun ReaderScreen(
     val layoutMode = resolvePageLayoutMode(
         posture = foldableUiState.posture,
         widthCategory = foldableUiState.widthCategory,
+        windowPortrait = foldableUiState.windowPortrait,
         pref = prefs.dualPageMode,
         wideScreenDualPage = prefs.wideScreenDualPage,
     )
@@ -227,13 +220,8 @@ fun ReaderScreen(
         heightPx = size.height.toFloat(),
     )
     val pageDual = layoutMode == PageLayoutMode.DUAL && tabletop == null
-    val rawMode = effectivePageTurnMode(prefs.pageTurnMode, prefs.pageTurnModeExplicit, pageDual)
+    val rawMode = prefs.pageTurnMode
     val scrollMode = rawMode == PageTurnMode.SCROLL
-    val effectiveMode = when (rawMode) {
-        PageTurnMode.SIMULATION ->
-            if (prefs.simulationDegraded) PageTurnMode.COVER else PageTurnMode.SIMULATION
-        else -> rawMode
-    }
     val dual = pageDual && !scrollMode
     // 双页外观（书脊、页眉页脚、页码）与正文排版统一以分页流的 dualPage 为准
     val spreadDual = uiState.dualPage && !scrollMode
@@ -334,55 +322,8 @@ fun ReaderScreen(
     var animSpread by remember { mutableStateOf<PageSpread?>(null) }
     val animX = remember { Animatable(0f) }
 
-    val prevSpread by viewModel.prevSpread.collectAsState()
-    val nextSpread by viewModel.nextSpread.collectAsState()
-    var simTarget by remember { mutableStateOf<PageSpread?>(null) }
-    var simForward by remember { mutableStateOf(true) }
-    var simProgress by remember { mutableFloatStateOf(0f) }
-    var simSettling by remember { mutableStateOf(false) }
-    var simCompleting by remember { mutableStateOf(false) }
-    var simDragOrigin by remember { mutableStateOf(Offset.Zero) }
-    var simFinger by remember { mutableStateOf(Offset.Zero) }
-    var simAnchorX by remember { mutableFloatStateOf(0f) }
-    var simGrabX by remember { mutableFloatStateOf(0f) }
-    var simStartY by remember { mutableFloatStateOf(-1f) }
-
-    /** 单页卷曲：折痕方向（由起手方向决定）与起手点（跟手锚定用）。 */
-    var simCurlDir by remember { mutableStateOf(Offset(1f, 0f)) }
-    var simCurlGrab by remember { mutableStateOf(Offset.Zero) }
-    var simFrontBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var simBackBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var simAnimJob by remember { mutableStateOf<Job?>(null) }
-    var simAnimToken by remember { mutableIntStateOf(0) }
-    val frameMonitor = remember { FrameHealthMonitor() }
-
     val battery by rememberBatteryPercent()
     val time by rememberClock()
-
-    val simActive = simTarget != null
-    LaunchedEffect(simActive) {
-        if (!simActive) return@LaunchedEffect
-        frameMonitor.reset()
-        var last = 0L
-        while (true) {
-            withFrameNanos { t ->
-                if (last != 0L) frameMonitor.noteFrame((t - last) / 1_000_000f)
-                last = t
-            }
-        }
-    }
-
-    fun maybeDegradeSimulation() {
-        if (frameMonitor.shouldDegrade()) {
-            viewModel.setSimulationDegraded(true)
-            Toast.makeText(
-                context,
-                "已切换为流畅模式（覆盖滑动），重新选择仿真翻页可恢复",
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-        frameMonitor.reset()
-    }
 
     fun clearSelection() {
         selection = null
@@ -394,152 +335,17 @@ fun ReaderScreen(
 
     var autoScrollY by remember { mutableStateOf(0f) }
 
-    /** 双页铰链纸张（书脊轴心/缝宽/翻向）。单页已改用卷曲几何，见 [singleCurlFrame]。 */
-    fun currentHingeSheet(forward: Boolean): HingeSheet = hingeSheetFor(
-        forward = forward,
-        pageWidthPx = spreadPageWidthPx,
-        leftInsetPx = leftInsetPx,
-        splitRightPx = splitRightPx,
-        rightInsetPx = rightInsetPx,
-    )
-
-    /** 单页卷曲的叶片坐标系：整页一张纸，装订边贴在页左缘（覆盖层局部坐标）。 */
-    fun singleCurlFrame(): CurlFrame =
-        CurlFrame(originX = 0f, side = 1f, width = contentRect.width, height = contentRect.height)
-
-    /** 单页卷曲方向：前进从右往左剥，后退从左往右剥。 */
-    fun curlDir(forward: Boolean): Offset =
-        if (forward) Offset(1f, 0f) else Offset(-1f, 0f)
-
-    /** 当前模式的铰链纸张。 */
-    fun simSheet(forward: Boolean): HingeSheet = currentHingeSheet(forward)
-
-    /** 进度域上限：卷曲与铰链都走整程 0..1。 */
-    fun simMaxProgress(): Float = 1f
-
-    fun clearSimState() {
-        simTarget = null
-        simProgress = 0f
-        simFrontBitmap = null
-        simBackBitmap = null
-        simAnchorX = 0f
-        simGrabX = 0f
-        simStartY = -1f
-        simCurlDir = Offset(1f, 0f)
-        simCurlGrab = Offset.Zero
-    }
-
-    /** 打断进行中的脚本翻页动画（点击翻页/松手收尾），状态保留给接管方或调用方清理。 */
-    fun interruptSimAnim() {
-        simAnimToken++
-        simAnimJob?.cancel()
-        simAnimJob = null
-        simSettling = false
-    }
-
-    // 版式几何变化：旧几何的仿真动画/位图一律作废，防止新旧版式叠画
+    // 版式几何变化：进行中的覆盖滑动动画作废，防止新旧版式叠画
     LaunchedEffect(currentGeom) {
-        interruptSimAnim()
-        clearSimState()
         animSpread = null
     }
 
-    /** 脚本翻页动画（点击翻页与松手收尾共用）：可被新手势/新翻页打断。 */
-    fun launchSimAnim(
-        target: PageSpread,
-        forward: Boolean,
-        completing: Boolean,
-        fromProgress: Float,
-        scripted: Boolean,
-        onComplete: (() -> Unit)? = null,
-    ) {
-        // 完成→1、取消→0；单页卷曲同样走整程（前进从右剥、后退从左剥，方向由 curlDir 决定）
-        val endProgress = if (completing) 1f else 0f
-        simSettling = true
-        simCompleting = completing
-        val token = ++simAnimToken
-        val spec: androidx.compose.animation.core.AnimationSpec<Float> = if (scripted) {
-            tween<Float>(360, easing = FastOutSlowInEasing)
-        } else {
-            spring(
-                stiffness = if (completing) Spring.StiffnessMediumLow else Spring.StiffnessMedium,
-                dampingRatio = Spring.DampingRatioNoBouncy,
-            )
-        }
-        simAnimJob = scope.launch {
-            try {
-                animate(fromProgress, endProgress, animationSpec = spec) { v, _ ->
-                    simProgress = v
-                }
-                if (completing) {
-                    viewModel.showSpread(target, countCharsRead = true)
-                    onComplete?.invoke()
-                }
-                clearSimState()
-                maybeDegradeSimulation()
-            } catch (ce: kotlinx.coroutines.CancellationException) {
-                throw ce
-            } finally {
-                if (simAnimToken == token) {
-                    simSettling = false
-                    simAnimJob = null
-                }
-            }
-        }
-    }
-
-    fun turn(forward: Boolean, tapOffset: Offset? = null) {
+    fun turn(forward: Boolean) {
         clearSelection()
         scope.launch {
             if (animSpread != null) return@launch
-            if (simSettling) {
-                // 打断飞行中的翻页：翻向完成的先落账，再开始新翻页
-                val inFlight = simTarget
-                val completing = simCompleting
-                interruptSimAnim()
-                if (completing && inFlight != null) {
-                    viewModel.showSpread(inFlight, countCharsRead = true)
-                }
-                clearSimState()
-            } else if (simTarget != null) {
-                return@launch // 拖拽进行中，忽略
-            }
-            if (effectiveMode == PageTurnMode.SIMULATION && !scrollMode) {
-                val current = uiState.spread ?: return@launch
-                val target = (if (forward) nextSpread else prevSpread)
-                    ?: viewModel.adjacentSpread(forward) ?: return@launch
-                autoScrollY = 0f
-                val front = viewModel.curlBitmap(current) ?: viewModel.renderCurlBitmap(current)
-                val back = viewModel.curlBitmap(target) ?: viewModel.renderCurlBitmap(target)
-                if (front != null && back != null && contentRect.width > 0f) {
-                    simTarget = target
-                    simForward = forward
-                    simFrontBitmap = front
-                    simBackBitmap = back
-                    val pageSize = Size(contentRect.width, contentRect.height)
-                    val startY = tapOffset
-                        ?.let { (it.y - contentRect.top).coerceIn(0f, pageSize.height) }
-                        ?: (pageSize.height * 0.5f)
-                    simStartY = startY
-                    simCurlDir = curlDir(forward)
-                    simProgress = 0f
-                    launchSimAnim(
-                        target, forward,
-                        completing = true, fromProgress = 0f,
-                        scripted = true,
-                    )
-                    return@launch
-                }
-                // 位图缺失/生成失败：当次翻页降级为 COVER 滑入（不置持久化 degraded）
-                animSpread = target
-                animX.snapTo(if (forward) size.width.toFloat() else -size.width.toFloat())
-                animX.animateTo(0f, tween(220))
-                viewModel.showSpread(target, countCharsRead = true)
-                animSpread = null
-                return@launch
-            }
             val target = viewModel.adjacentSpread(forward) ?: return@launch
-            if (effectiveMode == PageTurnMode.NONE || size.width <= 0) {
+            if (rawMode == PageTurnMode.NONE || size.width <= 0) {
                 viewModel.showSpread(target, countCharsRead = true)
                 return@launch
             }
@@ -553,8 +359,8 @@ fun ReaderScreen(
 
     // 点按/自动翻页等长驻协程不会随重组重建，直接捕获 turn 会沿用切换前的旧
     // 翻页模式（表现为"切了动画不生效"）；一律经此引用调用，读到最新闭包
-    val latestTurn by rememberUpdatedState<(Boolean, Offset?) -> Unit> { forward, tapOffset ->
-        turn(forward, tapOffset)
+    val latestTurn by rememberUpdatedState<(Boolean) -> Unit> { forward ->
+        turn(forward)
     }
 
     // 系统栏统一策略：任何转场期间（进/出阅读、去往设置）系统栏保持可见且不变，
@@ -680,10 +486,8 @@ fun ReaderScreen(
     // 定时自动翻页：到点事件走正常翻页动画；菜单/选择/动画进行中丢弃该次事件
     LaunchedEffect(Unit) {
         viewModel.autoPageTurns.collect { forward ->
-            if (!menuVisible && selection == null &&
-                simTarget == null && !simSettling && animSpread == null
-            ) {
-                latestTurn(forward, null)
+            if (!menuVisible && selection == null && animSpread == null) {
+                latestTurn(forward)
             }
         }
     }
@@ -730,7 +534,7 @@ fun ReaderScreen(
             autoScrollY += delta
             if (autoScrollY >= maxScroll) {
                 autoScrollY = 0f
-                latestTurn(true, null)
+                latestTurn(true)
             }
         }
     }
@@ -797,54 +601,14 @@ fun ReaderScreen(
         }
     }
 
-    // 页内内容版本：划线标注/搜索高亮变化时递增，使翻页位图缓存键失效重渲染
-    var highlightVersion by remember { mutableIntStateOf(0) }
-    LaunchedEffect(annotations, searchHighlight) { highlightVersion++ }
-
-    // 翻页动画离屏渲染上下文：几何/主题/密度/内容版本定键，高亮在抓取时刻取值；
-    // 页眉页脚不烘进位图——它们是固定悬浮层，翻页全程由 Compose 叠加层绘制
-    LaunchedEffect(
-        spreadDual, splitLeftPx, splitRightPx, leftInsetPx, rightInsetPx,
-        innerPadPx, spreadPageWidthPx, contentRect, colors, uiState.layoutConfig,
-        density.density, density.fontScale, highlightVersion, rightTopPadPx,
-    ) {
-        val bitmapWidthPx = contentRect.width.roundToInt()
-        val bitmapHeightPx = contentRect.height.roundToInt()
-        if (bitmapWidthPx <= 0 || bitmapHeightPx <= 0) return@LaunchedEffect
-        viewModel.setCurlRenderContext(
-            CurlRenderContext(
-                geom = SpreadGeom(
-                    dual = spreadDual,
-                    splitLeftPx = splitLeftPx,
-                    splitRightPx = splitRightPx,
-                    leftInsetPx = leftInsetPx,
-                    rightInsetPx = rightInsetPx,
-                    innerPadPx = innerPadPx,
-                    pageWidthPx = spreadPageWidthPx,
-                    rightTopPadPx = rightTopPadPx,
-                ),
-                colors = colors,
-                density = density.density,
-                scaledDensity = density.density * density.fontScale,
-                widthPx = bitmapWidthPx,
-                heightPx = bitmapHeightPx,
-                contentVersion = highlightVersion,
-                highlights = { s -> spansFor(s.left) to spansFor(s.right) },
-            ),
-        )
-    }
-    DisposableEffect(viewModel) {
-        onDispose { viewModel.setCurlRenderContext(null) }
-    }
-
-    // 系统内存紧张时清空翻页位图缓存（此后翻页现场重渲染，功能不受影响）
+    // 系统内存紧张时清空插图位图缓存（未命中的图片行先画占位灰框再按需解码）
     DisposableEffect(viewModel) {
         val callbacks = object : ComponentCallbacks2 {
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
-            override fun onLowMemory() = viewModel.clearBitmaps()
+            override fun onLowMemory() = viewModel.clearImageBitmaps()
             override fun onTrimMemory(level: Int) {
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-                    viewModel.clearBitmaps()
+                    viewModel.clearImageBitmaps()
                 }
             }
         }
@@ -1048,8 +812,8 @@ fun ReaderScreen(
                         y = offset.y,
                         heightPx = size.height.toFloat(),
                     )) {
-                        TapZone.PREVIOUS -> latestTurn(false, offset)
-                        TapZone.NEXT -> latestTurn(true, offset)
+                        TapZone.PREVIOUS -> latestTurn(false)
+                        TapZone.NEXT -> latestTurn(true)
                         TapZone.MENU -> menuVisible = true
                     }
                 }
@@ -1059,7 +823,7 @@ fun ReaderScreen(
                 if (scrollMode) return@pointerInput
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offset ->
-                        if (menuVisible || simTarget != null) return@detectDragGesturesAfterLongPress
+                        if (menuVisible) return@detectDragGesturesAfterLongPress
                         val caret = hitCaret(offset) ?: return@detectDragGesturesAfterLongPress
                         selection = SelectionUi(caret, caret, dragging = true)
                     },
@@ -1074,323 +838,28 @@ fun ReaderScreen(
                     onDragCancel = { selection = null },
                 )
             }
-            .pointerInput(scrollMode, effectiveMode, prefs.swipeGestureEnabled, selection != null, spreadDual) {
+            .pointerInput(scrollMode, prefs.swipeGestureEnabled, selection != null) {
                 if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
-                // 单页仿真改由下面"任意方向拖拽"那一路接管
-                if (effectiveMode == PageTurnMode.SIMULATION && !spreadDual) return@pointerInput
                 var dragStartX = 0f
                 var dragged = 0f
-                var simFetchJob: kotlinx.coroutines.Job? = null
-                var simFetchForward = true
-                var simFetched: PageSpread? = null
-                val samples = ArrayDeque<Pair<Long, Float>>()
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
                         dragStartX = offset.x
                         dragged = 0f
-                        samples.clear()
-                        simFetchJob?.cancel()
-                        simFetchJob = null
-                        simFetched = null
-                        val startC = Offset(
-                            offset.x - contentRect.left,
-                            offset.y - contentRect.top,
-                        )
-                        simDragOrigin = startC
-                        simFinger = startC
-                        if (simSettling) {
-                            // 抓住飞行中的页面：锚定当前自由边位置，拖拽无缝接管
-                            interruptSimAnim()
-                            simAnchorX = hingeFreeEdgeX(
-                                simSheet(simForward), simProgress,
-                            ) - startC.x
-                            simGrabX = startC.x
-                        }
                     },
                     onHorizontalDrag = { change, _ ->
                         dragged = change.position.x - dragStartX
-                        samples.addLast(System.nanoTime() to dragged)
-                        while (samples.size > 2 &&
-                            System.nanoTime() - samples.first().first > 120_000_000L
-                        ) {
-                            samples.removeFirst()
-                        }
-                        if (effectiveMode == PageTurnMode.SIMULATION && !scrollMode &&
-                            !simSettling && size.width > 0
-                        ) {
-                            simFinger = Offset(
-                                change.position.x - contentRect.left,
-                                change.position.y - contentRect.top,
-                            )
-                            val forward = if (simTarget != null) {
-                                // 已建立/接管的目标：明显反向（越过起点 24px）才切换方向
-                                if ((simForward && dragged > 24f) || (!simForward && dragged < -24f)) {
-                                    !simForward
-                                } else {
-                                    simForward
-                                }
-                            } else {
-                                dragged < 0
-                            }
-                            val target = (if (forward) nextSpread else prevSpread)
-                                ?: simFetched?.takeIf { simFetchForward == forward }
-                            if (target != null) {
-                                if (simTarget != target) {
-                                    val current = uiState.spread
-                                    val front = current?.let { viewModel.curlBitmap(it) }
-                                    val back = viewModel.curlBitmap(target)
-                                    if (front != null && back != null) {
-                                        clearSelection()
-                                        autoScrollY = 0f
-                                        simFrontBitmap = front
-                                        simBackBitmap = back
-                                        // 起手锚定：双页铰链的自由边从纸张外缘出发、随手指相对
-                                        // 位移移动，中途换向时锚定当前手指避免跳变。
-                                        // 单页卷曲的折痕直接跟手，不需要锚定量。
-                                        val wasActive = simTarget != null
-                                        simTarget = target
-                                        simForward = forward
-                                        if (spreadDual) {
-                                            val grabX = if (wasActive) simFinger.x else simDragOrigin.x
-                                            val sheet = simSheet(forward)
-                                            simAnchorX = hingeFreeEdgeX(sheet, 0f) - grabX
-                                            simGrabX = grabX
-                                        }
-                                        simStartY = simDragOrigin.y
-                                    } else if (simFetchJob == null) {
-                                        // 位图缺失时现场渲染，就绪前本次拖拽按普通滑动翻页处理
-                                        simFetchForward = forward
-                                        simFetchJob = scope.launch {
-                                            val fetched = viewModel.adjacentSpread(forward)
-                                            simFetched = fetched
-                                            current?.let { viewModel.renderCurlBitmap(it) }
-                                            fetched?.let { viewModel.renderCurlBitmap(it) }
-                                        }
-                                    }
-                                }
-                                if (simTarget == target) {
-                                    simProgress = if (spreadDual) {
-                                        val sheet = simSheet(simForward)
-                                        // 跟手：锚定量在翻向行程前 ~35% 内衰减到 0，
-                                        // 自由边平滑追上手指后精确贴在触点下
-                                        val traveled = if (simForward) {
-                                            simGrabX - simFinger.x
-                                        } else {
-                                            simFinger.x - simGrabX
-                                        }
-                                        hingeProgressFor(
-                                            fingerX = simFinger.x + hingeCatchUpAnchor(
-                                                simAnchorX, traveled, sheet.reach,
-                                            ),
-                                            sheet = sheet,
-                                            maxProgress = 1f,
-                                        )
-                                    } else {
-                                        // 卷曲：折痕精确跟在触点下
-                                        curlProgressFor(
-                                            singleCurlFrame(), curlDir(simForward), simFinger,
-                                        )
-                                    }
-                                }
-                            } else if (simFetchJob == null) {
-                                // 预取缺失时现场取一页兜底，避免整个手势被吞掉
-                                simFetchForward = forward
-                                simFetchJob = scope.launch {
-                                    simFetched = viewModel.adjacentSpread(forward)
-                                }
-                            }
-                        }
-                    },
-                    onDragCancel = {
-                        if (!simSettling) {
-                            clearSimState()
-                        }
-                        dragged = 0f
-                        simFetchJob?.cancel()
-                        simFetchJob = null
-                        simFetched = null
                     },
                     onDragEnd = {
-                        if (!scrollMode) {
-                            val sim = simTarget
-                            if (effectiveMode == PageTurnMode.SIMULATION && sim != null && !simSettling) {
-                                val now = System.nanoTime()
-                                val velocity = if (samples.size >= 2) {
-                                    val (t0, d0) = samples.first()
-                                    (dragged - d0) / ((now - t0) / 1_000_000_000f)
-                                } else {
-                                    0f
-                                }
-                                val directed = if (simForward) -velocity else velocity
-                                // 完成度 = 进度：卷曲与铰链都走整程 0..1，方向由 simForward 决定
-                                val completionFrac = simProgress
-                                val outcome = decideTurnOutcome(completionFrac, directed)
-                                launchSimAnim(
-                                    target = sim,
-                                    forward = simForward,
-                                    completing = outcome == TurnOutcome.COMPLETE,
-                                    fromProgress = simProgress,
-                                    scripted = false,
-                                    onComplete = viewModel::noteManualInteraction,
-                                )
-                            } else if (!simSettling) {
-                                // 仿真目标缺失（书边界或预取失败）时按阈值正常翻页
-                                val threshold = size.width * 0.15f
-                                if (dragged < -threshold) {
-                                    viewModel.noteManualInteraction()
-                                    latestTurn(true, null)
-                                } else if (dragged > threshold) {
-                                    viewModel.noteManualInteraction()
-                                    latestTurn(false, null)
-                                }
-                            }
+                        val threshold = size.width * 0.15f
+                        if (dragged < -threshold) {
+                            viewModel.noteManualInteraction()
+                            latestTurn(true)
+                        } else if (dragged > threshold) {
+                            viewModel.noteManualInteraction()
+                            latestTurn(false)
                         }
                         dragged = 0f
-                        simFetchJob = null
-                        simFetched = null
-                    },
-                )
-            }
-            // 单页仿真的任意方向拖拽：从任意位置、任意角度抓起，折痕垂直于拖动方向。
-            // 与水平拖拽那一路互斥（上面已提前 return），所以只会有一路生效。
-            .pointerInput(
-                scrollMode,
-                effectiveMode,
-                prefs.swipeGestureEnabled,
-                selection != null,
-                spreadDual,
-            ) {
-                if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
-                if (effectiveMode != PageTurnMode.SIMULATION || spreadDual) return@pointerInput
-
-                var grabAt = 0L
-                var started = false
-                var forward = true
-                var dir = Offset(1f, 0f)
-                var resumed = false
-                var resumeAt = Offset.Zero
-                var baseProgress = 0f
-                var fetchJob: kotlinx.coroutines.Job? = null
-                var fetchForward = true
-                var fetched: PageSpread? = null
-                val samples = ArrayDeque<Pair<Long, Float>>()
-
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val p = Offset(offset.x - contentRect.left, offset.y - contentRect.top)
-                        grabAt = System.currentTimeMillis()
-                        samples.clear()
-                        fetchJob?.cancel()
-                        fetchJob = null
-                        fetched = null
-                        simFinger = p
-                        if (simSettling) {
-                            // 抓住飞行中的页面：以当前进度为基准，按手指位移继续推进
-                            interruptSimAnim()
-                            resumed = true
-                            resumeAt = p
-                            baseProgress = simProgress
-                            dir = simCurlDir
-                            forward = simForward
-                            started = true
-                        } else {
-                            resumed = false
-                            simCurlGrab = p
-                            started = false
-                        }
-                    },
-                    onDrag = { change, _ ->
-                        if (contentRect.width <= 0f) return@detectDragGestures
-                        simFinger = Offset(
-                            change.position.x - contentRect.left,
-                            change.position.y - contentRect.top,
-                        )
-                        if (!started) {
-                            // 起手须停够时间、且不是竖向意图，才判定开始翻页
-                            if (System.currentTimeMillis() - grabAt < CURL_START_TIMEOUT_MS) {
-                                return@detectDragGestures
-                            }
-                            val d = curlDirectionFor(simCurlGrab, simFinger)
-                                ?: return@detectDragGestures
-                            if (kotlin.math.abs(d.y) > kotlin.math.abs(d.x) * 1.6f) {
-                                return@detectDragGestures
-                            }
-                            dir = d
-                            forward = d.x >= 0f
-                            started = true
-                        }
-
-                        val frame = singleCurlFrame()
-                        val progress = if (resumed) {
-                            curlResumeProgress(frame, dir, simFinger, resumeAt, baseProgress)
-                        } else {
-                            curlDragProgress(frame, dir, simCurlGrab, simFinger)
-                        }
-                        if (progress <= 0f) return@detectDragGestures
-                        simCurlDir = dir
-                        simForward = forward
-                        samples.addLast(System.nanoTime() to progress)
-                        while (samples.size > 2 &&
-                            System.nanoTime() - samples.first().first > 120_000_000L
-                        ) {
-                            samples.removeFirst()
-                        }
-
-                        val target = (if (forward) nextSpread else prevSpread)
-                            ?: fetched?.takeIf { fetchForward == forward }
-                        if (target == null) {
-                            if (fetchJob == null) {
-                                fetchForward = forward
-                                fetchJob = scope.launch {
-                                    val fetchedSpread = viewModel.adjacentSpread(forward)
-                                    fetched = fetchedSpread
-                                    uiState.spread?.let { viewModel.renderCurlBitmap(it) }
-                                    fetchedSpread?.let { viewModel.renderCurlBitmap(it) }
-                                }
-                            }
-                            return@detectDragGestures
-                        }
-                        if (simTarget != target) {
-                            val current = uiState.spread ?: return@detectDragGestures
-                            val front = viewModel.curlBitmap(current) ?: return@detectDragGestures
-                            val leaf = viewModel.curlBitmap(target) ?: return@detectDragGestures
-                            clearSelection()
-                            autoScrollY = 0f
-                            // 前进：纸张 = 当前页、下层 = 下一页；后退交换
-                            simFrontBitmap = if (forward) front else leaf
-                            simBackBitmap = if (forward) leaf else front
-                            simTarget = target
-                        }
-                        simProgress = progress
-                    },
-                    onDragEnd = {
-                        val sim = simTarget
-                        if (sim != null && !simSettling) {
-                            val now = System.nanoTime()
-                            val velocity = if (samples.size >= 2) {
-                                val (t0, p0) = samples.first()
-                                (simProgress - p0) / ((now - t0) / 1_000_000_000f)
-                            } else {
-                                0f
-                            }
-                            val outcome = decideTurnOutcome(simProgress, velocity)
-                            launchSimAnim(
-                                target = sim,
-                                forward = simForward,
-                                completing = outcome == TurnOutcome.COMPLETE,
-                                fromProgress = simProgress,
-                                scripted = false,
-                                onComplete = viewModel::noteManualInteraction,
-                            )
-                        }
-                        fetchJob = null
-                        fetched = null
-                    },
-                    onDragCancel = {
-                        if (!simSettling) clearSimState()
-                        fetchJob?.cancel()
-                        fetchJob = null
-                        fetched = null
                     },
                 )
             }
@@ -1472,98 +941,7 @@ fun ReaderScreen(
                     )
                 } else {
                     val spread = uiState.spread
-                    val sim = simTarget
-                    if (spread != null && sim != null && geomReady) {
-                        val front = simFrontBitmap
-                        val back = simBackBitmap
-                        if (front != null && back != null) {
-                            val curlPageSize = Size(contentRect.width, contentRect.height)
-                            val startY = simStartY.takeIf { it >= 0f }
-                                ?: (curlPageSize.height * 0.5f)
-                            if (spreadDual) {
-                                val sheet = currentHingeSheet(simForward)
-                                HingeOverlay(
-                                    front = front,
-                                    target = back,
-                                    progress = simProgress,
-                                    sheet = sheet,
-                                    startY = startY,
-                                    // 双页转轴固定竖直，对准书脊中缝分页线
-                                    tilt = 0f,
-                                    sheetFade = 1f,
-                                    bendPx = creaseBend(
-                                        Size(sheet.width, curlPageSize.height),
-                                    ) * hingeBendFade(simProgress),
-                                    onShaderFailed = {
-                                        Toast.makeText(
-                                            context,
-                                            "当前设备不支持仿真翻页渲染，已使用简化效果",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            } else {
-                                // 单页卷曲：前进纸张 = 当前页、下层 = 下一页；
-                                // 后退交换（纸张 = 翻入的上一页、下层 = 当前页）
-                                val curlFrame = singleCurlFrame()
-                                CurlOverlay(
-                                    // 纸张正面 = 当前页；纸背走纸色（实心）。
-                                    // 自定义纸背图片接在这里：解出 Bitmap 传给 back 即可。
-                                    leaf = if (simForward) front else back,
-                                    under = if (simForward) back else front,
-                                    roll = curlRollForProgress(
-                                        frame = curlFrame,
-                                        dir = simCurlDir,
-                                        progress = simProgress,
-                                    ),
-                                    frame = curlFrame,
-                                    meshIntervalPx = CURL_MESH_INTERVAL_PX,
-                                    pageBackColor = pageBackColor(colors),
-                                    palette = curlShadowPaletteFor(colors.background),
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        } else {
-                            // 位图缺失兜底：COVER 滑入
-                            SpreadContent(
-                                spread = sim,
-                                config = uiState.layoutConfig,
-                                colors = colors,
-                                dual = uiState.dualPage,
-                                leftDp = leftDp,
-                                hingeDp = hingeDp,
-                                rightDp = rightDp,
-                                innerPadPx = innerPadPx,
-                                pageWidthDp = pageWidthDp,
-                                rightTopPadPx = rightTopPadPx,
-                                modifier = Modifier.fillMaxSize(),
-                                imageProvider = viewModel.imageProvider,
-                            )
-                            SpreadContent(
-                                spread = spread,
-                                config = uiState.layoutConfig,
-                                colors = colors,
-                                dual = uiState.dualPage,
-                                leftDp = leftDp,
-                                hingeDp = hingeDp,
-                                rightDp = rightDp,
-                                innerPadPx = innerPadPx,
-                                pageWidthDp = pageWidthDp,
-                                rightTopPadPx = rightTopPadPx,
-                                imageProvider = viewModel.imageProvider,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        translationX = if (simForward) {
-                                            -simProgress * size.width
-                                        } else {
-                                            simProgress * size.width
-                                        }
-                                    },
-                            )
-                        }
-                    } else if (spread != null && geomReady) {
+                    if (spread != null && geomReady) {
                         SpreadContent(
                             spread = spread,
                             config = uiState.layoutConfig,
@@ -1839,7 +1217,7 @@ fun ReaderScreen(
             ReaderMenuPanel(
                 prefs = prefs,
                 progressFraction = position.progressFraction,
-                displayPageTurnMode = effectiveMode,
+                displayPageTurnMode = rawMode,
                 chapterProgress = chapterProgressText(
                     index = position.chapterIndex,
                     count = position.chapterCount,
@@ -1855,7 +1233,7 @@ fun ReaderScreen(
                 onOpenCatalog = { catalogVisible = true },
                 onOpenAnnotations = { annotationsVisible = true },
                 onCyclePageTurnMode = {
-                    viewModel.setPageTurnMode(nextPageTurnMode(effectiveMode))
+                    viewModel.setPageTurnMode(nextPageTurnMode(rawMode))
                 },
                 onSelectPageTurnMode = viewModel::setPageTurnMode,
                 onCycleDualPageMode = {

@@ -36,7 +36,6 @@ class SettingsRepositoryImpl(
         val WIDE_SCREEN_DUAL_PAGE = booleanPreferencesKey("wide_screen_dual_page")
         val AVOID_CAMERA_CUTOUT = booleanPreferencesKey("avoid_camera_cutout")
         val PAGE_TURN_MODE = stringPreferencesKey("page_turn_mode")
-        val PAGE_TURN_MODE_EXPLICIT = booleanPreferencesKey("page_turn_mode_explicit")
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
         val BRIGHTNESS_GESTURE_ENABLED = booleanPreferencesKey("brightness_gesture_enabled")
@@ -52,7 +51,6 @@ class SettingsRepositoryImpl(
         val AUTO_PAGE_MODE = stringPreferencesKey("auto_page_mode")
         val AUTO_PAGE_INTERVAL_SEC = intPreferencesKey("auto_page_interval_sec")
         val AUTO_PAGE_SPEED_PX = floatPreferencesKey("auto_page_speed_px")
-        val SIMULATION_DEGRADED = booleanPreferencesKey("simulation_degraded")
         val PANEL_SCREEN_OFF = booleanPreferencesKey("panel_screen_off")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
         val BOOKSHELF_SORT = stringPreferencesKey("bookshelf_sort")
@@ -83,8 +81,6 @@ class SettingsRepositoryImpl(
                 avoidCameraCutout = prefs[Keys.AVOID_CAMERA_CUTOUT]
                     ?: defaults.avoidCameraCutout,
                 pageTurnMode = enumOrDefault(prefs[Keys.PAGE_TURN_MODE], defaults.pageTurnMode),
-                pageTurnModeExplicit = prefs[Keys.PAGE_TURN_MODE_EXPLICIT]
-                    ?: defaults.pageTurnModeExplicit,
                 pageTurnHotspotRatio = prefs[Keys.PAGE_TURN_HOTSPOT_RATIO]
                     ?: defaults.pageTurnHotspotRatio,
                 volumeKeyPagingEnabled = prefs[Keys.VOLUME_KEY_PAGING_ENABLED]
@@ -104,7 +100,6 @@ class SettingsRepositoryImpl(
                 autoPageMode = enumOrDefault(prefs[Keys.AUTO_PAGE_MODE], defaults.autoPageMode),
                 autoPageIntervalSec = prefs[Keys.AUTO_PAGE_INTERVAL_SEC] ?: defaults.autoPageIntervalSec,
                 autoPageSpeedPx = prefs[Keys.AUTO_PAGE_SPEED_PX] ?: defaults.autoPageSpeedPx,
-                simulationDegraded = prefs[Keys.SIMULATION_DEGRADED] ?: defaults.simulationDegraded,
                 panelScreenOff = prefs[Keys.PANEL_SCREEN_OFF] ?: defaults.panelScreenOff,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
                 bookshelfSort = enumOrDefault(prefs[Keys.BOOKSHELF_SORT], defaults.bookshelfSort),
@@ -177,13 +172,6 @@ class SettingsRepositoryImpl(
     override suspend fun setPageTurnMode(mode: PageTurnMode) {
         context.readingPreferencesStore.edit {
             it[Keys.PAGE_TURN_MODE] = mode.name
-            it[Keys.PAGE_TURN_MODE_EXPLICIT] = true
-        }
-    }
-
-    override suspend fun setPageTurnModeExplicit(explicit: Boolean) {
-        context.readingPreferencesStore.edit {
-            it[Keys.PAGE_TURN_MODE_EXPLICIT] = explicit
         }
     }
 
@@ -251,10 +239,6 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit {
             it[Keys.AUTO_PAGE_SPEED_PX] = pxPerSecond.coerceIn(10f, 300f)
         }
-    }
-
-    override suspend fun setSimulationDegraded(degraded: Boolean) {
-        context.readingPreferencesStore.edit { it[Keys.SIMULATION_DEGRADED] = degraded }
     }
 
     override suspend fun setPanelScreenOff(enabled: Boolean) {

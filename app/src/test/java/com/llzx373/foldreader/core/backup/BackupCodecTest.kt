@@ -59,7 +59,6 @@ class BackupCodecTest {
         autoPageMode = AutoPageMode.SCROLL,
         autoPageIntervalSec = 20,
         autoPageSpeedPx = 120f,
-        simulationDegraded = true,
         panelScreenOff = true,
         bookshelfGridView = false,
         customChapterRules = listOf("^第.+章$", "^卷 \\d+ .+"),
@@ -429,8 +428,6 @@ class BackupCodecTest {
             update { copy(avoidCameraCutout = enabled) }
         override suspend fun setPageTurnMode(mode: PageTurnMode) =
             update { copy(pageTurnMode = mode) }
-        override suspend fun setPageTurnModeExplicit(explicit: Boolean) =
-            update { copy(pageTurnModeExplicit = explicit) }
         override suspend fun setPageTurnHotspotRatio(ratio: Float) =
             update { copy(pageTurnHotspotRatio = ratio) }
         override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) =
@@ -460,8 +457,6 @@ class BackupCodecTest {
             update { copy(autoPageIntervalSec = seconds) }
         override suspend fun setAutoPageSpeedPx(pxPerSecond: Float) =
             update { copy(autoPageSpeedPx = pxPerSecond) }
-        override suspend fun setSimulationDegraded(degraded: Boolean) =
-            update { copy(simulationDegraded = degraded) }
         override suspend fun setPanelScreenOff(enabled: Boolean) =
             update { copy(panelScreenOff = enabled) }
         override suspend fun setBookshelfGridView(gridView: Boolean) =
@@ -566,7 +561,7 @@ class BackupCodecTest {
         }
         override suspend fun applyGlobalPageTurnMode(mode: String) {
             rows.replaceAll {
-                it.copy(pageTurnMode = mode, pageTurnModeExplicit = true, simulationDegraded = false)
+                it.copy(pageTurnMode = mode)
             }
         }
         override suspend fun delete(bookId: Long) {

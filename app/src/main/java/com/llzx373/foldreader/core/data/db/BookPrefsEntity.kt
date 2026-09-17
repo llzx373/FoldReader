@@ -36,7 +36,6 @@ data class BookPrefsEntity(
     val fontKey: String = "default",
     val dualPageMode: String = "AUTO",
     val pageTurnMode: String = "COVER",
-    @ColumnInfo(defaultValue = "0") val pageTurnModeExplicit: Boolean = false,
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,
     val keepScreenOn: Boolean = false,
@@ -50,7 +49,6 @@ data class BookPrefsEntity(
     val autoPageMode: String = "INTERVAL",
     val autoPageIntervalSec: Int = 10,
     val autoPageSpeedPx: Float = 60f,
-    val simulationDegraded: Boolean = false,
     val panelScreenOff: Boolean = false,
     @ColumnInfo(defaultValue = "1") val autoIndentEnabled: Boolean = true,
 )
@@ -70,7 +68,7 @@ interface BookPrefsDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(prefs: BookPrefsEntity)
 
-    @Query("UPDATE book_prefs SET pageTurnMode = :mode, pageTurnModeExplicit = 1, simulationDegraded = 0")
+    @Query("UPDATE book_prefs SET pageTurnMode = :mode")
     suspend fun applyGlobalPageTurnMode(mode: String)
 
     @Query("DELETE FROM book_prefs WHERE bookId = :bookId")

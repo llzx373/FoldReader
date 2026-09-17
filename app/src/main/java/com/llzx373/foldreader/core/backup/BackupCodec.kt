@@ -312,7 +312,6 @@ class BackupCodec(
         .put("wideScreenDualPage", p.wideScreenDualPage)
         .put("avoidCameraCutout", p.avoidCameraCutout)
         .put("pageTurnMode", p.pageTurnMode.name)
-        .put("pageTurnModeExplicit", p.pageTurnModeExplicit)
         .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
         .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
         .put("brightnessGestureEnabled", p.brightnessGestureEnabled)
@@ -328,7 +327,6 @@ class BackupCodec(
         .put("autoPageMode", p.autoPageMode.name)
         .put("autoPageIntervalSec", p.autoPageIntervalSec)
         .put("autoPageSpeedPx", p.autoPageSpeedPx.toDouble())
-        .put("simulationDegraded", p.simulationDegraded)
         .put("panelScreenOff", p.panelScreenOff)
         .put("bookshelfGridView", p.bookshelfGridView)
         .put("customChapterRules", JSONArray().apply { p.customChapterRules.forEach { put(it) } })
@@ -386,9 +384,6 @@ class BackupCodec(
                 enumOrDefault(json.optString("pageTurnMode"), current.pageTurnMode),
             )
         }
-        if (json.has("pageTurnModeExplicit")) {
-            settingsRepository.setPageTurnModeExplicit(json.optBoolean("pageTurnModeExplicit"))
-        }
         if (json.has("pageTurnHotspotRatio")) {
             settingsRepository.setPageTurnHotspotRatio(json.optDouble("pageTurnHotspotRatio").toFloat())
         }
@@ -430,9 +425,6 @@ class BackupCodec(
         if (json.has("autoPageSpeedPx")) {
             settingsRepository.setAutoPageSpeedPx(json.optDouble("autoPageSpeedPx").toFloat())
         }
-        if (json.has("simulationDegraded")) {
-            settingsRepository.setSimulationDegraded(json.optBoolean("simulationDegraded"))
-        }
         if (json.has("panelScreenOff")) {
             settingsRepository.setPanelScreenOff(json.optBoolean("panelScreenOff"))
         }
@@ -466,7 +458,6 @@ class BackupCodec(
         .put("fontKey", p.fontKey)
         .put("dualPageMode", p.dualPageMode)
         .put("pageTurnMode", p.pageTurnMode)
-        .put("pageTurnModeExplicit", p.pageTurnModeExplicit)
         .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
         .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
         .put("keepScreenOn", p.keepScreenOn)
@@ -480,7 +471,6 @@ class BackupCodec(
         .put("autoPageMode", p.autoPageMode)
         .put("autoPageIntervalSec", p.autoPageIntervalSec)
         .put("autoPageSpeedPx", p.autoPageSpeedPx.toDouble())
-        .put("simulationDegraded", p.simulationDegraded)
         .put("panelScreenOff", p.panelScreenOff)
         .put("autoIndentEnabled", p.autoIndentEnabled)
 
@@ -518,10 +508,6 @@ class BackupCodec(
             fontKey = json.optString("fontKey", defaults.fontKey),
             dualPageMode = json.optString("dualPageMode", defaults.dualPageMode),
             pageTurnMode = json.optString("pageTurnMode", defaults.pageTurnMode),
-            pageTurnModeExplicit = json.optBoolean(
-                "pageTurnModeExplicit",
-                defaults.pageTurnModeExplicit,
-            ),
             pageTurnHotspotRatio = json.optDouble(
                 "pageTurnHotspotRatio",
                 defaults.pageTurnHotspotRatio.toDouble(),
@@ -547,7 +533,6 @@ class BackupCodec(
                 "autoPageSpeedPx",
                 defaults.autoPageSpeedPx.toDouble(),
             ).toFloat(),
-            simulationDegraded = json.optBoolean("simulationDegraded", defaults.simulationDegraded),
             panelScreenOff = json.optBoolean("panelScreenOff", defaults.panelScreenOff),
             autoIndentEnabled = json.optBoolean("autoIndentEnabled", defaults.autoIndentEnabled),
         )

@@ -2,7 +2,7 @@ package com.llzx373.foldreader.core.data.settings
 
 enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, AMOLED, CUSTOM }
 
-enum class PageTurnMode { SIMULATION, COVER, NONE, SCROLL }
+enum class PageTurnMode { COVER, NONE, SCROLL }
 
 enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
 
@@ -30,8 +30,6 @@ data class ReadingPreferences(
     /** 非书籍维度（全局透传）：双页模式按 displayCutout 自动规避摄像头开孔位置。 */
     val avoidCameraCutout: Boolean = false,
     val pageTurnMode: PageTurnMode = PageTurnMode.COVER,
-    /** 用户是否显式设置过翻页方式（false 时按姿态取默认：双页仿真、单页覆盖）。 */
-    val pageTurnModeExplicit: Boolean = false,
     val pageTurnHotspotRatio: Float = 0.3f,
     val volumeKeyPagingEnabled: Boolean = false,
     val brightnessGestureEnabled: Boolean = true,
@@ -47,7 +45,6 @@ data class ReadingPreferences(
     val autoPageMode: AutoPageMode = AutoPageMode.INTERVAL,
     val autoPageIntervalSec: Int = 10,
     val autoPageSpeedPx: Float = 60f,
-    val simulationDegraded: Boolean = false,
     val panelScreenOff: Boolean = false,
     val autoIndentEnabled: Boolean = true,
     val bookshelfGridView: Boolean = true,
