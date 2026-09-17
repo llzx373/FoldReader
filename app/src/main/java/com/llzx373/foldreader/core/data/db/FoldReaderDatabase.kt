@@ -16,8 +16,9 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
     ],
-    version = 11,
-    // 10 → 11 是索引增删，AutoMigration 不覆盖索引变更，见 FoldReaderMigrations.MIGRATION_10_11
+    version = 12,
+    // 10 → 11 与 11 → 12 都涉及 AutoMigration 覆盖不了的结构调整（索引增删 / 列改名 + 换模型），
+    // 均为手写 SQL，见 FoldReaderMigrations。
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -32,6 +33,7 @@ import androidx.room.RoomDatabase
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {
+
     abstract fun bookDao(): BookDao
     abstract fun readingProgressDao(): ReadingProgressDao
     abstract fun bookmarkDao(): BookmarkDao

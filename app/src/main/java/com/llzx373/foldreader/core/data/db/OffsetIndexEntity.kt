@@ -8,8 +8,6 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 
-// charOffset 列存的是块起始"字节"偏移（变长编码下字符偏移可由 chunkIndex * blockChars 推导，
-// 字节偏移不可推导，必须持久化）；列名遗留未改，改名需 DB 版本迁移，收益不抵成本。
 @Entity(
     tableName = "offset_index",
     primaryKeys = ["bookId", "chunkIndex"],
@@ -26,7 +24,16 @@ import androidx.room.Transaction
 data class OffsetIndexEntity(
     val bookId: Long,
     val chunkIndex: Int,
-    val charOffset: Long,
+    /** 块起点的字节偏移（变长编码下不可推导，必须持久化）。v12 起由 `charOffset` 更名而来。 */
+    val byteOffset: Long,
+    /**
+     * 块起点的字符偏移。**不能**假设它等于 `chunkIndex * blockChars`：
+     * 索引器的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的增补字符（emoji、CJK 扩展 B）时，
+     * 该块会以不足 blockChars 的字符数提交，此后所有块起点相对均匀模型前移。
+     * 而增补字符在 UTF-8 里是不可分割的 4 字节，这种边界上不存在合法字节偏移——
+     * 非均匀是数据模型的必然结果，只能如实存下来。
+     */
+    val charStart: Long,
 )
 
 @Entity(

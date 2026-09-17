@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.core.data.db
 
 import com.llzx373.foldreader.core.format.OffsetIndex
+import com.llzx373.foldreader.core.format.OffsetIndexBlock
 import com.llzx373.foldreader.core.format.OffsetIndexSnapshot
 import com.llzx373.foldreader.core.format.OffsetIndexStore
 
@@ -35,13 +36,6 @@ class RoomOffsetIndexStore(
     override suspend fun save(key: String, snapshot: OffsetIndexSnapshot) {
         val bookId = key.toLongOrNull() ?: return
         require(snapshot.blockChars == OffsetIndex.DEFAULT_BLOCK_CHARS)
-        if (!snapshot.hasUniformBlockStarts()) {
-            // 代理对跨块会让索引器产出 4095/8190/… 这类非均匀块起点，而本表只存字节偏移、
-            // 恢复时按 i * blockChars 重建起点 —— 存下去读回来就会整体错位（窗口串位甚至越界）。
-            // 宁可不落盘，让下次打开重扫一遍。
-            dao.clearForBook(bookId)
-            return
-        }
         dao.replaceForBook(bookId, entriesOf(bookId, snapshot))
     }
 
@@ -53,11 +47,6 @@ class RoomOffsetIndexStore(
         charsetName: String,
     ) {
         val bookId = key.toLongOrNull() ?: return
-        if (!snapshot.hasUniformBlockStarts()) {
-            // 不能只跳过块：meta 标了 completed 而块缺失/错位同样会让恢复失败
-            dao.clearForBook(bookId)
-            return
-        }
         save(key, snapshot)
         dao.upsertMeta(
             OffsetIndexMetaEntity(
@@ -76,12 +65,17 @@ class RoomOffsetIndexStore(
         dao.clearForBook(bookId)
     }
 
-    override suspend fun appendBlocks(key: String, blocks: List<Pair<Int, Long>>) {
+    override suspend fun appendBlocks(key: String, blocks: List<OffsetIndexBlock>) {
         val bookId = key.toLongOrNull() ?: return
         if (blocks.isEmpty()) return
         dao.upsertAll(
-            blocks.map { (chunkIndex, byteOffset) ->
-                OffsetIndexEntity(bookId = bookId, chunkIndex = chunkIndex, charOffset = byteOffset)
+            blocks.map { block ->
+                OffsetIndexEntity(
+                    bookId = bookId,
+                    chunkIndex = block.chunkIndex,
+                    byteOffset = block.byteOffset,
+                    charStart = block.charStart,
+                )
             },
         )
     }
@@ -117,31 +111,49 @@ class RoomOffsetIndexStore(
             OffsetIndexEntity(
                 bookId = bookId,
                 chunkIndex = block,
-                charOffset = snapshot.blockByteOffsets[block],
+                byteOffset = snapshot.blockByteOffsets[block],
+                charStart = snapshot.blockCharStarts[block],
             )
         }
     }
 
+    /**
+     * 由落盘行重建快照。块起点直接取存量值，**不再**按 `i * blockChars` 推算——
+     * 代理对跨块时索引器产出的起点就是非均匀的（4095/8190/…），推算会整体错位。
+     * 这里的校验因此按「相邻跨度」而非「绝对位置」来做。
+     */
     private suspend fun buildSnapshot(bookId: Long, meta: OffsetIndexMetaEntity): OffsetIndexSnapshot? {
         val entries = dao.getForBook(bookId)
         if (entries.isEmpty()) return null
         val blockCount = entries.size
         val blockChars = OffsetIndex.DEFAULT_BLOCK_CHARS
         for (i in entries.indices) {
-            if (entries[i].chunkIndex != i) return null
-            if (i > 0 && entries[i].charOffset <= entries[i - 1].charOffset) return null
+            val entry = entries[i]
+            if (entry.chunkIndex != i) return null
+            if (entry.byteOffset < 0L || entry.charStart < 0L) return null
+            if (i == 0) {
+                // 块 0 必从字符 0 起；字节起点是 BOM 长度，可以为 0
+                if (entry.charStart != 0L) return null
+                continue
+            }
+            val prev = entries[i - 1]
+            if (entry.byteOffset <= prev.byteOffset) return null
+            val span = entry.charStart - prev.charStart
+            if (span < 1L || span > blockChars) return null
         }
-        if (meta.totalChars <= (blockCount - 1L) * blockChars ||
-            meta.totalChars > blockCount.toLong() * blockChars
-        ) {
-            return null
+        // 末块由 meta.totalChars 收尾，跨度同样受 blockChars 约束
+        val lastSpan = meta.totalChars - entries.last().charStart
+        if (lastSpan < 1L || lastSpan > blockChars) return null
+        if (meta.fileLength < entries.last().byteOffset) return null
+
+        val charStarts = LongArray(blockCount + 1)
+        val byteOffsets = LongArray(blockCount + 1)
+        for (i in 0 until blockCount) {
+            charStarts[i] = entries[i].charStart
+            byteOffsets[i] = entries[i].byteOffset
         }
-        if (meta.fileLength < entries.last().charOffset) return null
-        val charStarts = LongArray(blockCount + 1) { it.toLong() * blockChars }
         charStarts[blockCount] = meta.totalChars
-        val byteOffsets = LongArray(blockCount + 1) {
-            if (it < blockCount) entries[it].charOffset else meta.fileLength
-        }
+        byteOffsets[blockCount] = meta.fileLength
         return OffsetIndexSnapshot(
             blockChars = blockChars,
             totalChars = meta.totalChars,

@@ -252,15 +252,20 @@
 - [x] `positionAt` 收敛重复的 `chapterIndexAt` 调用
 - [x] `Page`/`PageLine`/`LineBox`/`RangeSegment`/`LayoutConfig`/`ReaderColors`/`PageSpread`/`ReadingPosition` 加 `@Immutable`
 
-### M5.9 偏移索引正确性修复（已完成）
+### M5.9 偏移索引改为双列模型（已完成，DB v12）
 
 > 详见 `docs/需求与设计说明书.md` 附录「v1.5 偏移索引的代理对跨块修复」。
 
-- [x] 修复代理对跨块导致持久化索引错位：`TxtIndexer` 会产出 4095/8190/… 非均匀块起点，
+- [x] 定位问题：`TxtIndexer` 在增补字符跨块时产出 4095/8190/… 非均匀块起点，
       而 `offset_index` 恢复时按 `i * blockChars` 重建起点 → 次开读出的文本整体偏移、靠后越界
-- [x] 非均匀快照一律拒绝落盘（清掉旧索引），live 索引封口时改走 `invalidate`
-- [x] 压平文件的索引扫描不再跑被丢弃的章节正则（结果本就由空回调丢弃）
-- [ ] 彻底的修法（可选）：`offset_index` 增列存真实字符起点，DB v12 迁移，可让这类书也享受索引缓存
+- [x] 论证根因：增补字符在 UTF-8 里不可分割，这种边界上不存在合法字节偏移，非均匀是必然
+- [x] `offset_index` 改双列模型：`charOffset` → **`byteOffset`**，新增 **`charStart`**（真实字符起点）
+- [x] `OffsetIndexBlock` 取代 `Pair<Int, Long>`，live 逐块落盘一并带字符起点
+- [x] `buildSnapshot` 校验改为按相邻跨度（起点严格递增 / 单块跨度 ≤ blockChars / 首块为 0）
+- [x] `MIGRATION_11_12` 重建空表（旧行真实起点已丢失，搬过去也是错的）
+- [x] 压平文件的索引扫描不再跑被丢弃的章节正则
+- [x] 测试：非均匀索引忠实往返（含逐字符读比对）、增量落盘路径、不自洽快照判损坏、
+      SchemaV12 / MigrationV12
 
 ### M5.10 性能专项·第三批（待定）
 - [ ] EPUB/FB2 增量压平：首章先出，其余后台续写——**存在三个待决风险**：

@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.core.data.db
 
 import com.llzx373.foldreader.core.format.OffsetIndex
+import com.llzx373.foldreader.core.format.OffsetIndexBlock
 import com.llzx373.foldreader.core.format.OffsetIndexSnapshot
 import com.llzx373.foldreader.core.format.txt.TxtBookContent
 import com.llzx373.foldreader.core.format.txt.TxtIndexer
@@ -23,6 +24,13 @@ class OffsetIndexStoreTest {
     private val key = "7"
     private val contentHash = "hash-abc"
     private val charsetName = "GBK"
+
+    /** 从快照取出第 [block] 块的落盘形态（字节起点 + 字符起点）。 */
+    private fun blockAt(snapshot: OffsetIndexSnapshot, block: Int) = OffsetIndexBlock(
+        chunkIndex = block,
+        byteOffset = snapshot.blockByteOffsets[block],
+        charStart = snapshot.blockCharStarts[block],
+    )
 
     private fun indexedFile(text: String): Pair<File, OffsetIndexSnapshot> {
         val file = File.createTempFile("foldreader-store", ".txt")
@@ -87,7 +95,7 @@ class OffsetIndexStoreTest {
         val (file, snapshot) = indexedFile("第一章 未完成。".repeat(600))
 
         store.begin(key)
-        store.appendBlocks(key, listOf(0 to snapshot.blockByteOffsets[0]))
+        store.appendBlocks(key, listOf(blockAt(snapshot, 0)))
         assertNull(store.load(key))
         assertNull(store.loadValid(key, file.length(), contentHash, charsetName))
 
@@ -111,7 +119,7 @@ class OffsetIndexStoreTest {
         val blockCount = snapshot.blockCharStarts.size - 1
 
         store.begin(key)
-        val blocks = (0 until blockCount).map { it to snapshot.blockByteOffsets[it] }
+        val blocks = (0 until blockCount).map { blockAt(snapshot, it) }
         val half = blocks.size / 2
         store.appendBlocks(key, blocks.subList(0, half))
         store.appendBlocks(key, blocks.subList(half, blocks.size))
@@ -138,20 +146,22 @@ class OffsetIndexStoreTest {
             completed = true,
         )
 
+        // 块号不连续（缺 chunkIndex=1）；起点本身是自洽的，只有连续性检查能拦下来
         dao.upsertAll(
             listOf(
-                OffsetIndexEntity(key.toLong(), 0, 0L),
-                OffsetIndexEntity(key.toLong(), 2, 5000L),
+                OffsetIndexEntity(key.toLong(), 0, 0L, 0L),
+                OffsetIndexEntity(key.toLong(), 2, 5000L, 4096L),
             ),
         )
         dao.upsertMeta(meta)
         assertNull(store.load(key))
 
         store.begin(key)
+        // 字节偏移倒退；字符起点自洽，只有字节单调性检查能拦下来
         dao.upsertAll(
             listOf(
-                OffsetIndexEntity(key.toLong(), 0, 5000L),
-                OffsetIndexEntity(key.toLong(), 1, 4000L),
+                OffsetIndexEntity(key.toLong(), 0, 5000L, 0L),
+                OffsetIndexEntity(key.toLong(), 1, 4000L, 4096L),
             ),
         )
         dao.upsertMeta(meta)
@@ -183,63 +193,115 @@ class OffsetIndexStoreTest {
      * 代理对跨块：`TxtIndexer` 的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的增补字符
      * （emoji、CJK 扩展 B 等）时，会以「不足 blockChars」的块提交，起点变成 4095 / 8190 / …
      *
-     * 持久化格式只存字节偏移、恢复时按 `i * blockChars` 重建起点，**无法忠实表达**这种序列：
-     * 存下去读回来块起点整体偏移，窗口读取会串位、靠后位置还会越界。
-     * 因此约定：非均匀索引一律不落盘（宁可下次重扫），本用例钉住这条约定。
+     * 增补字符在 UTF-8 里是不可分割的 4 字节，这种边界上**不存在**合法字节偏移——
+     * 非均匀是数据模型的必然结果，只能把真实字符起点一并持久化。
+     * 按 `i * blockChars` 推算会整体错位：第 k 块错 k 个字符，靠后位置还会越界。
      */
     @Test
-    fun `代理对跨块产生的非均匀索引拒绝落盘`() = runBlocking {
-        // 增补字符占第 4095、4096 两个 char，正好把块边界切在代理对中间
-        val text = "a".repeat(4095) + "😀" + "b".repeat(9000)
-        val file = File.createTempFile("foldreader-surrogate", ".txt")
-        file.deleteOnExit()
-        file.writeBytes(text.toByteArray(Charsets.UTF_8))
-        val snapshot = FileChannel.open(file.toPath(), StandardOpenOption.READ).use { channel ->
-            TxtIndexer.index(channel, Charsets.UTF_8).offsetIndex.snapshot()
-        }
+    fun `代理对跨块的非均匀索引也能忠实往返`() = runBlocking {
+        val (file, snapshot, text) = surrogateIndexedFile()
 
         // 前提：确实触发了非均匀块，否则这条用例没在测目标场景
         assertEquals("应触发不足 blockChars 的块", 4095L, snapshot.blockCharStarts[1])
-        assertTrue("应被判定为非均匀", !snapshot.hasUniformBlockStarts())
 
         val store = RoomOffsetIndexStore(FakeOffsetIndexDao())
         store.saveValid(key, snapshot, file.length(), contentHash, "UTF-8")
+        val restored = store.loadValid(key, file.length(), contentHash, "UTF-8")
 
-        assertNull("非均匀索引不能落盘", store.loadValid(key, file.length(), contentHash, "UTF-8"))
-        assertNull("元信息也不能留下 completed 标记", store.load(key))
+        assertNotNull(restored)
+        assertArrayEquals(snapshot.blockCharStarts, restored!!.blockCharStarts)
+        assertArrayEquals(snapshot.blockByteOffsets, restored.blockByteOffsets)
+
+        // 用户可见的后果：恢复索引读出的文本必须与原始索引逐字符一致
+        val original = TxtBookContent(
+            channel = RandomAccessFile(file, "r").channel,
+            charset = Charsets.UTF_8,
+            offsetIndex = OffsetIndex.restore(snapshot),
+        )
+        val roundTripped = TxtBookContent(
+            channel = RandomAccessFile(file, "r").channel,
+            charset = Charsets.UTF_8,
+            offsetIndex = OffsetIndex.restore(restored),
+        )
+        assertEquals(text.length.toLong(), roundTripped.charCount)
+        assertEquals(original.read(0L..text.length - 1L), roundTripped.read(0L..text.length - 1L))
+        assertEquals(text.substring(4080, 4120), roundTripped.read(4080L..4119L))
+        original.close()
+        roundTripped.close()
     }
 
     @Test
-    fun `非均匀索引落盘会清掉该书的旧索引`() = runBlocking {
-        val dao = FakeOffsetIndexDao()
-        val store = RoomOffsetIndexStore(dao)
+    fun `增量落盘的非均匀索引同样忠实往返`() = runBlocking {
+        // live 路径是逐块 append 的，字符起点必须一路带上
+        val (file, snapshot, _) = surrogateIndexedFile()
+        val store = RoomOffsetIndexStore(FakeOffsetIndexDao())
+        val blockCount = snapshot.blockCharStarts.size - 1
 
-        // 先落一份正常的均匀索引
-        val (uniformFile, uniform) = indexedFile("第一章 均匀索引。".repeat(1000))
-        store.saveValid(key, uniform, uniformFile.length(), contentHash, charsetName)
-        assertNotNull(store.loadValid(key, uniformFile.length(), contentHash, charsetName))
+        store.begin(key)
+        val blocks = (0 until blockCount).map { blockAt(snapshot, it) }
+        val half = blocks.size / 2
+        store.appendBlocks(key, blocks.subList(0, half))
+        store.appendBlocks(key, blocks.subList(half, blocks.size))
+        store.complete(key, file.length(), contentHash, "UTF-8", snapshot.totalChars)
 
-        // 同一本书随后产出非均匀索引（例如重扫到代理对跨块的版本）：必须把旧的清干净，
-        // 否则残留的旧块与新的 meta 混在一起，恢复出来的索引是错的
-        val text = "a".repeat(4095) + "😀" + "b".repeat(9000)
-        val file = File.createTempFile("foldreader-surrogate2", ".txt")
-        file.deleteOnExit()
-        file.writeBytes(text.toByteArray(Charsets.UTF_8))
-        val nonUniform = FileChannel.open(file.toPath(), StandardOpenOption.READ).use { channel ->
-            TxtIndexer.index(channel, Charsets.UTF_8).offsetIndex.snapshot()
+        val restored = store.loadValid(key, file.length(), contentHash, "UTF-8")
+        assertNotNull(restored)
+        assertArrayEquals(snapshot.blockCharStarts, restored!!.blockCharStarts)
+    }
+
+    @Test
+    fun `块起点序列不自洽的快照判为损坏`() = runBlocking {
+        val meta = OffsetIndexMetaEntity(
+            bookId = key.toLong(),
+            fileLength = 100_000L,
+            contentHash = contentHash,
+            charsetName = charsetName,
+            totalChars = 10_000L,
+            completed = true,
+        )
+        suspend fun loadWith(vararg entries: OffsetIndexEntity): OffsetIndexSnapshot? {
+            val dao = FakeOffsetIndexDao()
+            dao.upsertAll(entries.toList())
+            dao.upsertMeta(meta)
+            return RoomOffsetIndexStore(dao).load(key)
         }
-        store.saveValid(key, nonUniform, file.length(), "hash-surrogate", "UTF-8")
 
-        assertNull(store.load(key))
-        assertEquals(0, dao.getForBook(key.toLong()).size)
+        // 块号连续但字符起点倒退
+        assertNull(
+            loadWith(
+                OffsetIndexEntity(key.toLong(), 0, 0L, 0L),
+                OffsetIndexEntity(key.toLong(), 1, 5_000L, 3_000L),
+                OffsetIndexEntity(key.toLong(), 2, 9_000L, 2_000L),
+            ),
+        )
+        // 单块字符跨度超过 blockChars
+        assertNull(
+            loadWith(
+                OffsetIndexEntity(key.toLong(), 0, 0L, 0L),
+                OffsetIndexEntity(key.toLong(), 1, 5_000L, 5_000L),
+            ),
+        )
+        // 首块字符起点不为 0
+        assertNull(
+            loadWith(
+                OffsetIndexEntity(key.toLong(), 0, 0L, 7L),
+                OffsetIndexEntity(key.toLong(), 1, 5_000L, 5_000L),
+            ),
+        )
+        // 末块跨度超过 blockChars（totalChars 10_000，块起点 6_000 → 跨度 4_000 尚可；
+        // 起点 1_000 则跨度 9_000 超限）
+        assertNull(
+            loadWith(
+                OffsetIndexEntity(key.toLong(), 0, 0L, 0L),
+                OffsetIndexEntity(key.toLong(), 1, 5_000L, 1_000L),
+            ),
+        )
     }
 
     @Test
     fun `均匀块的快照仍能正常往返`() = runBlocking {
-        // 无增补字符 → 块起点严格是 i * blockChars
         val text = "第一章 均匀块往返。".repeat(1000)
         val (file, snapshot) = indexedFile(text)
-        assertTrue("应为均匀起点", snapshot.hasUniformBlockStarts())
 
         val store = RoomOffsetIndexStore(FakeOffsetIndexDao())
         store.saveValid(key, snapshot, file.length(), contentHash, charsetName)
@@ -248,5 +310,18 @@ class OffsetIndexStoreTest {
         assertNotNull(restored)
         assertArrayEquals(snapshot.blockCharStarts, restored!!.blockCharStarts)
         assertArrayEquals(snapshot.blockByteOffsets, restored.blockByteOffsets)
+    }
+
+    /** 构造「增补字符正好跨 4096 块边界」的文件与其索引快照。 */
+    private fun surrogateIndexedFile(): Triple<File, OffsetIndexSnapshot, String> {
+        // 增补字符占第 4095、4096 两个 char，正好把块边界切在代理对中间
+        val text = "a".repeat(4095) + "😀" + "b".repeat(9000)
+        val file = File.createTempFile("foldreader-surrogate", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(text.toByteArray(Charsets.UTF_8))
+        val snapshot = FileChannel.open(file.toPath(), StandardOpenOption.READ).use { channel ->
+            TxtIndexer.index(channel, Charsets.UTF_8).offsetIndex.snapshot()
+        }
+        return Triple(file, snapshot, text)
     }
 }

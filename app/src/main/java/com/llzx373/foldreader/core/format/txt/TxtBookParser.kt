@@ -10,6 +10,7 @@ import com.llzx373.foldreader.core.format.ChapterRules
 import com.llzx373.foldreader.core.format.ContentHasher
 import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.OffsetIndex
+import com.llzx373.foldreader.core.format.OffsetIndexBlock
 import com.llzx373.foldreader.core.format.OffsetIndexStore
 import java.nio.channels.SeekableByteChannel
 import java.nio.charset.Charset
@@ -144,12 +145,12 @@ class TxtBookParser(
             var indexChannel: SeekableByteChannel? = null
             // 分段落盘交给独立消费者协程：TxtIndexer 的解码循环不是 suspend 的，
             // 回调里没有挂起点，直接写库只能 runBlocking 占住一个 IO 线程。
-            val persistQueue = Channel<List<Pair<Int, Long>>>(Channel.UNLIMITED)
+            val persistQueue = Channel<List<OffsetIndexBlock>>(Channel.UNLIMITED)
             val persistJob = launch { for (pending in persistQueue) store.appendBlocks(key, pending) }
             try {
                 indexChannel = UriChannels.open(context, uri)
                 store.begin(key)
-                var batch = ArrayList<Pair<Int, Long>>(PERSIST_BATCH_BLOCKS)
+                var batch = ArrayList<OffsetIndexBlock>(PERSIST_BATCH_BLOCKS)
                 val chapters = TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules) { chunkIndex, startByteOffset, endByteOffset ->
                     if (!isActive) throw CancellationException()
                     progress.value = if (fileLength > 0) {
@@ -157,7 +158,13 @@ class TxtBookParser(
                     } else {
                         1f
                     }
-                    batch += chunkIndex to startByteOffset
+                    // 字符起点必须一并落盘：代理对跨块时它不等于 chunkIndex * blockChars，
+                    // 而该边界上不存在合法字节偏移，推算不出来。
+                    batch += OffsetIndexBlock(
+                        chunkIndex = chunkIndex,
+                        byteOffset = startByteOffset,
+                        charStart = shared.charStartOfBlock(chunkIndex),
+                    )
                     if (batch.size >= PERSIST_BATCH_BLOCKS) {
                         persistQueue.trySend(batch)
                         batch = ArrayList(PERSIST_BATCH_BLOCKS)
@@ -166,13 +173,7 @@ class TxtBookParser(
                 if (batch.isNotEmpty()) persistQueue.trySend(batch)
                 persistQueue.close()
                 persistJob.join()
-                if (shared.hasUniformBlockStarts) {
-                    store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
-                } else {
-                    // 代理对跨块产出的是非均匀块起点，持久化格式按 i * blockChars 重建起点，
-                    // 存下去读回来会整体错位。宁可作废，下次打开重扫一遍。
-                    runCatching { store.invalidate(key) }
-                }
+                store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
                 progress.value = 1f
                 runCatching { onChaptersIndexed(bookId, chapters) }
                 runCatching { onBookIndexed(bookId, shared.totalChars) }

@@ -8,19 +8,21 @@ class OffsetIndexSnapshot(
     val totalChars: Long,
     val blockCharStarts: LongArray,
     val blockByteOffsets: LongArray,
-) {
-    /**
-     * 持久化格式（`offset_index` 表）只存字节偏移，恢复时按 `i * blockChars` 重建块起点，
-     * 所以只有均匀起点才能被忠实保存。非均匀时落盘再读回会整体错位。
-     */
-    fun hasUniformBlockStarts(): Boolean {
-        val blocks = blockCharStarts.size - 1
-        for (i in 0 until blocks) {
-            if (blockCharStarts[i] != i.toLong() * blockChars) return false
-        }
-        return true
-    }
-}
+)
+
+/**
+ * 已落盘的一个块起点：块号 + 字节起点 + 字符起点。
+ *
+ * 字符起点必须显式携带，不能靠 `chunkIndex * blockChars` 推：索引器的输出缓冲只剩 1 个槽位、
+ * 而下一个字符是需要 2 槽的增补字符（emoji、CJK 扩展 B 等）时，该块会以不足 blockChars 的
+ * 字符数提交，此后所有块起点都相对均匀模型前移。而增补字符在 UTF-8 里是不可分割的 4 字节，
+ * 这种边界上**不存在**合法的字节偏移，非均匀是数据模型的必然结果。
+ */
+data class OffsetIndexBlock(
+    val chunkIndex: Int,
+    val byteOffset: Long,
+    val charStart: Long,
+)
 
 interface OffsetIndexStore {
     suspend fun load(key: String): OffsetIndexSnapshot?
@@ -39,7 +41,7 @@ interface OffsetIndexStore {
         charsetName: String,
     )
     suspend fun begin(key: String)
-    suspend fun appendBlocks(key: String, blocks: List<Pair<Int, Long>>)
+    suspend fun appendBlocks(key: String, blocks: List<OffsetIndexBlock>)
     suspend fun complete(
         key: String,
         fileLength: Long,
@@ -72,22 +74,6 @@ class OffsetIndex(
     val isComplete: Boolean get() = synchronized(lock) { _isComplete }
 
     val blockCount: Int get() = synchronized(lock) { blockCharStarts.size - 1 }
-
-    /**
-     * 块起点是否为均匀的 `i * blockChars`。
-     *
-     * 索引器的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的增补字符（emoji、CJK 扩展 B 等）时，
-     * 会以「不足 blockChars」的块提交，此时起点是 4095 / 8190 / … 这种非均匀序列。
-     */
-    val hasUniformBlockStarts: Boolean get() = synchronized(lock) { blockCharStarts.isUniform(blockChars) }
-
-    private fun List<Long>.isUniform(blockChars: Int): Boolean {
-        val blocks = size - 1
-        for (i in 0 until blocks) {
-            if (this[i] != i.toLong() * blockChars) return false
-        }
-        return true
-    }
 
     fun appendBlock(charCount: Int, endByteOffset: Long) {
         synchronized(lock) {

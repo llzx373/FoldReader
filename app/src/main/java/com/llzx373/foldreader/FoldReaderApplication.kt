@@ -39,7 +39,10 @@ class AppContainer(context: Context) {
     )
     val database: FoldReaderDatabase =
         Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db")
-            .addMigrations(com.llzx373.foldreader.core.data.db.MIGRATION_10_11)
+            .addMigrations(
+                com.llzx373.foldreader.core.data.db.MIGRATION_10_11,
+                com.llzx373.foldreader.core.data.db.MIGRATION_11_12,
+            )
             .build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
     val convertedDir = File(context.filesDir, "converted").apply { mkdirs() }

@@ -30,3 +30,27 @@ val MIGRATION_10_11: Migration = object : Migration(10, 11) {
         db.execSQL("DROP INDEX IF EXISTS `index_offset_index_bookId`")
     }
 }
+
+/**
+ * v11 → v12：`offset_index` 改为「字节起点 + 字符起点」双列模型
+ * （`charOffset` 更名 `byteOffset`，新增 `charStart`）。
+ *
+ * 为什么要存字符起点：`TxtIndexer` 的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的
+ * 增补字符（emoji、CJK 扩展 B）时，该块会以不足 blockChars 的字符数提交，此后所有块起点
+ * 相对均匀模型前移。而增补字符在 UTF-8 里是不可分割的 4 字节，这种边界上不存在合法字节
+ * 偏移——非均匀是数据模型的必然结果，不能再用 `i * blockChars` 推算。
+ *
+ * 这里重建空表而不是搬数据：旧行只存了字节偏移，真实字符起点已经丢失，搬过去也是错的
+ * （`charStart` 只能填 0，会被加载校验判为损坏）。直接清掉，下次打开重扫一遍即可。
+ */
+val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `offset_index`")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `offset_index` (`bookId` INTEGER NOT NULL, " +
+                "`chunkIndex` INTEGER NOT NULL, `byteOffset` INTEGER NOT NULL, " +
+                "`charStart` INTEGER NOT NULL, PRIMARY KEY(`bookId`, `chunkIndex`), " +
+                "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+    }
+}
