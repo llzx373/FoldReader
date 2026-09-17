@@ -8,7 +8,19 @@ class OffsetIndexSnapshot(
     val totalChars: Long,
     val blockCharStarts: LongArray,
     val blockByteOffsets: LongArray,
-)
+) {
+    /**
+     * 持久化格式（`offset_index` 表）只存字节偏移，恢复时按 `i * blockChars` 重建块起点，
+     * 所以只有均匀起点才能被忠实保存。非均匀时落盘再读回会整体错位。
+     */
+    fun hasUniformBlockStarts(): Boolean {
+        val blocks = blockCharStarts.size - 1
+        for (i in 0 until blocks) {
+            if (blockCharStarts[i] != i.toLong() * blockChars) return false
+        }
+        return true
+    }
+}
 
 interface OffsetIndexStore {
     suspend fun load(key: String): OffsetIndexSnapshot?
@@ -60,6 +72,22 @@ class OffsetIndex(
     val isComplete: Boolean get() = synchronized(lock) { _isComplete }
 
     val blockCount: Int get() = synchronized(lock) { blockCharStarts.size - 1 }
+
+    /**
+     * 块起点是否为均匀的 `i * blockChars`。
+     *
+     * 索引器的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的增补字符（emoji、CJK 扩展 B 等）时，
+     * 会以「不足 blockChars」的块提交，此时起点是 4095 / 8190 / … 这种非均匀序列。
+     */
+    val hasUniformBlockStarts: Boolean get() = synchronized(lock) { blockCharStarts.isUniform(blockChars) }
+
+    private fun List<Long>.isUniform(blockChars: Int): Boolean {
+        val blocks = size - 1
+        for (i in 0 until blocks) {
+            if (this[i] != i.toLong() * blockChars) return false
+        }
+        return true
+    }
 
     fun appendBlock(charCount: Int, endByteOffset: Long) {
         synchronized(lock) {

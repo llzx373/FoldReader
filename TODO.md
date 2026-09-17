@@ -252,16 +252,28 @@
 - [x] `positionAt` 收敛重复的 `chapterIndexAt` 调用
 - [x] `Page`/`PageLine`/`LineBox`/`RangeSegment`/`LayoutConfig`/`ReaderColors`/`PageSpread`/`ReadingPosition` 加 `@Immutable`
 
-### M5.9 性能专项·第三批（待定）
+### M5.9 偏移索引正确性修复（已完成）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v1.5 偏移索引的代理对跨块修复」。
+
+- [x] 修复代理对跨块导致持久化索引错位：`TxtIndexer` 会产出 4095/8190/… 非均匀块起点，
+      而 `offset_index` 恢复时按 `i * blockChars` 重建起点 → 次开读出的文本整体偏移、靠后越界
+- [x] 非均匀快照一律拒绝落盘（清掉旧索引），live 索引封口时改走 `invalidate`
+- [x] 压平文件的索引扫描不再跑被丢弃的章节正则（结果本就由空回调丢弃）
+- [ ] 彻底的修法（可选）：`offset_index` 增列存真实字符起点，DB v12 迁移，可让这类书也享受索引缓存
+
+### M5.10 性能专项·第三批（待定）
 - [ ] EPUB/FB2 增量压平：首章先出，其余后台续写——**存在三个待决风险**：
       ① 生长中文件需要「持续读到 EOF 后等待追加」的索引循环；
       ② sidecar（样式 span / 纸书页码 / 链接锚点）必须整本压平完才能定稿，
       首开期间会缺少富文本与纸书页码，需完成后回填并重排（用户可见一次样式跳变）；
       ③ 无真机无法验证收益与回归。建议先真机测出「大 EPUB 首开耗时」再决定是否做。
+- [ ] 「压平时顺带产出偏移索引」——需在压平器里复现 `TxtIndexer` 的字节偏移语义
+      （含代理对跨块边界），非低风险改动；现有「扫描成品文件」天然正确。
 - [ ] 引入 `kotlinx.collections.immutable` 把 `PageView`/`SpreadContent` 的 `List` 形参换成 `ImmutableList`，使其可跳过重组
 - [ ] `ScrollContent` 函数引用改 `remember` 包裹（当前收益有限）
 - [ ] 真机验证 release 包（R8 后的 Room 迁移、EPUB 解析、字体加载路径）
-- [ ] 真机验证滚动流畅度（本次改动的核心收益需要 profile 确认）
+- [ ] 真机验证滚动流畅度（第二批的核心收益需要 profile 确认）
 
 ---
 

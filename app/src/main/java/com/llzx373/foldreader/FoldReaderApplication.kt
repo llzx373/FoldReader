@@ -107,8 +107,10 @@ class AppContainer(context: Context) {
         },
         contentUriResolver = { it },
         onBookIndexed = onBookIndexed,
+        // 压平文件的章节来自 EPUB/FB2 的 .toc sidecar，这里扫出来的结果由下面那行空回调丢弃。
+        // 用空规则集跳过索引扫描期间的逐行正则匹配——那次扫描只剩纯解码，没有白做的活。
         onChaptersIndexed = { _, _ -> },
-        chapterRules = chapterRules,
+        chapterRules = { emptyList() },
     )
     private val openFlattenedContent: suspend (File) -> com.llzx373.foldreader.core.format.BookContent =
         { file -> flattenedTxtParser.openContent(Uri.fromFile(file), Charsets.UTF_8) }

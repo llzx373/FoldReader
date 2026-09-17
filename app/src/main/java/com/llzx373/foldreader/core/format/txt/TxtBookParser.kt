@@ -166,7 +166,13 @@ class TxtBookParser(
                 if (batch.isNotEmpty()) persistQueue.trySend(batch)
                 persistQueue.close()
                 persistJob.join()
-                store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
+                if (shared.hasUniformBlockStarts) {
+                    store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
+                } else {
+                    // 代理对跨块产出的是非均匀块起点，持久化格式按 i * blockChars 重建起点，
+                    // 存下去读回来会整体错位。宁可作废，下次打开重扫一遍。
+                    runCatching { store.invalidate(key) }
+                }
                 progress.value = 1f
                 runCatching { onChaptersIndexed(bookId, chapters) }
                 runCatching { onBookIndexed(bookId, shared.totalChars) }

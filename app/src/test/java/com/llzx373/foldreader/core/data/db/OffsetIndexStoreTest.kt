@@ -14,6 +14,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OffsetIndexStoreTest {
@@ -176,5 +177,76 @@ class OffsetIndexStoreTest {
         assertEquals(text, content.read(0L..text.length - 1L))
         assertEquals(text.substring(1000, 5000), content.read(1000L..4999L))
         content.close()
+    }
+
+    /**
+     * 代理对跨块：`TxtIndexer` 的输出缓冲只剩 1 个槽位、而下一个字符是需要 2 槽的增补字符
+     * （emoji、CJK 扩展 B 等）时，会以「不足 blockChars」的块提交，起点变成 4095 / 8190 / …
+     *
+     * 持久化格式只存字节偏移、恢复时按 `i * blockChars` 重建起点，**无法忠实表达**这种序列：
+     * 存下去读回来块起点整体偏移，窗口读取会串位、靠后位置还会越界。
+     * 因此约定：非均匀索引一律不落盘（宁可下次重扫），本用例钉住这条约定。
+     */
+    @Test
+    fun `代理对跨块产生的非均匀索引拒绝落盘`() = runBlocking {
+        // 增补字符占第 4095、4096 两个 char，正好把块边界切在代理对中间
+        val text = "a".repeat(4095) + "😀" + "b".repeat(9000)
+        val file = File.createTempFile("foldreader-surrogate", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(text.toByteArray(Charsets.UTF_8))
+        val snapshot = FileChannel.open(file.toPath(), StandardOpenOption.READ).use { channel ->
+            TxtIndexer.index(channel, Charsets.UTF_8).offsetIndex.snapshot()
+        }
+
+        // 前提：确实触发了非均匀块，否则这条用例没在测目标场景
+        assertEquals("应触发不足 blockChars 的块", 4095L, snapshot.blockCharStarts[1])
+        assertTrue("应被判定为非均匀", !snapshot.hasUniformBlockStarts())
+
+        val store = RoomOffsetIndexStore(FakeOffsetIndexDao())
+        store.saveValid(key, snapshot, file.length(), contentHash, "UTF-8")
+
+        assertNull("非均匀索引不能落盘", store.loadValid(key, file.length(), contentHash, "UTF-8"))
+        assertNull("元信息也不能留下 completed 标记", store.load(key))
+    }
+
+    @Test
+    fun `非均匀索引落盘会清掉该书的旧索引`() = runBlocking {
+        val dao = FakeOffsetIndexDao()
+        val store = RoomOffsetIndexStore(dao)
+
+        // 先落一份正常的均匀索引
+        val (uniformFile, uniform) = indexedFile("第一章 均匀索引。".repeat(1000))
+        store.saveValid(key, uniform, uniformFile.length(), contentHash, charsetName)
+        assertNotNull(store.loadValid(key, uniformFile.length(), contentHash, charsetName))
+
+        // 同一本书随后产出非均匀索引（例如重扫到代理对跨块的版本）：必须把旧的清干净，
+        // 否则残留的旧块与新的 meta 混在一起，恢复出来的索引是错的
+        val text = "a".repeat(4095) + "😀" + "b".repeat(9000)
+        val file = File.createTempFile("foldreader-surrogate2", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(text.toByteArray(Charsets.UTF_8))
+        val nonUniform = FileChannel.open(file.toPath(), StandardOpenOption.READ).use { channel ->
+            TxtIndexer.index(channel, Charsets.UTF_8).offsetIndex.snapshot()
+        }
+        store.saveValid(key, nonUniform, file.length(), "hash-surrogate", "UTF-8")
+
+        assertNull(store.load(key))
+        assertEquals(0, dao.getForBook(key.toLong()).size)
+    }
+
+    @Test
+    fun `均匀块的快照仍能正常往返`() = runBlocking {
+        // 无增补字符 → 块起点严格是 i * blockChars
+        val text = "第一章 均匀块往返。".repeat(1000)
+        val (file, snapshot) = indexedFile(text)
+        assertTrue("应为均匀起点", snapshot.hasUniformBlockStarts())
+
+        val store = RoomOffsetIndexStore(FakeOffsetIndexDao())
+        store.saveValid(key, snapshot, file.length(), contentHash, charsetName)
+        val restored = store.loadValid(key, file.length(), contentHash, charsetName)
+
+        assertNotNull(restored)
+        assertArrayEquals(snapshot.blockCharStarts, restored!!.blockCharStarts)
+        assertArrayEquals(snapshot.blockByteOffsets, restored.blockByteOffsets)
     }
 }

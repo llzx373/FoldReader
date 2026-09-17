@@ -35,6 +35,13 @@ class RoomOffsetIndexStore(
     override suspend fun save(key: String, snapshot: OffsetIndexSnapshot) {
         val bookId = key.toLongOrNull() ?: return
         require(snapshot.blockChars == OffsetIndex.DEFAULT_BLOCK_CHARS)
+        if (!snapshot.hasUniformBlockStarts()) {
+            // 代理对跨块会让索引器产出 4095/8190/… 这类非均匀块起点，而本表只存字节偏移、
+            // 恢复时按 i * blockChars 重建起点 —— 存下去读回来就会整体错位（窗口串位甚至越界）。
+            // 宁可不落盘，让下次打开重扫一遍。
+            dao.clearForBook(bookId)
+            return
+        }
         dao.replaceForBook(bookId, entriesOf(bookId, snapshot))
     }
 
@@ -46,6 +53,11 @@ class RoomOffsetIndexStore(
         charsetName: String,
     ) {
         val bookId = key.toLongOrNull() ?: return
+        if (!snapshot.hasUniformBlockStarts()) {
+            // 不能只跳过块：meta 标了 completed 而块缺失/错位同样会让恢复失败
+            dao.clearForBook(bookId)
+            return
+        }
         save(key, snapshot)
         dao.upsertMeta(
             OffsetIndexMetaEntity(
