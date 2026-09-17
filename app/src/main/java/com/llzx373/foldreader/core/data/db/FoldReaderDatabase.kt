@@ -16,7 +16,8 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
     ],
-    version = 10,
+    version = 11,
+    // 10 → 11 是索引增删，AutoMigration 不覆盖索引变更，见 FoldReaderMigrations.MIGRATION_10_11
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

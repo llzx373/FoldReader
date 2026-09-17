@@ -35,8 +35,7 @@ class RoomOffsetIndexStore(
     override suspend fun save(key: String, snapshot: OffsetIndexSnapshot) {
         val bookId = key.toLongOrNull() ?: return
         require(snapshot.blockChars == OffsetIndex.DEFAULT_BLOCK_CHARS)
-        dao.deleteForBook(bookId)
-        dao.upsertAll(entriesOf(bookId, snapshot))
+        dao.replaceForBook(bookId, entriesOf(bookId, snapshot))
     }
 
     override suspend fun saveValid(
@@ -62,8 +61,7 @@ class RoomOffsetIndexStore(
 
     override suspend fun begin(key: String) {
         val bookId = key.toLongOrNull() ?: return
-        dao.deleteForBook(bookId)
-        dao.deleteMeta(bookId)
+        dao.clearForBook(bookId)
     }
 
     override suspend fun appendBlocks(key: String, blocks: List<Pair<Int, Long>>) {
@@ -98,8 +96,7 @@ class RoomOffsetIndexStore(
 
     override suspend fun invalidate(key: String) {
         val bookId = key.toLongOrNull() ?: return
-        dao.deleteForBook(bookId)
-        dao.deleteMeta(bookId)
+        dao.clearForBook(bookId)
     }
 
     private fun entriesOf(bookId: Long, snapshot: OffsetIndexSnapshot): List<OffsetIndexEntity> {

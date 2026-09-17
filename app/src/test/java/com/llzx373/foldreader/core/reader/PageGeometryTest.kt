@@ -174,4 +174,82 @@ class PageGeometryTest {
         )
         assertEquals(4f, noIndent[0].x0, 0.001f)
     }
+
+    /**
+     * 渲染端走 [buildLineBoxes] 的 fillCharWidths 批量路径（Paint.getTextWidths），
+     * 单测走逐字 measure 路径；两条路径必须产出完全相同的几何，否则划线/光标会错位。
+     * 这里用一个「字符串宽度 = 各字符宽度之和」的假字宽表模拟真实字体。
+     */
+    @Test
+    fun `批量取字宽与逐字度量产出相同几何`() {
+        val charWidth: (Char) -> Float = { ch -> if (ch in '0'..'9') 6f else 10f }
+        val measureBySum: (String) -> Float = { s ->
+            var sum = 0f
+            for (ch in s) sum += charWidth(ch)
+            sum
+        }
+        val fillByTable: (CharSequence, FloatArray) -> Unit = { text, out ->
+            for (i in text.indices) out[i] = charWidth(text[i])
+        }
+
+        fun boxes(fill: ((CharSequence, FloatArray) -> Unit)?) = buildLineBoxes(
+            page = page,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 6f,
+            indentPx = 20f,
+            topPadPx = 4f,
+            leftPadPx = 4f,
+            textWidthPx = 110f,
+            justify = true,
+            measure = measureBySum,
+            fillCharWidths = fill,
+        )
+
+        val perChar = boxes(null)
+        val batched = boxes(fillByTable)
+
+        assertEquals(perChar.size, batched.size)
+        perChar.forEachIndexed { index, expected ->
+            val actual = batched[index]
+            assertEquals(expected.x0, actual.x0, 0.001f)
+            assertEquals(expected.yTop, actual.yTop, 0.001f)
+            assertEquals(expected.lineHeightPx, actual.lineHeightPx, 0.001f)
+            assertEquals(expected.gapPx, actual.gapPx, 0.001f)
+            assertEquals(expected.charWidths.size, actual.charWidths.size)
+            expected.charWidths.indices.forEach { i ->
+                assertEquals(expected.charWidths[i], actual.charWidths[i], 0.001f)
+            }
+            // 段落末行的两端对齐字距必须为 0（不拉伸最后一行）
+            assertEquals(expected.line.charStart + expected.textLength, actual.line.charStart + actual.textLength)
+        }
+    }
+
+    @Test
+    fun `批量取字宽时空行不调用填充`() {
+        val emptyLinePage = Page(
+            charStart = 0,
+            charEnd = 2,
+            lines = listOf(
+                PageLine(0, 1, "", isParagraphStart = true, isParagraphEnd = true),
+                PageLine(1, 2, "甲", isParagraphStart = true, isParagraphEnd = true),
+            ),
+            paddingLeft = 0f,
+            paddingRight = 0f,
+        )
+        val calls = mutableListOf<Int>()
+        val boxes = buildLineBoxes(
+            page = emptyLinePage,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 0f,
+            topPadPx = 0f,
+            leftPadPx = 0f,
+            textWidthPx = 100f,
+            justify = false,
+            measure = { it.length * 10f },
+            fillCharWidths = { text, _ -> calls += text.length },
+        )
+        assertEquals(listOf(0, 1), calls)
+        assertEquals(2, boxes.size)
+    }
 }

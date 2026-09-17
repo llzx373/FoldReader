@@ -59,6 +59,13 @@ class Paginator(
     @Volatile private var fullBoundsFromDisk = false
 
     /**
+     * 已成功落盘的边界条数。后台全书分页会周期性调用 [persistBounds]，
+     * 有了它就能只追加新增尾部，而不是每 64 页都把整份数组重写一遍（O(n²) 写入）。
+     * 0 = 磁盘上没有与本实例同源的前缀，下一次落盘必须整份写。
+     */
+    @Volatile private var persistedCount = 0
+
+    /**
      * 临时分页起点（段首吸附后的锚点）。磁盘边界缺失且进度在书中部时，
      * 从这里开始向后排版先出第一屏，精确前缀边界由后台追上后整体切换。
      * 注意：从段首临时起排的页边界与从 0 精确起排的页边界一般不一致，
@@ -188,13 +195,16 @@ class Paginator(
         val key = diskKey ?: return
         val stored = runCatching { diskCache?.load(key, content.charCount) }.getOrNull() ?: return
         if (stored.size < 2) return
-        synchronized(boundsLock) {
-            if (bounds.size == 1) {
-                bounds.clear()
-                stored.forEach { bounds += it }
-                fullBoundsFromDisk = true
-            }
+        val adopted = synchronized(boundsLock) {
+            // 只有在内存边界还没长出来时才能采纳磁盘快照；采纳后内存前缀即等于磁盘内容，
+            // 后续 append 才能安全地只写尾部。未采纳则 persistedCount 归零，下次整份写。
+            if (bounds.size != 1) return@synchronized false
+            bounds.clear()
+            stored.forEach { bounds += it }
+            fullBoundsFromDisk = true
+            true
         }
+        persistedCount = if (adopted) stored.size else 0
     }
 
     val hasFullBoundaryIndex: Boolean get() = diskBoundsLoaded && fullBoundsFromDisk
@@ -213,7 +223,14 @@ class Paginator(
         val key = diskKey ?: return
         val cache = diskCache ?: return
         val snapshot = synchronized(boundsLock) { bounds.toLongArray() }
-        runCatching { cache.save(key, content.charCount, snapshot) }
+        val already = persistedCount
+        if (snapshot.size <= already) return
+        val appended = already > 0 &&
+            runCatching { cache.append(key, content.charCount, snapshot, already) }.getOrDefault(false)
+        if (!appended) {
+            runCatching { cache.save(key, content.charCount, snapshot) }
+        }
+        persistedCount = snapshot.size
     }
 
     private suspend fun getOrPaginate(start: Long): Page =

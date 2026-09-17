@@ -135,6 +135,8 @@ class BookshelfRepositoryGroupTest {
             books.replaceAll { if (it.groupName == groupName) it.copy(groupName = null) else it }
         }
         override suspend fun getById(bookId: Long): BookEntity? = books.find { it.id == bookId }
+        override suspend fun getByIds(bookIds: List<Long>): List<BookEntity> =
+            books.filter { it.id in bookIds }
         override fun observeById(bookId: Long): Flow<BookEntity?> = flowOf(books.find { it.id == bookId })
         override suspend fun updateEncoding(bookId: Long, encoding: String) {
             books.replaceAll { if (it.id == bookId) it.copy(encoding = encoding) else it }

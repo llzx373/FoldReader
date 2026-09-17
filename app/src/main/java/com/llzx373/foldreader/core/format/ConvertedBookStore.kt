@@ -41,12 +41,45 @@ internal data class FlattenContent(
  */
 internal class ConvertedBookStore(private val convertedDir: File) {
 
+    /**
+     * sidecar 解析结果短时备忘：打开一本书会多次问同一 hash（内容、纸书页码、样式 span、章节），
+     * 每次都把 4 个 sidecar 全量 readLines 解析一遍是纯浪费。容量小、按访问序淘汰。
+     */
+    private val memo = object : LinkedHashMap<String, FlattenedBook>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FlattenedBook>): Boolean =
+            size > MEMO_SIZE
+    }
+
+    @Synchronized
     fun cached(hash: String): FlattenedBook? {
+        memo[hash]?.let { book ->
+            // 备忘省掉的是 sidecar 解析，不是有效性判定：产物被删书清掉、
+            // sidecar 缺失、版本号被降级，都必须照常判失效。
+            if (cacheFilesValid(hash)) return book
+            memo.remove(hash)
+            return null
+        }
+        return readCached(hash)?.also { memo[hash] = it }
+    }
+
+    /** 廉价校验（几次 stat + 读几字节版本号），用于备忘命中的场合。 */
+    private fun cacheFilesValid(hash: String): Boolean {
+        val target = File(convertedDir, "$hash.txt")
+        if (!target.isFile || target.length() == 0L) return false
+        for (suffix in SIDECAR_SUFFIXES) {
+            if (!File(convertedDir, "$hash$suffix").isFile) return false
+        }
+        return readVersion(hash) == FLATTEN_VERSION
+    }
+
+    private fun readVersion(hash: String): Int? =
+        File(convertedDir, "$hash.version").takeIf { it.isFile }
+            ?.let { runCatching { it.readText(Charsets.UTF_8).trim().toInt() }.getOrNull() }
+
+    private fun readCached(hash: String): FlattenedBook? {
         val target = File(convertedDir, "$hash.txt")
         if (!target.isFile || target.length() == 0L) return null
-        val version = File(convertedDir, "$hash.version").takeIf { it.isFile }
-            ?.let { runCatching { it.readText(Charsets.UTF_8).trim().toInt() }.getOrNull() }
-        if (version != FLATTEN_VERSION) return null
+        if (readVersion(hash) != FLATTEN_VERSION) return null
         val chapters = readToc(File(convertedDir, "$hash.toc")) ?: return null
         val anchors = readAnchors(File(convertedDir, "$hash.anchors")) ?: return null
         val pages = readPages(File(convertedDir, "$hash.pages")) ?: return null
@@ -75,7 +108,7 @@ internal class ConvertedBookStore(private val convertedDir: File) {
             if (!tmpTxt.renameTo(target)) {
                 throw IOException("压平缓存写入失败: ${target.absolutePath}")
             }
-            return FlattenedBook(
+            val stored = FlattenedBook(
                 target,
                 content.chapters,
                 fresh = true,
@@ -83,9 +116,18 @@ internal class ConvertedBookStore(private val convertedDir: File) {
                 pageLabels = content.pageLabels,
                 spans = content.spans,
             )
+            // 备忘里存 fresh=false 的等价实例：fresh 只表示「本次调用刚压平」，
+            // 后续 cached() 命中不能谎报为刚压平（否则会重复回填章节）。
+            memoize(hash, stored.copy(fresh = false))
+            return stored
         } finally {
             tmpTxt.delete()
         }
+    }
+
+    @Synchronized
+    private fun memoize(hash: String, book: FlattenedBook) {
+        memo[hash] = book
     }
 
     /** 内嵌图片目录：`<hash>.images/`。 */
@@ -279,5 +321,11 @@ internal class ConvertedBookStore(private val convertedDir: File) {
          * v2：ruby/表格/列表结构化；v3：img 占位块（U+FFFC）+ 样式/链接/图片 span 记录。
          */
         const val FLATTEN_VERSION = 3
+
+        /** sidecar 解析结果备忘容量：同一时刻只有一本书在阅读，2 条足够。 */
+        const val MEMO_SIZE = 2
+
+        /** 压平产物必须齐备的 sidecar 后缀（缺任何一个都视为缓存失效）。 */
+        val SIDECAR_SUFFIXES = listOf(".toc", ".anchors", ".pages", ".spans", ".version")
     }
 }

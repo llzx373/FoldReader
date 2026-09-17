@@ -52,6 +52,10 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE id = :bookId")
     suspend fun getById(bookId: Long): BookEntity?
 
+    /** 批量取：删书时按 id 逐个查询是 N+1，一次 IN 查询即可。 */
+    @Query("SELECT * FROM books WHERE id IN (:bookIds)")
+    suspend fun getByIds(bookIds: List<Long>): List<BookEntity>
+
     @Query("SELECT * FROM books WHERE id = :bookId")
     fun observeById(bookId: Long): Flow<BookEntity?>
 

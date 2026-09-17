@@ -16,7 +16,8 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.NO_ACTION,
         ),
     ],
-    indices = [Index("bookId")],
+    // 查询是 WHERE bookId = ? ORDER BY createdAt DESC，复合索引让排序走索引而非临时 B-tree
+    indices = [Index("bookId", "createdAt")],
 )
 data class BookmarkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

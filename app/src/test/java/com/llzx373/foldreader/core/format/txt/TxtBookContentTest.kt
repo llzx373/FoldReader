@@ -2,13 +2,38 @@ package com.llzx373.foldreader.core.format.txt
 
 import java.io.File
 import java.io.RandomAccessFile
+import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.nio.channels.SeekableByteChannel
 import java.nio.charset.Charset
 import java.nio.file.StandardOpenOption
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+/** 统计底层 channel 的 read 次数，用来验证块解码缓存确实省掉了重复 IO。 */
+private class CountingChannel(private val delegate: SeekableByteChannel) : SeekableByteChannel {
+    var reads = 0
+        private set
+
+    override fun read(dst: ByteBuffer): Int {
+        reads++
+        return delegate.read(dst)
+    }
+
+    override fun write(src: ByteBuffer): Int = delegate.write(src)
+    override fun position(): Long = delegate.position()
+    override fun position(newPosition: Long): SeekableByteChannel {
+        delegate.position(newPosition)
+        return this
+    }
+
+    override fun size(): Long = delegate.size()
+    override fun truncate(size: Long): SeekableByteChannel = delegate.truncate(size)
+    override fun isOpen(): Boolean = delegate.isOpen()
+    override fun close() = delegate.close()
+}
 
 class TxtBookContentTest {
 
@@ -183,5 +208,88 @@ class TxtBookContentTest {
         )
 
         assertEquals(text, content.read(0L..text.length - 1L))
+    }
+
+    // ---- 块解码缓存 ----
+
+    private fun countingContent(
+        text: String,
+        charset: Charset,
+        blockChars: Int = 16,
+    ): Pair<TxtBookContent, CountingChannel> {
+        val file = File.createTempFile("foldreader-blockcache", ".txt")
+        file.deleteOnExit()
+        file.writeBytes(text.toByteArray(charset))
+        val index = TxtIndexer.index(
+            channel = FileChannel.open(file.toPath(), StandardOpenOption.READ),
+            charset = charset,
+            blockChars = blockChars,
+        )
+        val channel = CountingChannel(RandomAccessFile(file, "r").channel)
+        return TxtBookContent(channel, charset, index.offsetIndex) to channel
+    }
+
+    @Test
+    fun `重复读取同一区间只解码一次`() = runBlocking {
+        val text = "第一章 块缓存测试内容。".repeat(60)
+        val (content, channel) = countingContent(text, gbk)
+
+        val first = content.read(0L..15L)
+        val readsAfterFirst = channel.reads
+        val second = content.read(0L..15L)
+
+        assertEquals(first, second)
+        assertEquals(text.substring(0, 16), second)
+        // 第二次完全命中缓存：不再触碰 channel
+        assertEquals(readsAfterFirst, channel.reads)
+        assertTrue(channel.reads > 0)
+    }
+
+    @Test
+    fun `回访已读区间不产生新的 channel 读取`() = runBlocking {
+        val text = "第二章 相邻块与回访测试。".repeat(80)
+        val (content, channel) = countingContent(text, gbk)
+
+        content.read(0L..15L)
+        content.read(16L..31L)
+        content.read(32L..47L)
+        val readsAfterSweep = channel.reads
+
+        // 回访前三个区间：全部命中缓存
+        assertEquals(text.substring(0, 16), content.read(0L..15L))
+        assertEquals(text.substring(16, 32), content.read(16L..31L))
+        assertEquals(text.substring(32, 48), content.read(32L..47L))
+        assertEquals(readsAfterSweep, channel.reads)
+    }
+
+    @Test
+    fun `缓存命中与未命中结果逐字符一致`() = runBlocking {
+        val text = "第三章 乱序读取一致性与多字节字符混排 ABC 123。".repeat(9)
+        val cold = countingContent(text, gbk).first
+        val (warm, _) = countingContent(text, gbk)
+
+        // 先制造一批缓存条目，再乱序回访：结果必须与全新的实例完全一致
+        repeat(6) { i -> warm.read((i * 16).toLong() until (i * 16 + 16).toLong()) }
+        val probes = listOf(0L, 16L, 32L, 48L, 64L, 80L, 11L, 33L, 7L)
+        for (start in probes) {
+            val end = (start + 15).coerceAtMost(text.length - 1L)
+            assertEquals(cold.read(start..end), warm.read(start..end))
+        }
+    }
+
+    @Test
+    fun `超出容量的区间被淘汰后仍能重新解码`() = runBlocking {
+        val text = "第四章 缓存淘汰测试内容。".repeat(120)
+        val (content, channel) = countingContent(text, gbk, blockChars = 16)
+        val lastStart = (text.length - 16).toLong()
+
+        // 连读 12 个互不相同的区间，必然挤掉最早的条目（缓存上限 8）
+        repeat(12) { i -> content.read((i * 16).toLong() until (i * 16 + 16).toLong()) }
+        val readsAfterSweep = channel.reads
+        // 回访最早那个区间：已被淘汰，需要重新解码
+        assertEquals(text.substring(0, 16), content.read(0L..15L))
+        assertTrue("淘汰后应重新读取 channel", channel.reads > readsAfterSweep)
+        // 末尾区间仍然正确
+        assertEquals(text.substring(lastStart.toInt()), content.read(lastStart..text.length - 1L))
     }
 }

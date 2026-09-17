@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class AppContainer(context: Context) {
     val pendingImportUri = MutableStateFlow<Uri?>(null)
@@ -37,11 +38,17 @@ class AppContainer(context: Context) {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     val database: FoldReaderDatabase =
-        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db").build()
+        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db")
+            .addMigrations(com.llzx373.foldreader.core.data.db.MIGRATION_10_11)
+            .build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
     val convertedDir = File(context.filesDir, "converted").apply { mkdirs() }
     /** 封面图片目录（<contentHash>.<ext>），与 converted/ 同生命周期。 */
     val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+    /** 页边界缓存目录（改版式会生成多份文件，删书时按 bookId 清理）。 */
+    val pageBoundsDir = File(context.filesDir, "page_bounds")
+    val pageDiskCache: com.llzx373.foldreader.core.reader.PageDiskCache =
+        com.llzx373.foldreader.core.reader.FilePageDiskCache(pageBoundsDir)
     val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
         bookDao = database.bookDao(),
         progressDao = database.readingProgressDao(),
@@ -51,6 +58,7 @@ class AppContainer(context: Context) {
         sessionDao = database.readingSessionDao(),
         convertedDir = convertedDir,
         coversDir = coversDir,
+        pageDiskCache = pageDiskCache,
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     val fileBrowserRootsStore = FileBrowserRootsStore(context)
@@ -132,9 +140,6 @@ class AppContainer(context: Context) {
         ),
     )
     val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
-    val pageDiskCache = com.llzx373.foldreader.core.reader.FilePageDiskCache(
-        java.io.File(appContext.filesDir, "page_bounds"),
-    )
     val backupManager = com.llzx373.foldreader.core.backup.BackupManager(
         context = appContext,
         bookshelfRepository = bookshelfRepository,
@@ -156,6 +161,20 @@ class AppContainer(context: Context) {
         importBook = importBookUseCase,
         bookshelfRepository = bookshelfRepository,
     )
+
+    /**
+     * 闲时回收页边界缓存：孤儿文件（书已不在书架）与同书过多的版式副本
+     * 都会让 page_bounds/ 只增不减。放 IO 线程，不占冷启动主线程。
+     */
+    private val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    init {
+        maintenanceScope.launch {
+            runCatching {
+                val live = bookshelfRepository.observeBookshelf().first().map { it.id }.toSet()
+                com.llzx373.foldreader.core.reader.PageBoundsGc.sweep(pageBoundsDir, live)
+            }
+        }
+    }
 }
 
 class FoldReaderApplication : Application() {

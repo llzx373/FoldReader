@@ -834,10 +834,10 @@ fun ReaderScreen(
     DisposableEffect(viewModel) {
         val callbacks = object : ComponentCallbacks2 {
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
-            override fun onLowMemory() = viewModel.clearCurlBitmaps()
+            override fun onLowMemory() = viewModel.clearBitmaps()
             override fun onTrimMemory(level: Int) {
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-                    viewModel.clearCurlBitmaps()
+                    viewModel.clearBitmaps()
                 }
             }
         }
@@ -886,8 +886,9 @@ fun ReaderScreen(
         }
     }
 
+    // 普通 HashMap 而非 snapshot state：只在手势命中里读，绘制阶段写 state 会额外调度帧。
     val scrollLineBoxes = remember {
-        androidx.compose.runtime.mutableStateMapOf<Long, List<com.llzx373.foldreader.core.reader.LineBox>>()
+        HashMap<Long, List<com.llzx373.foldreader.core.reader.LineBox>>()
     }
 
     // 滚动模式：内容区坐标 → (行几何, 页内局部坐标)（跨 LazyColumn 项；双栏按列分区）

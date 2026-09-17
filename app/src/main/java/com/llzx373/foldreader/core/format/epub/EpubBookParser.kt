@@ -305,16 +305,12 @@ class EpubBookParser(
             ?: flattened.anchors[target.targetFile]
     }
 
+    /**
+     * 纸书页码来自压平 sidecar：直接走 [ensureFlattened]（channel 采样哈希，命中缓存时不复制文件），
+     * 不要先把整本 EPUB 复制成临时文件再取——打开路径上每次都会调用这里。
+     */
     override suspend fun pageLabels(uri: Uri): List<PageLabel>? = withContext(Dispatchers.IO) {
-        openChannel(uri).use { channel ->
-            val tmp = store.newTempFile(".epub")
-            try {
-                store.copyChannel(channel, tmp)
-                pageLabelsFile(tmp)
-            } finally {
-                tmp.delete()
-            }
-        }
+        ensureFlattened(uri).pageLabels.takeIf { it.isNotEmpty() }
     }
 
     internal fun pageLabelsFile(epub: File): List<PageLabel>? =
@@ -326,15 +322,13 @@ class EpubBookParser(
 
     internal fun textSpansFile(epub: File): List<TextSpan> = ensureFlattenedFile(epub).spans
 
+    /**
+     * 图片文件在压平期就已抽取到 `converted/<hash>.images/`，这里只需算出 contentHash 定位它。
+     * 采样哈希直接读 channel 即可，不要整本复制——每张图都会调用这里。
+     */
     override suspend fun imageFile(uri: Uri, imagePath: String): File? = withContext(Dispatchers.IO) {
         openChannel(uri).use { channel ->
-            val tmp = store.newTempFile(".epub")
-            try {
-                store.copyChannel(channel, tmp)
-                imageFileOf(tmp, imagePath)
-            } finally {
-                tmp.delete()
-            }
+            store.imageFile(store.contentHash(channel), imagePath).takeIf { it.isFile }
         }
     }
 

@@ -24,9 +24,17 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            // R8 全量优化：去虚拟化 / 内联 / 裁剪 / 资源压缩。
+            // 关掉时 release 包的方法数、冷启动与运行期性能都明显劣于 debug 之外的预期。
             optimization {
-                enable = false
+                enable = true
             }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
     // APK 输出文件名与项目目录名一致：FoldReader-debug.apk / FoldReader-release.apk
@@ -41,7 +49,18 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests {
+            // Robolectric 需要合并后的资源与 manifest 才能跑 Android API 用例
+            isIncludeAndroidResources = true
+        }
+    }
 }
+
+// 注意：本项目走 AGP 9 的内置 Kotlin 编译（build/intermediates/built_in_kotlinc），
+// 实测 `composeCompiler {}` 的 stabilityConfigurationFile / metricsDestination 都不会
+// 接到编译任务上（改配置文件不会让 compileDebugKotlin 失效、指标目录也不生成）。
+// 因此稳定性一律用代码里的 @Immutable / @Stable 注解声明，不要依赖这个块。
 
 ksp {
     arg("room.schemaDirectory", "$projectDir/schemas")
@@ -80,6 +99,8 @@ dependencies {
     testImplementation(libs.org.json)
     // JVM 单测用的 XmlPullParser 实现（生产用 android.util.Xml）
     testImplementation(libs.kxml2)
+    // 需要真实 Android API 的单测（Paint 字宽 / BitmapFactory / Room 迁移 / Compose 重组）
+    testImplementation(libs.robolectric)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

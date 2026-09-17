@@ -1,8 +1,10 @@
 package com.llzx373.foldreader.core.reader
 
+import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.io.RandomAccessFile
 
 class PageCache<K, V>(private val maxSize: Int) {
 
@@ -27,7 +29,18 @@ class PageCache<K, V>(private val maxSize: Int) {
 
 interface PageDiskCache {
     fun load(key: PaginatorKey, charCount: Long): LongArray?
+
     fun save(key: PaginatorKey, charCount: Long, bounds: LongArray)
+
+    /**
+     * 增量追加：磁盘上已有 [persistedCount] 条、且头部与 [allBounds] 的前提一致时，
+     * 只把新增的尾部写进去（后台全书分页每 64 页落盘一次，整份重写会退化成 O(n²) 写入）。
+     * 返回 false 表示无法增量，调用方应回落 [save]。
+     */
+    fun append(key: PaginatorKey, charCount: Long, allBounds: LongArray, persistedCount: Int): Boolean
+
+    /** 删除某本书的全部页边界文件：改一次版式就多一份（文件名含版式指纹）。 */
+    fun deleteForBook(bookId: Long)
 }
 
 internal fun LayoutConfig.diskKeyString(): String = listOf(
@@ -40,6 +53,9 @@ internal fun LayoutConfig.diskKeyString(): String = listOf(
  * 页边界索引磁盘缓存：每个 key 一个文件，存各页起始偏移（第一页恒为 0，
  * 页 i 覆盖 [bounds[i], bounds[i+1])，最后一页到 charCount）。
  * 头部含魔数/版本与完整 key 校验，任何不符即弃（删文件返回 null）。
+ *
+ * 头部布局由 [headerBytes] 唯一决定，[save]/[append]/[read] 共用同一份序列化，
+ * 保证增量追加写出的字节与整份写入完全一致。
  */
 class FilePageDiskCache(private val dir: File) : PageDiskCache {
 
@@ -57,16 +73,7 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
         val tmp = File(dir, fileFor(key).name + ".tmp")
         runCatching {
             DataOutputStream(tmp.outputStream().buffered()).use { out ->
-                out.write(MAGIC)
-                out.writeInt(VERSION)
-                out.writeLong(key.bookId)
-                out.writeInt(key.widthPx)
-                out.writeInt(key.heightPx)
-                out.writeFloat(key.density)
-                out.writeFloat(key.scaledDensity)
-                out.writeInt(key.avoidance.oddTopLines)
-                out.writeInt(key.avoidance.evenBottomLines)
-                out.writeUTF(key.config.diskKeyString())
+                out.write(headerBytes(key))
                 out.writeLong(charCount)
                 out.writeInt(bounds.size)
                 bounds.forEach { out.writeLong(it) }
@@ -75,6 +82,64 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
             target.delete()
             tmp.renameTo(target)
         }.onFailure { tmp.delete() }
+    }
+
+    override fun append(
+        key: PaginatorKey,
+        charCount: Long,
+        allBounds: LongArray,
+        persistedCount: Int,
+    ): Boolean {
+        if (allBounds.isEmpty() || allBounds[0] != 0L) return false
+        if (persistedCount <= 0 || persistedCount > allBounds.size) return false
+        val file = fileFor(key)
+        if (!file.isFile) return false
+        val header = headerBytes(key)
+        val countOffset = header.size.toLong() + Long.SIZE_BYTES
+        val dataOffset = countOffset + Int.SIZE_BYTES
+        return runCatching {
+            RandomAccessFile(file, "rw").use { raf ->
+                if (raf.length() < dataOffset) return@use false
+                val onDiskHeader = ByteArray(header.size)
+                raf.seek(0)
+                raf.readFully(onDiskHeader)
+                if (!onDiskHeader.contentEquals(header)) return@use false
+                if (raf.readLong() != charCount) return@use false
+                if (raf.readInt() != persistedCount) return@use false
+                // 校验通过且没有新增：磁盘即最新，无需写
+                if (persistedCount == allBounds.size) return@use true
+                // 顺序讲究：先写数据、再更新条数、最后截断。
+                // 中途崩溃时文件里仍是旧条数，读取方只认条数内的字节，内容依旧自洽。
+                raf.seek(dataOffset + persistedCount * Long.SIZE_BYTES)
+                for (i in persistedCount until allBounds.size) raf.writeLong(allBounds[i])
+                raf.seek(countOffset)
+                raf.writeInt(allBounds.size)
+                raf.setLength(dataOffset + allBounds.size * Long.SIZE_BYTES)
+                true
+            }
+        }.getOrElse { false }
+    }
+
+    override fun deleteForBook(bookId: Long) {
+        dir.listFiles { f -> f.isFile && boundsBookIdOf(f.name) == bookId }?.forEach { it.delete() }
+    }
+
+    /** 头部字节：魔数 / 版本 / 完整 key（书号、几何、开孔规避、排版参数）。 */
+    private fun headerBytes(key: PaginatorKey): ByteArray {
+        val out = ByteArrayOutputStream(HEADER_ESTIMATED_BYTES)
+        DataOutputStream(out).use { d ->
+            d.write(MAGIC)
+            d.writeInt(VERSION)
+            d.writeLong(key.bookId)
+            d.writeInt(key.widthPx)
+            d.writeInt(key.heightPx)
+            d.writeFloat(key.density)
+            d.writeFloat(key.scaledDensity)
+            d.writeInt(key.avoidance.oddTopLines)
+            d.writeInt(key.avoidance.evenBottomLines)
+            d.writeUTF(key.config.diskKeyString())
+        }
+        return out.toByteArray()
     }
 
     private fun read(file: File, key: PaginatorKey, charCount: Long): LongArray? {
@@ -110,11 +175,28 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
                 key.avoidance.oddTopLines, key.avoidance.evenBottomLines,
             ).joinToString("|") + "|" + key.config.diskKeyString()
             ).hashCode()
-        return File(dir, "bounds_${key.bookId}_$hash.bin")
+        return File(dir, "$FILE_PREFIX${key.bookId}_$hash$FILE_SUFFIX")
     }
 
     private companion object {
         val MAGIC = byteArrayOf('F'.code.toByte(), 'R'.code.toByte(), 'P'.code.toByte(), 'B'.code.toByte())
         const val VERSION = 3
+        const val HEADER_ESTIMATED_BYTES = 256
     }
+}
+
+/** 页边界缓存文件名前缀 / 后缀（[PageBoundsGc] 也按它们识别文件）。 */
+internal const val FILE_PREFIX = "bounds_"
+internal const val FILE_SUFFIX = ".bin"
+
+/**
+ * 从 `bounds_<bookId>_<hash>.bin` 解析书号；格式不符返回 null。
+ * 注意版式哈希可能为负，故必须先剥后缀再按第一个下划线切。
+ */
+internal fun boundsBookIdOf(fileName: String): Long? {
+    if (!fileName.startsWith(FILE_PREFIX) || !fileName.endsWith(FILE_SUFFIX)) return null
+    val body = fileName.substring(FILE_PREFIX.length, fileName.length - FILE_SUFFIX.length)
+    val separator = body.indexOf('_')
+    if (separator <= 0) return null
+    return body.substring(0, separator).toLongOrNull()
 }

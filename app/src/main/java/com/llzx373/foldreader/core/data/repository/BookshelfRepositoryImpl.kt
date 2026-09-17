@@ -28,6 +28,8 @@ class BookshelfRepositoryImpl(
     private val convertedDir: java.io.File? = null,
     /** 封面目录；删除书籍时按 coverPath 一并清理。 */
     private val coversDir: java.io.File? = null,
+    /** 页边界缓存；删除书籍时按 bookId 清理（改一次版式就多一份文件，不删则只增不减）。 */
+    private val pageDiskCache: com.llzx373.foldreader.core.reader.PageDiskCache? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -59,8 +61,10 @@ class BookshelfRepositoryImpl(
             bookmarkDao.deleteByBookIds(bookIds)
             annotationDao.deleteByBookIds(bookIds)
         }
+        pageDiskCache?.let { cache -> bookIds.forEach { cache.deleteForBook(it) } }
+        val booksById = bookDao.getByIds(bookIds).associateBy { it.id }
         bookIds.forEach { id ->
-            val book = bookDao.getById(id)
+            val book = booksById[id]
             book?.cleanedFilePath?.let { java.io.File(it).delete() }
             book?.coverPath?.let { java.io.File(it).delete() }
             if (book != null && convertedDir != null && book.contentHash.isNotBlank()) {
@@ -113,8 +117,8 @@ class BookshelfRepositoryImpl(
         }
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
-        chapterDao.deleteForBook(bookId)
-        chapterDao.upsertAll(
+        chapterDao.replaceForBook(
+            bookId,
             chapters.mapIndexed { index, chapter ->
                 ChapterEntity(
                     bookId = bookId,

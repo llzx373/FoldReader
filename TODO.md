@@ -222,6 +222,32 @@
 
 ---
 
+## M5.7 性能专项·第一批（低风险高收益）
+
+> 对标：文本阅读器 = Sublime Text；电子书阅读器 = 静读天下。
+> 详见 `docs/需求与设计说明书.md` 附录「v1.3 性能专项」。每项均配单元测试。
+
+- [x] 渲染层：行几何缓存（键含页实例身份）+ `getTextWidths` 批量取宽 + Paint 按线程复用
+- [x] EPUB 打开路径零拷贝：`pageLabels`/`imageFile` 不再整本复制源文件；压平 sidecar 解析结果进程内备忘（含磁盘失效校验）
+- [x] 搜索：命中批处理按时间/条数节流发布；`SearchScanner` 跳过无收益的 lowercase、上下文复用已读窗口
+- [x] `chapterIndexAt` 改二分（滚动每页 4 次 + 搜索每命中 1 次的调用点全部受益）
+- [x] `TxtBookContent` 块解码缓存 + 解码器/字节缓冲复用
+- [x] 页边界缓存追加式落盘；删书按 bookId 清理 + 闲时 GC（每书保留最近 4 份版式）
+- [x] DB v11：bookmarks/annotations 补复合索引、去除与主键前缀重复的单列索引；`deleteBooks` 批量查询；覆盖式写入包 `@Transaction`
+- [x] `TxtBookParser` 去掉解码回调里的 `runBlocking`（改独立消费者协程）
+- [x] 插图解码固定 RGB_565；`onTrimMemory` 同时清插图与翻页位图缓存
+- [x] 构建：release 开启 R8（`optimization.enable` + minify + 资源压缩）
+- [x] 测试基建：引入 Robolectric（Paint 字宽 / BitmapFactory / 真实 SQLite 迁移 / Compose 用例）
+
+### M5.8 性能专项·第二批（高风险，待第一批验证通过后做）
+- [ ] 滚动模式：拆分单一大 `uiState` 为独立 State，`scrollPages` 改 `SnapshotStateList`，一次批量预取 N 页
+- [ ] 滚动模式：`spansFor` 按偏移二分 + `derivedStateOf`，消除每个 item 全量扫标注
+- [ ] Compose 稳定性：`Page`/`PageLine`/`LineBox`/`ReaderColors`/`LayoutConfig` 加 `@Immutable`（编译器配置不生效，见说明书）
+- [ ] EPUB/FB2 增量压平：首章先出，其余后台续写
+- [ ] 真机验证 release 包（R8 后的 Room 迁移、EPUB 解析、字体加载路径）
+
+---
+
 ## M6+ 格式扩展（后置）
 - [ ] EPUB 解析器实现 `BookParser` 接口（core/format/epub），阅读器/UI 零改动验证
 - [ ] MOBI / 其他格式评估

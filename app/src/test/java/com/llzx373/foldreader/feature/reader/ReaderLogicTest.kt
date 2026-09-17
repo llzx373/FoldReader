@@ -293,4 +293,53 @@ class ReaderLogicTest {
         val zero = cameraAvoidanceLines(listOf(huge), leftPage, rightPage, lineHeightPx = 0f)
         assertEquals(PageAvoidance(), zero)
     }
+
+    /**
+     * chapterIndexAt 改二分后必须与原线性实现完全等价：
+     * 它在滚动路径上是主线程热点（每页 4 次），在搜索分组里是每个命中 1 次。
+     */
+    @Test
+    fun `chapterIndexAt 与线性实现逐点等价`() {
+        fun linear(list: List<Chapter>, offset: Long): Int =
+            list.indexOfLast { offset >= it.charStart }.coerceAtLeast(0)
+
+        val cases = listOf(
+            emptyList(),
+            chapters,
+            listOf(Chapter("唯一", 0L, 10L)),
+            listOf(Chapter("首章不从 0 开始", 500L, 900L)),
+        )
+        for (list in cases) {
+            val probe = listOf(-1000L, -1L, 0L, 1L, 99L, 100L, 101L, 249L, 250L, 399L, 400L, 10_000L)
+            for (offset in probe) {
+                assertEquals(
+                    "list=${list.map { it.charStart }} offset=$offset",
+                    linear(list, offset),
+                    chapterIndexAt(list, offset),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `chapterIndexAt 随机用例与线性实现等价`() {
+        fun linear(list: List<Chapter>, offset: Long): Int =
+            list.indexOfLast { offset >= it.charStart }.coerceAtLeast(0)
+
+        val random = java.util.Random(20240917)
+        repeat(50) {
+            var start = random.nextInt(500).toLong()
+            val list = ArrayList<Chapter>()
+            repeat(random.nextInt(40)) {
+                val end = start + random.nextInt(400) + 1
+                list += Chapter("c${list.size}", start, end)
+                start = end + random.nextInt(50)
+            }
+            val probeCount = 200
+            repeat(probeCount) {
+                val offset = random.nextInt((start + 100).toInt().coerceAtLeast(1)).toLong()
+                assertEquals(linear(list, offset), chapterIndexAt(list, offset))
+            }
+        }
+    }
 }

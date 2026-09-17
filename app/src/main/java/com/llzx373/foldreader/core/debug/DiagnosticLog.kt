@@ -60,6 +60,14 @@ object DiagnosticLog {
     private var writer: BufferedWriter? = null
     private var started = false
 
+    /** 有日志才排一次落盘：空闲时不再每 500ms 唤醒一次调度线程。 */
+    private val flusher = FlushScheduler(
+        schedule = { task ->
+            runCatching { executor.schedule(task, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS) }.isSuccess
+        },
+        flush = { runCatching { flush() } },
+    )
+
     @Volatile
     var isEnabled: Boolean = false
         private set
@@ -73,12 +81,6 @@ object DiagnosticLog {
         prefs = store
         isEnabled = store.getBoolean(KEY_ENABLED, BuildConfig.DEBUG)
         installCrashHandler()
-        executor.scheduleWithFixedDelay(
-            { runCatching { flush() } },
-            FLUSH_INTERVAL_MS,
-            FLUSH_INTERVAL_MS,
-            TimeUnit.MILLISECONDS,
-        )
         line(
             "==== 启动 ${BuildConfig.VERSION_NAME} debug=${BuildConfig.DEBUG} " +
                 "记录=${if (isEnabled) "开" else "关"} ====",
@@ -104,13 +106,15 @@ object DiagnosticLog {
     /** ReturnTrace 的每条输出都会进这里 */
     fun line(message: String) {
         val stamped = "${stamp()} $message"
-        synchronized(lock) {
+        val queued = synchronized(lock) {
             recent.addLast(stamped)
             while (recent.size > RECENT_LINES) recent.removeFirst()
-            if (!isEnabled) return
+            if (!isEnabled) return@synchronized false
             pending.addLast(stamped)
             while (pending.size > MAX_BUFFERED_LINES) pending.removeFirst()
+            true
         }
+        if (queued) flusher.onData()
     }
 
     /**

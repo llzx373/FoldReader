@@ -18,11 +18,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 class TxtBookParser(
@@ -142,10 +142,14 @@ class TxtBookParser(
         )
         buildScope.launch {
             var indexChannel: SeekableByteChannel? = null
+            // 分段落盘交给独立消费者协程：TxtIndexer 的解码循环不是 suspend 的，
+            // 回调里没有挂起点，直接写库只能 runBlocking 占住一个 IO 线程。
+            val persistQueue = Channel<List<Pair<Int, Long>>>(Channel.UNLIMITED)
+            val persistJob = launch { for (pending in persistQueue) store.appendBlocks(key, pending) }
             try {
                 indexChannel = UriChannels.open(context, uri)
                 store.begin(key)
-                val batch = ArrayList<Pair<Int, Long>>(PERSIST_BATCH_BLOCKS)
+                var batch = ArrayList<Pair<Int, Long>>(PERSIST_BATCH_BLOCKS)
                 val chapters = TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules) { chunkIndex, startByteOffset, endByteOffset ->
                     if (!isActive) throw CancellationException()
                     progress.value = if (fileLength > 0) {
@@ -155,17 +159,20 @@ class TxtBookParser(
                     }
                     batch += chunkIndex to startByteOffset
                     if (batch.size >= PERSIST_BATCH_BLOCKS) {
-                        val pending = batch.toList()
-                        batch.clear()
-                        runBlocking { store.appendBlocks(key, pending) }
+                        persistQueue.trySend(batch)
+                        batch = ArrayList(PERSIST_BATCH_BLOCKS)
                     }
                 }
-                if (batch.isNotEmpty()) store.appendBlocks(key, batch.toList())
+                if (batch.isNotEmpty()) persistQueue.trySend(batch)
+                persistQueue.close()
+                persistJob.join()
                 store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
                 progress.value = 1f
                 runCatching { onChaptersIndexed(bookId, chapters) }
                 runCatching { onBookIndexed(bookId, shared.totalChars) }
             } catch (t: Throwable) {
+                persistQueue.close()
+                persistJob.cancel()
                 shared.abort(t)
                 if (t !is CancellationException) runCatching { store.invalidate(key) }
                 throw t

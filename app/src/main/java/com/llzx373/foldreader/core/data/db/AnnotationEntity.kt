@@ -16,7 +16,8 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.NO_ACTION,
         ),
     ],
-    indices = [Index("bookId")],
+    // 查询是 WHERE bookId = ? ORDER BY startCharOffset ASC，复合索引让排序走索引
+    indices = [Index("bookId", "startCharOffset")],
 )
 data class AnnotationEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

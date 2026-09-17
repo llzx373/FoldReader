@@ -223,8 +223,27 @@ fun chapterProgressText(index: Int, count: Int, inChapter: Float): String? {
     return if (inChapter >= 0f) "$base · ${formatPercent(inChapter)}" else base
 }
 
-fun chapterIndexAt(chapters: List<Chapter>, offset: Long): Int =
-    chapters.indexOfLast { offset >= it.charStart }.coerceAtLeast(0)
+/**
+ * [offset] 所属章节序号：取最后一个 `charStart <= offset` 的章节（章节按 charStart 升序）。
+ * 二分查找：原实现用 `indexOfLast` 线性扫，滚动时每翻一页要调 4 次、搜索分组时每个命中调 1 次，
+ * 章节多时是主线程热点。offset 落在首章之前时返回 0（与原 `coerceAtLeast(0)` 一致）。
+ */
+fun chapterIndexAt(chapters: List<Chapter>, offset: Long): Int {
+    if (chapters.isEmpty()) return 0
+    var lo = 0
+    var hi = chapters.lastIndex
+    var found = 0
+    while (lo <= hi) {
+        val mid = (lo + hi) ushr 1
+        if (chapters[mid].charStart <= offset) {
+            found = mid
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    return found
+}
 
 fun progressPercentOf(offset: Long, totalChars: Long): Float =
     if (totalChars <= 0L) 0f else (offset.toFloat() / totalChars).coerceIn(0f, 1f)

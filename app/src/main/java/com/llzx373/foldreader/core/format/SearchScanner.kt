@@ -3,6 +3,13 @@ package com.llzx373.foldreader.core.format
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
+/**
+ * 查询词是否含大小写敏感字符。为 false（纯中文/日文/数字/符号）时
+ * 小写化窗口不会改变匹配结果，可以整段跳过这次字符串拷贝。
+ */
+internal fun needsCaseFolding(query: String): Boolean =
+    query.any { it.lowercaseChar() != it.uppercaseChar() }
+
 /** 一次搜索命中：[offset] 为命中起始字符偏移；[context] 为 ±contextChars 摘要。 */
 data class SearchHit(
     val offset: Long,
@@ -28,20 +35,27 @@ suspend fun searchContent(
     val needle = query.trim().lowercase()
     val total = content.charCount
     if (needle.isEmpty() || total <= 0L) return
+    // 查询词不含大小写敏感字符（纯中文/数字/符号）时小写化窗口毫无收益，白付一次整窗口拷贝
+    val foldCase = needsCaseFolding(needle)
     val step = (windowChars - needle.length + 1).coerceAtLeast(1)
     var windowStart = 0L
     while (windowStart < total) {
         currentCoroutineContext().ensureActive()
         val windowEnd = minOf(windowStart + windowChars, total)
         val window = content.read(windowStart until windowEnd)
-        val hay = window.lowercase()
+        val hay = if (foldCase) window.lowercase() else window
         val ownedEnd = minOf(step.toLong(), windowEnd - windowStart)
         var idx = hay.indexOf(needle)
         while (idx >= 0 && idx < ownedEnd) {
             val abs = windowStart + idx
             val contextStart = maxOf(0L, abs - contextChars)
             val contextEnd = minOf(total, abs + needle.length + contextChars)
-            val context = content.read(contextStart until contextEnd)
+            // 上下文通常就落在本窗口内：直接用已读到的文本，省掉一次 seek + 整块解码
+            val context = if (contextStart >= windowStart && contextEnd <= windowEnd) {
+                window.substring((contextStart - windowStart).toInt(), (contextEnd - windowStart).toInt())
+            } else {
+                content.read(contextStart until contextEnd)
+            }
             onHit(
                 SearchHit(
                     offset = abs,

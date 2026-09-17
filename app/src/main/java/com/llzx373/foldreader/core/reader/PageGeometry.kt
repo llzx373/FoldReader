@@ -36,6 +36,8 @@ data class RangeSegment(
 /**
  * 逐行布局，复刻 PageView 的排版：段首缩进、段间距、两端对齐附加字距。
  * [measure] 为字符串宽度测量（px）。
+ * [fillCharWidths] 为批量逐字宽度填充（一次调用填满整行，如 `Paint.getTextWidths`）；
+ * 为 null 时退回逐字 [measure]（单测与无 Paint 场景）。
  */
 fun buildLineBoxes(
     page: Page,
@@ -47,6 +49,7 @@ fun buildLineBoxes(
     textWidthPx: Float,
     justify: Boolean,
     measure: (String) -> Float,
+    fillCharWidths: ((CharSequence, FloatArray) -> Unit)? = null,
 ): List<LineBox> {
     val boxes = ArrayList<LineBox>(page.lines.size)
     var yTop = topPadPx
@@ -55,7 +58,12 @@ fun buildLineBoxes(
         // 图片行用缩放后实际行高；文本行恒为 lineHeightPx（纯文本路径逐像素不变）
         val effectiveLineHeightPx = line.heightPx ?: lineHeightPx
         val x0 = leftPadPx + if (line.isParagraphStart && !hasLeadingIndent(line.text)) indentPx else 0f
-        val widths = FloatArray(line.text.length) { i -> measure(line.text[i].toString()) }
+        val widths = FloatArray(line.text.length)
+        if (fillCharWidths != null) {
+            fillCharWidths(line.text, widths)
+        } else {
+            for (i in line.text.indices) widths[i] = measure(line.text[i].toString())
+        }
         val gap = if (justify && !line.isParagraphEnd && line.text.length > 1) {
             val natural = measure(line.text)
             // 上限防御：绘制宽度与分页宽度错配（版式切换窗口期）时字距不会爆炸

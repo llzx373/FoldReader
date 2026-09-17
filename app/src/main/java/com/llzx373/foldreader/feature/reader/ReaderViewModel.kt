@@ -34,6 +34,7 @@ import com.llzx373.foldreader.core.reader.Paginator
 import com.llzx373.foldreader.core.reader.PaginatorKey
 import com.llzx373.foldreader.core.reader.PaginatorStore
 import com.llzx373.foldreader.core.reader.StaticLayoutTextMeasurer
+import com.llzx373.foldreader.core.reader.decodeSampledImage
 import com.llzx373.foldreader.core.reader.renderSpreadToBitmap
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
 import com.llzx373.foldreader.core.reader.sliceSpansForLine
@@ -295,18 +296,40 @@ class ReaderViewModel(
             totalChars = source.charCount,
         )
         searchJob = viewModelScope.launch {
+            // 命中累积在批处理器里，按时间/条数节流发布：逐条 update 会让每个命中
+            // 都拷贝一整份命中列表（O(n²)）并发一次 StateFlow，命中上万条时 UI 直接卡死。
+            val batcher = SearchHitBatcher()
+            var scanned = 0L
             com.llzx373.foldreader.core.format.searchContent(
                 content = source,
                 query = query,
                 onHit = { hit ->
-                    _searchState.update { it.copy(hits = it.hits + hit) }
+                    val now = System.currentTimeMillis()
+                    if (batcher.onHit(hit, now)) {
+                        batcher.onPublished(now)
+                        publishSearch(batcher.hits, scanned)
+                    }
                 },
-                onProgress = { scanned ->
-                    _searchState.update { it.copy(scannedChars = scanned) }
+                onProgress = { chars ->
+                    scanned = chars
+                    val now = System.currentTimeMillis()
+                    if (batcher.onProgress(now)) {
+                        batcher.onPublished(now)
+                        publishSearch(batcher.hits, scanned)
+                    }
                 },
             )
+            publishSearch(batcher.hits, scanned)
             _searchState.update { it.copy(running = false) }
         }
+    }
+
+    private fun publishSearch(
+        hits: List<com.llzx373.foldreader.core.format.SearchHit>,
+        scanned: Long,
+    ) {
+        val snapshot = hits.toList()
+        _searchState.update { it.copy(hits = snapshot, scannedChars = scanned) }
     }
 
     fun cancelSearch() {
@@ -1037,23 +1060,15 @@ class ReaderViewModel(
             val targetH = (line.heightPx ?: 0f).toInt().coerceAtLeast(64)
             val targetW = lastPageWidthPx.takeIf { it > 0 } ?: (targetH * 3)
             val bitmap = withContext(Dispatchers.IO) {
-                runCatching { decodeSampled(file, targetW, targetH) }.getOrNull()
+                runCatching { decodeSampledImage(file, targetW, targetH) }.getOrNull()
             } ?: continue
             imageBitmapCache.put(path, bitmap)
         }
     }
 
-    /** 按目标尺寸降采样解码（inSampleSize 2 的幂，解码后不小于目标）。 */
-    private fun decodeSampled(file: java.io.File, targetW: Int, targetH: Int): Bitmap? {
-        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= targetW && bounds.outHeight / (sample * 2) >= targetH) {
-            sample *= 2
-        }
-        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-        return android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
+    /** 系统内存紧张时清空插图位图缓存；未命中的行回落占位灰框，之后按需重新解码。 */
+    fun clearImageBitmaps() {
+        imageBitmapCache.evictAll()
     }
 
     private suspend fun currentSpreadFrom(anchor: Long): PageSpread? {
@@ -1212,8 +1227,14 @@ class ReaderViewModel(
         }
     }
 
-    /** 系统内存紧张（onTrimMemory）时清空翻页位图缓存，后续翻页现场重渲染。 */
-    fun clearCurlBitmaps() = curlBitmapCache.clear()
+    /**
+     * 系统内存紧张（onTrimMemory）时清空两类位图缓存：翻页离屏位图与插图位图，
+     * 后续翻页现场重渲染、未命中的图片行先画占位灰框再按需解码。
+     */
+    fun clearBitmaps() {
+        curlBitmapCache.clear()
+        clearImageBitmaps()
+    }
 
     fun setDualPageMode(mode: DualPageMode) {
         viewModelScope.launch {

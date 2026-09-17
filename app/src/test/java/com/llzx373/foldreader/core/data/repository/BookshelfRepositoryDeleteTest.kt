@@ -28,6 +28,7 @@ class BookshelfRepositoryDeleteTest {
     private lateinit var progressDao: FakeProgressDao
     private lateinit var bookmarkDao: FakeBookmarkDao
     private lateinit var annotationDao: FakeAnnotationDao
+    private lateinit var pageDiskCache: RecordingPageDiskCache
     private lateinit var repository: BookshelfRepository
 
     @Before
@@ -36,6 +37,7 @@ class BookshelfRepositoryDeleteTest {
         progressDao = FakeProgressDao()
         bookmarkDao = FakeBookmarkDao()
         annotationDao = FakeAnnotationDao()
+        pageDiskCache = RecordingPageDiskCache()
         repository = BookshelfRepositoryImpl(
             bookDao = bookDao,
             progressDao = progressDao,
@@ -43,6 +45,7 @@ class BookshelfRepositoryDeleteTest {
             bookmarkDao = bookmarkDao,
             annotationDao = annotationDao,
             sessionDao = FakeSessionDao(),
+            pageDiskCache = pageDiskCache,
         )
         bookDao.books += book(1)
         bookDao.books += book(2)
@@ -94,6 +97,22 @@ class BookshelfRepositoryDeleteTest {
         assertTrue(annotationDao.rows.isEmpty())
     }
 
+    @Test
+    fun `删除书籍时一并清理该书的页边界缓存`() = runBlocking {
+        repository.deleteBooks(listOf(1L, 2L))
+
+        // 改一次版式就多一份 bounds 文件，不按 bookId 清理则 page_bounds/ 只增不减
+        assertEquals(listOf(1L, 2L), pageDiskCache.deletedBooks)
+    }
+
+    @Test
+    fun `保留本地数据时仍清理页边界缓存`() = runBlocking {
+        // 页边界只是分页加速缓存，与「保留本地进度/标注」无关，删书就该回收
+        repository.deleteBooks(listOf(1L), deleteLocalData = false)
+
+        assertEquals(listOf(1L), pageDiskCache.deletedBooks)
+    }
+
     private fun book(id: Long) = BookEntity(
         id = id,
         title = "书$id",
@@ -130,6 +149,8 @@ class BookshelfRepositoryDeleteTest {
             books.replaceAll { if (it.groupName == groupName) it.copy(groupName = null) else it }
         }
         override suspend fun getById(bookId: Long): BookEntity? = books.find { it.id == bookId }
+        override suspend fun getByIds(bookIds: List<Long>): List<BookEntity> =
+            books.filter { it.id in bookIds }
         override fun observeById(bookId: Long): Flow<BookEntity?> = flowOf(books.find { it.id == bookId })
         override suspend fun updateEncoding(bookId: Long, encoding: String) {
             books.replaceAll { if (it.id == bookId) it.copy(encoding = encoding) else it }
@@ -198,6 +219,28 @@ class BookshelfRepositoryDeleteTest {
         }
         override suspend fun deleteByBookIds(bookIds: List<Long>) {
             rows.removeAll { it.bookId in bookIds }
+        }
+    }
+
+    private class RecordingPageDiskCache : com.llzx373.foldreader.core.reader.PageDiskCache {
+        val deletedBooks = mutableListOf<Long>()
+
+        override fun load(key: com.llzx373.foldreader.core.reader.PaginatorKey, charCount: Long): LongArray? = null
+        override fun save(
+            key: com.llzx373.foldreader.core.reader.PaginatorKey,
+            charCount: Long,
+            bounds: LongArray,
+        ) = Unit
+
+        override fun append(
+            key: com.llzx373.foldreader.core.reader.PaginatorKey,
+            charCount: Long,
+            allBounds: LongArray,
+            persistedCount: Int,
+        ): Boolean = false
+
+        override fun deleteForBook(bookId: Long) {
+            deletedBooks += bookId
         }
     }
 
