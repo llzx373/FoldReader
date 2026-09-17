@@ -29,6 +29,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -345,6 +346,10 @@ fun ReaderScreen(
     var simAnchorX by remember { mutableFloatStateOf(0f) }
     var simGrabX by remember { mutableFloatStateOf(0f) }
     var simStartY by remember { mutableFloatStateOf(-1f) }
+
+    /** 单页卷曲：折痕方向（由起手方向决定）与起手点（跟手锚定用）。 */
+    var simCurlDir by remember { mutableStateOf(Offset(1f, 0f)) }
+    var simCurlGrab by remember { mutableStateOf(Offset.Zero) }
     var simFrontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var simBackBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var simAnimJob by remember { mutableStateOf<Job?>(null) }
@@ -389,10 +394,7 @@ fun ReaderScreen(
 
     var autoScrollY by remember { mutableStateOf(0f) }
 
-    /** 单页铰链纸张（绕页左缘轴，只走前半程；与位图渲染同一坐标系：contentRect 相对）。 */
-    fun currentSingleSheet(): HingeSheet = singleHingeSheet(contentRect.width)
-
-    /** 双页铰链纸张（书脊轴心/缝宽/翻向）。 */
+    /** 双页铰链纸张（书脊轴心/缝宽/翻向）。单页已改用卷曲几何，见 [singleCurlFrame]。 */
     fun currentHingeSheet(forward: Boolean): HingeSheet = hingeSheetFor(
         forward = forward,
         pageWidthPx = spreadPageWidthPx,
@@ -401,12 +403,19 @@ fun ReaderScreen(
         rightInsetPx = rightInsetPx,
     )
 
-    /** 当前模式的铰链纸张。 */
-    fun simSheet(forward: Boolean): HingeSheet =
-        if (spreadDual) currentHingeSheet(forward) else currentSingleSheet()
+    /** 单页卷曲的叶片坐标系：整页一张纸，装订边贴在页左缘（覆盖层局部坐标）。 */
+    fun singleCurlFrame(): CurlFrame =
+        CurlFrame(originX = 0f, side = 1f, width = contentRect.width, height = contentRect.height)
 
-    /** 进度域上限：双页走整程到 1，单页只走前半程到 0.5（垂直位即完成）。 */
-    fun simMaxProgress(): Float = if (spreadDual) 1f else 0.5f
+    /** 单页卷曲方向：前进从右往左剥，后退从左往右剥。 */
+    fun curlDir(forward: Boolean): Offset =
+        if (forward) Offset(1f, 0f) else Offset(-1f, 0f)
+
+    /** 当前模式的铰链纸张。 */
+    fun simSheet(forward: Boolean): HingeSheet = currentHingeSheet(forward)
+
+    /** 进度域上限：卷曲与铰链都走整程 0..1。 */
+    fun simMaxProgress(): Float = 1f
 
     fun clearSimState() {
         simTarget = null
@@ -416,6 +425,8 @@ fun ReaderScreen(
         simAnchorX = 0f
         simGrabX = 0f
         simStartY = -1f
+        simCurlDir = Offset(1f, 0f)
+        simCurlGrab = Offset.Zero
     }
 
     /** 打断进行中的脚本翻页动画（点击翻页/松手收尾），状态保留给接管方或调用方清理。 */
@@ -442,13 +453,8 @@ fun ReaderScreen(
         scripted: Boolean,
         onComplete: (() -> Unit)? = null,
     ) {
-        // 双页：完成→1、取消→0；单页只走前半程：前进完成→0.5/取消→0，
-        // 后退完成→0/取消→0.5（后退的静止态是垂直位，纸张尚未落下）
-        val endProgress = if (spreadDual) {
-            if (completing) 1f else 0f
-        } else {
-            if (completing == forward) 0.5f else 0f
-        }
+        // 完成→1、取消→0；单页卷曲同样走整程（前进从右剥、后退从左剥，方向由 curlDir 决定）
+        val endProgress = if (completing) 1f else 0f
         simSettling = true
         simCompleting = completing
         val token = ++simAnimToken
@@ -515,12 +521,11 @@ fun ReaderScreen(
                         ?.let { (it.y - contentRect.top).coerceIn(0f, pageSize.height) }
                         ?: (pageSize.height * 0.5f)
                     simStartY = startY
-                    // 单页后退从垂直位（p=0.5）落回 0；其余都从 0 起
-                    val startP = if (!spreadDual && !forward) 0.5f else 0f
-                    simProgress = startP
+                    simCurlDir = curlDir(forward)
+                    simProgress = 0f
                     launchSimAnim(
                         target, forward,
-                        completing = true, fromProgress = startP,
+                        completing = true, fromProgress = 0f,
                         scripted = true,
                     )
                     return@launch
@@ -1069,8 +1074,10 @@ fun ReaderScreen(
                     onDragCancel = { selection = null },
                 )
             }
-            .pointerInput(scrollMode, effectiveMode, prefs.swipeGestureEnabled, selection != null) {
+            .pointerInput(scrollMode, effectiveMode, prefs.swipeGestureEnabled, selection != null, spreadDual) {
                 if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
+                // 单页仿真改由下面"任意方向拖拽"那一路接管
+                if (effectiveMode == PageTurnMode.SIMULATION && !spreadDual) return@pointerInput
                 var dragStartX = 0f
                 var dragged = 0f
                 var simFetchJob: kotlinx.coroutines.Job? = null
@@ -1137,17 +1144,18 @@ fun ReaderScreen(
                                         autoScrollY = 0f
                                         simFrontBitmap = front
                                         simBackBitmap = back
-                                        // 起手锚定：自由边从纸张外缘出发，随手指相对位移
-                                        // 移动；中途换向时锚定当前手指，避免画面跳变。
-                                        // 单页后退从垂直位（p=0.5）起手，自由边在轴心处
+                                        // 起手锚定：双页铰链的自由边从纸张外缘出发、随手指相对
+                                        // 位移移动，中途换向时锚定当前手指避免跳变。
+                                        // 单页卷曲的折痕直接跟手，不需要锚定量。
                                         val wasActive = simTarget != null
                                         simTarget = target
                                         simForward = forward
-                                        val grabX = if (wasActive) simFinger.x else simDragOrigin.x
-                                        val sheet = simSheet(forward)
-                                        val baseP = if (!spreadDual && !forward) 0.5f else 0f
-                                        simAnchorX = hingeFreeEdgeX(sheet, baseP) - grabX
-                                        simGrabX = grabX
+                                        if (spreadDual) {
+                                            val grabX = if (wasActive) simFinger.x else simDragOrigin.x
+                                            val sheet = simSheet(forward)
+                                            simAnchorX = hingeFreeEdgeX(sheet, 0f) - grabX
+                                            simGrabX = grabX
+                                        }
                                         simStartY = simDragOrigin.y
                                     } else if (simFetchJob == null) {
                                         // 位图缺失时现场渲染，就绪前本次拖拽按普通滑动翻页处理
@@ -1161,21 +1169,28 @@ fun ReaderScreen(
                                     }
                                 }
                                 if (simTarget == target) {
-                                    val sheet = simSheet(simForward)
-                                    // 跟手：锚定量在翻向行程前 ~35% 内衰减到 0，
-                                    // 自由边平滑追上手指后精确贴在触点下
-                                    val traveled = if (simForward) {
-                                        simGrabX - simFinger.x
+                                    simProgress = if (spreadDual) {
+                                        val sheet = simSheet(simForward)
+                                        // 跟手：锚定量在翻向行程前 ~35% 内衰减到 0，
+                                        // 自由边平滑追上手指后精确贴在触点下
+                                        val traveled = if (simForward) {
+                                            simGrabX - simFinger.x
+                                        } else {
+                                            simFinger.x - simGrabX
+                                        }
+                                        hingeProgressFor(
+                                            fingerX = simFinger.x + hingeCatchUpAnchor(
+                                                simAnchorX, traveled, sheet.reach,
+                                            ),
+                                            sheet = sheet,
+                                            maxProgress = 1f,
+                                        )
                                     } else {
-                                        simFinger.x - simGrabX
+                                        // 卷曲：折痕精确跟在触点下
+                                        curlProgressFor(
+                                            singleCurlFrame(), curlDir(simForward), simFinger,
+                                        )
                                     }
-                                    simProgress = hingeProgressFor(
-                                        fingerX = simFinger.x + hingeCatchUpAnchor(
-                                            simAnchorX, traveled, sheet.reach,
-                                        ),
-                                        sheet = sheet,
-                                        maxProgress = simMaxProgress(),
-                                    )
                                 }
                             } else if (simFetchJob == null) {
                                 // 预取缺失时现场取一页兜底，避免整个手势被吞掉
@@ -1207,13 +1222,8 @@ fun ReaderScreen(
                                     0f
                                 }
                                 val directed = if (simForward) -velocity else velocity
-                                // 阈值按"完成度"判定并归一化：双页=p；单页前进=p/0.5；
-                                // 单页后退从垂直位起手，完成度随 p 减小而增大
-                                val completionFrac = when {
-                                    spreadDual -> simProgress
-                                    simForward -> simProgress / 0.5f
-                                    else -> 1f - simProgress / 0.5f
-                                }
+                                // 完成度 = 进度：卷曲与铰链都走整程 0..1，方向由 simForward 决定
+                                val completionFrac = simProgress
                                 val outcome = decideTurnOutcome(completionFrac, directed)
                                 launchSimAnim(
                                     target = sim,
@@ -1238,6 +1248,149 @@ fun ReaderScreen(
                         dragged = 0f
                         simFetchJob = null
                         simFetched = null
+                    },
+                )
+            }
+            // 单页仿真的任意方向拖拽：从任意位置、任意角度抓起，折痕垂直于拖动方向。
+            // 与水平拖拽那一路互斥（上面已提前 return），所以只会有一路生效。
+            .pointerInput(
+                scrollMode,
+                effectiveMode,
+                prefs.swipeGestureEnabled,
+                selection != null,
+                spreadDual,
+            ) {
+                if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
+                if (effectiveMode != PageTurnMode.SIMULATION || spreadDual) return@pointerInput
+
+                var grabAt = 0L
+                var started = false
+                var forward = true
+                var dir = Offset(1f, 0f)
+                var resumed = false
+                var resumeAt = Offset.Zero
+                var baseProgress = 0f
+                var fetchJob: kotlinx.coroutines.Job? = null
+                var fetchForward = true
+                var fetched: PageSpread? = null
+                val samples = ArrayDeque<Pair<Long, Float>>()
+
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val p = Offset(offset.x - contentRect.left, offset.y - contentRect.top)
+                        grabAt = System.currentTimeMillis()
+                        samples.clear()
+                        fetchJob?.cancel()
+                        fetchJob = null
+                        fetched = null
+                        simFinger = p
+                        if (simSettling) {
+                            // 抓住飞行中的页面：以当前进度为基准，按手指位移继续推进
+                            interruptSimAnim()
+                            resumed = true
+                            resumeAt = p
+                            baseProgress = simProgress
+                            dir = simCurlDir
+                            forward = simForward
+                            started = true
+                        } else {
+                            resumed = false
+                            simCurlGrab = p
+                            started = false
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        if (contentRect.width <= 0f) return@detectDragGestures
+                        simFinger = Offset(
+                            change.position.x - contentRect.left,
+                            change.position.y - contentRect.top,
+                        )
+                        if (!started) {
+                            // 起手须停够时间、且不是竖向意图，才判定开始翻页
+                            if (System.currentTimeMillis() - grabAt < CURL_START_TIMEOUT_MS) {
+                                return@detectDragGestures
+                            }
+                            val d = curlDirectionFor(simCurlGrab, simFinger)
+                                ?: return@detectDragGestures
+                            if (kotlin.math.abs(d.y) > kotlin.math.abs(d.x) * 1.6f) {
+                                return@detectDragGestures
+                            }
+                            dir = d
+                            forward = d.x >= 0f
+                            started = true
+                        }
+
+                        val frame = singleCurlFrame()
+                        val progress = if (resumed) {
+                            curlResumeProgress(frame, dir, simFinger, resumeAt, baseProgress)
+                        } else {
+                            curlDragProgress(frame, dir, simCurlGrab, simFinger)
+                        }
+                        if (progress <= 0f) return@detectDragGestures
+                        simCurlDir = dir
+                        simForward = forward
+                        samples.addLast(System.nanoTime() to progress)
+                        while (samples.size > 2 &&
+                            System.nanoTime() - samples.first().first > 120_000_000L
+                        ) {
+                            samples.removeFirst()
+                        }
+
+                        val target = (if (forward) nextSpread else prevSpread)
+                            ?: fetched?.takeIf { fetchForward == forward }
+                        if (target == null) {
+                            if (fetchJob == null) {
+                                fetchForward = forward
+                                fetchJob = scope.launch {
+                                    val fetchedSpread = viewModel.adjacentSpread(forward)
+                                    fetched = fetchedSpread
+                                    uiState.spread?.let { viewModel.renderCurlBitmap(it) }
+                                    fetchedSpread?.let { viewModel.renderCurlBitmap(it) }
+                                }
+                            }
+                            return@detectDragGestures
+                        }
+                        if (simTarget != target) {
+                            val current = uiState.spread ?: return@detectDragGestures
+                            val front = viewModel.curlBitmap(current) ?: return@detectDragGestures
+                            val leaf = viewModel.curlBitmap(target) ?: return@detectDragGestures
+                            clearSelection()
+                            autoScrollY = 0f
+                            // 前进：纸张 = 当前页、下层 = 下一页；后退交换
+                            simFrontBitmap = if (forward) front else leaf
+                            simBackBitmap = if (forward) leaf else front
+                            simTarget = target
+                        }
+                        simProgress = progress
+                    },
+                    onDragEnd = {
+                        val sim = simTarget
+                        if (sim != null && !simSettling) {
+                            val now = System.nanoTime()
+                            val velocity = if (samples.size >= 2) {
+                                val (t0, p0) = samples.first()
+                                (simProgress - p0) / ((now - t0) / 1_000_000_000f)
+                            } else {
+                                0f
+                            }
+                            val outcome = decideTurnOutcome(simProgress, velocity)
+                            launchSimAnim(
+                                target = sim,
+                                forward = simForward,
+                                completing = outcome == TurnOutcome.COMPLETE,
+                                fromProgress = simProgress,
+                                scripted = false,
+                                onComplete = viewModel::noteManualInteraction,
+                            )
+                        }
+                        fetchJob = null
+                        fetched = null
+                    },
+                    onDragCancel = {
+                        if (!simSettling) clearSimState()
+                        fetchJob?.cancel()
+                        fetchJob = null
+                        fetched = null
                     },
                 )
             }
@@ -1351,28 +1504,23 @@ fun ReaderScreen(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             } else {
-                                val sheet = currentSingleSheet()
-                                // 单页前半程铰链：前进纸张=当前页、下层=下一页；
-                                // 后退交换纹理（纸张正面=翻入的上一页、下层=当前页）
-                                HingeOverlay(
-                                    front = if (simForward) front else back,
-                                    target = if (simForward) back else front,
-                                    progress = simProgress,
-                                    sheet = sheet,
-                                    startY = startY,
-                                    // 单页转轴同样固定竖直，对齐页左缘
-                                    tilt = 0f,
-                                    sheetFade = hingeSliverFade(simProgress),
-                                    bendPx = creaseBend(
-                                        Size(sheet.width, curlPageSize.height),
-                                    ) * hingeBendFade(simProgress),
-                                    onShaderFailed = {
-                                        Toast.makeText(
-                                            context,
-                                            "当前设备不支持仿真翻页渲染，已使用简化效果",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    },
+                                // 单页卷曲：前进纸张 = 当前页、下层 = 下一页；
+                                // 后退交换（纸张 = 翻入的上一页、下层 = 当前页）
+                                val curlFrame = singleCurlFrame()
+                                CurlOverlay(
+                                    // 纸张正面 = 当前页；纸背走纸色（实心）。
+                                    // 自定义纸背图片接在这里：解出 Bitmap 传给 back 即可。
+                                    leaf = if (simForward) front else back,
+                                    under = if (simForward) back else front,
+                                    roll = curlRollForProgress(
+                                        frame = curlFrame,
+                                        dir = simCurlDir,
+                                        progress = simProgress,
+                                    ),
+                                    frame = curlFrame,
+                                    meshIntervalPx = CURL_MESH_INTERVAL_PX,
+                                    pageBackColor = pageBackColor(colors),
+                                    palette = curlShadowPaletteFor(colors.background),
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }

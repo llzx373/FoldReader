@@ -326,6 +326,66 @@
 
 ---
 
+## M5.13 仿真翻页：卷曲几何（单页 + 双页）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v1.8 仿真翻页卷曲几何」。
+> 现状是**刚性平板绕竖轴旋转**（AGSL 铰链模型）：单页无页背、从起手即整页横向压缩、
+> 折痕永远竖直、没有法线光照。本次换成**圆柱卷曲**（折痕可任意角度、`R·sin(s/R)` 网格
+> 展开、正面/背面分界、分层阴影），单页与双页统一，双页纸背用真实内容。
+> 参考实现族：MIT 的 `FantasticPornTaiQiang/PTQFlipper`（只作观感与阴影分层参照）。
+
+### 阶段 1 · 几何与网格
+- [x] `CurlGeometry.kt`：`CurlFrame` 叶片坐标系、`CurlRoll` 卷筒、`curlRollForProgress`
+      （折痕从自由边扫到装订边之外 → 两端严格收敛）、`curlProgressFor`（折痕跟手）、
+      `curlSurfaceAt`（FLAT/FRONT/BACK/UNDER）、`curlWarpPoint`、`curlMeshVertices`、
+      `curlMeshSize`（含顶点数上限）、`curlBandPolygon`（凸多边形裁剪，锁定折痕不越中缝）
+- [x] `CurlGeometryTest`：卷角区间、**起手帧 = 当前页 / 终点帧 = 下层页（两端严格收敛）**、
+      折痕单调推进、可卷长度不超叶片跨度、表面分区、**平板侧逐点不动**、卷起侧不超伸距、
+      自由边落点对齐正背分界、网格顶点数与上限、镜像恒等式、
+      **折痕不越中缝（双页左右页双向扫掠）**、阶段状态机、完成度与覆盖率
+- [x] 实现偏离（已与用户同步）：PTQFlipper 的 `algorithmStateLoose` 里
+      `Rf.y ≡ R.y` 会让折痕斜率恒为 ±∞/NaN，无法靠阅读确认其意图，故未照抄，
+      改为自行推导的圆柱模型；PTQ 仅作阴影分层与观感参照
+
+### 阶段 2 · 阴影与绘制
+- [x] `CurlShadows.kt`：6 条分层阴影（折痕外侧 / 纸面贴折痕 / 卷筒投影 / 自由边光泽 /
+      平铺侧光泽 / **卷筒背面圆柱明暗**），宽度由 `curlShadowWidths` 单一来源、
+      颜色由主题明度派生（暗背景自动收敛），全部与叶片矩形求交
+- [x] `CurlOverlay.kt`：背景 → 卷筒投影 → 正面 `drawBitmapMesh` → 背面 → 纸面阴影的图层顺序；
+      不再有"着色器编译失败"这一失败模式
+- [x] `CurlShadowsTest`：带落在各自区间、不越叶片、宽度随卷筒自适应、面积单调、暗背景收敛、
+      渐变方向与折痕共线
+- [x] `CurlSoftwareRenderer.kt` + `CurlFrameRenderTest`：离线出图到 `build/curlFrames/curl/`，
+      断言**起手帧逐像素等于当前页、终点帧逐像素等于目标页**（水平与斜向起手各一条）
+
+### 阶段 3 · 接线
+- [x] `ReaderScreen.kt`：单页仿真改用 `CurlOverlay`；进度域统一 0..1（`simMaxProgress`）、
+      松手完成度直接用 `simProgress`；拖拽时折痕跟手（`curlDragProgress`）；
+      点击翻页起点改从 0 起
+- [x] 拖拽改任意方向（角抓取）：`detectDragGestures` 独立一路，与水平那路互斥；
+      70ms 起手延迟、竖向起手（`|dy| > 1.6·|dx|`）不接管；抓页中间起手用锚定量防跳帧；
+      抓住飞行中的页面用 `curlTakeoverGrab` 虚拟起手点无缝接管
+- [x] 折痕方向取自拖动方向，"抓上角"是自然的斜向 `dir`，不需要上下翻转开关
+
+### 阶段 4 · 双页打磨（未开始，是唯一剩下的功能缺口）
+- [ ] 双页仍走旧铰链路径。换卷曲几何**不是改渲染分支就够**：现在这套卷曲模型没有
+      "叶片落定到对侧"的相位（折痕扫到装订边之后卷筒只能滑出，无法在另一侧摊开），
+      需要先补相位 B（卷起来之后绕中缝转到对侧、纸背用真实内容），
+      再把背景改成"当前左页 + 目标右页"的两段拼接、叶片做成半页裁剪
+- [ ] 双页纸背改用真实内容（目标跨页另一半页）
+
+### 阶段 5 · 退役旧路径 + 真机（依赖阶段 4）
+- [ ] 双页也换完之后删除 `PageCurlShader.kt` 与铰链几何、`HingeFrameRenderTest` /
+      `HingeSoftwareRenderer` / `PageCurlShaderTest`
+- [ ] 真机 profile：重折/阔折叠 120fps、`CURL_MESH_INTERVAL_PX` 定值、确认不误触发降级
+
+### 待归档（已完成但未提交）
+- [x] `HingeSoftwareRenderer` 与生产 AGSL 失同步修复（`7adaf5b` 改了自由边高光/暗影但没同步镜像）
+- [x] `PageTurnCompareRenderTest`：三模型并排出图（现铰链 / 同模型加透视 / 圆柱卷曲参考）
+      与「只有卷曲模型保持正文不变形」的断言
+
+---
+
 ## M6+ 格式扩展（后置）
 - [x] EPUB 解析器实现 `BookParser` 接口（core/format/epub），阅读器/UI 零改动验证
       —— 已实现：EPUB3 NAV / EPUB2 NCX 目录、page-list 纸书页码、样式与链接 span、图片抽取、

@@ -105,15 +105,14 @@ class HingeSoftwareRenderer(
                         val tex = rgb(sample(front, srcX, srcY))
                         val shade = 1f - 0.30f * lift.toDouble().pow(1.5).toFloat()
                         val ao = 1f - 0.10f * exp(-(d - sheetG) / (sheetW * 0.12f)) * lift
-                        // 与 AGSL 同步：乘法高光，随纸色缩放
-                        val ridge = exp(
-                            -((reach - d) / (sheetW * 0.06f)).pow(2),
-                        ) * 0.14f * lift
+                        // 与 AGSL 同步：自由边暗影（乘法项，随纸色缩放），范围收窄
+                        val edgeShade = 1f -
+                            0.20f * exp(-((reach - d) / (sheetW * 0.06f)).pow(2)) * lift
                         val base = rgb(sample(under, fx.toFloat(), fy.toFloat()))
                         result = floatArrayOf(
-                            base[0] + (min(tex[0] * (shade * ao + ridge), 1f) - base[0]) * sheetFade,
-                            base[1] + (min(tex[1] * (shade * ao + ridge), 1f) - base[1]) * sheetFade,
-                            base[2] + (min(tex[2] * (shade * ao + ridge), 1f) - base[2]) * sheetFade,
+                            base[0] + (tex[0] * (shade * ao * edgeShade) - base[0]) * sheetFade,
+                            base[1] + (tex[1] * (shade * ao * edgeShade) - base[1]) * sheetFade,
+                            base[2] + (tex[2] * (shade * ao * edgeShade) - base[2]) * sheetFade,
                         )
                     } else if (delta >= edge && delta < reach) {
                         val sh = shadowProfile(delta - edge, lift, sheetFade)
