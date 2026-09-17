@@ -130,6 +130,18 @@ internal class ConvertedBookStore(private val convertedDir: File) {
         memo[hash] = book
     }
 
+    private val flattenLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    /**
+     * 同一 hash 的压平串行化。
+     *
+     * 后台预热队列与阅读器可能同时发现缓存缺失（导入后马上点开就是这个时序），
+     * 并发压同一本书会白做一遍——而那正是用户正在等首屏的时刻。
+     * 调用方应在拿到锁**之后**再查一次缓存：等锁期间别人可能已经压好了。
+     */
+    fun <T> withFlattenLock(hash: String, block: () -> T): T =
+        synchronized(flattenLocks.computeIfAbsent(hash) { Any() }) { block() }
+
     /** 内嵌图片目录：`<hash>.images/`。 */
     fun imagesDir(hash: String): File = File(convertedDir, "$hash.images")
 

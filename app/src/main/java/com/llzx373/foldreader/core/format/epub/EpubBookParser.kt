@@ -104,14 +104,24 @@ class EpubBookParser(
     override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
         withContext(Dispatchers.IO) {
             // charsetOverride 忽略：压平产物固定 UTF-8
-            val flattened = ensureFlattened(uri)
-            if (flattened.fresh) {
-                bookIdResolver(uri)?.let { bookId ->
-                    runCatching { onChaptersIndexed(bookId, flattened.chapters) }
-                }
-            }
-            openFlattenedContent(flattened.file)
+            openFlattenedContent(ensureFlattenedAndIndexChapters(uri).file)
         }
+
+    /** 预热：只做压平，不取内容。导入后由后台队列调用，好让首次打开直接命中缓存。 */
+    override suspend fun prewarm(uri: Uri) {
+        withContext(Dispatchers.IO) { ensureFlattenedAndIndexChapters(uri) }
+    }
+
+    /** 压平（命中缓存则零成本）；本次确实新压平时顺带把真实 TOC 回填进章节表。 */
+    private suspend fun ensureFlattenedAndIndexChapters(uri: Uri): FlattenedBook {
+        val flattened = ensureFlattened(uri)
+        if (flattened.fresh) {
+            bookIdResolver(uri)?.let { bookId ->
+                runCatching { onChaptersIndexed(bookId, flattened.chapters) }
+            }
+        }
+        return flattened
+    }
 
     override suspend fun parseChapters(uri: Uri, charsetOverride: Charset?): List<Chapter> =
         withContext(Dispatchers.IO) { ensureFlattened(uri).chapters }
@@ -120,12 +130,16 @@ class EpubBookParser(
         openChannel(uri).use { channel ->
             val hash = store.contentHash(channel)
             store.cached(hash)?.let { return it }
-            val tmpEpub = store.newTempFile(".epub")
-            try {
-                store.copyChannel(channel, tmpEpub)
-                return flattenLocal(tmpEpub, hash)
-            } finally {
-                tmpEpub.delete()
+            // 按 hash 串行：后台预热与阅读器可能同时发现缓存缺失，别把同一本书压两遍
+            return store.withFlattenLock(hash) {
+                store.cached(hash)?.let { return@withFlattenLock it }
+                val tmpEpub = store.newTempFile(".epub")
+                try {
+                    store.copyChannel(channel, tmpEpub)
+                    flattenLocal(tmpEpub, hash)
+                } finally {
+                    tmpEpub.delete()
+                }
             }
         }
     }

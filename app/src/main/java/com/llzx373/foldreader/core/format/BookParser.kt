@@ -73,4 +73,12 @@ interface BookParser {
 
     /** 内嵌图片的本地文件（EPUB 压平时抽取到 converted/<hash>.images/）；无此书/此图返回 null。 */
     suspend fun imageFile(uri: Uri, imagePath: String): java.io.File? = null
+
+    /**
+     * 预热：把「首次打开才需要做」的重活提前做掉（EPUB/FB2 的整本压平）。
+     * 默认无操作——TXT 没有这一步，它的偏移索引在打开时边建边读。
+     *
+     * 调用方必须容忍失败：预热只是加速，失败等同于没预热，首次打开会照常重来。
+     */
+    suspend fun prewarm(uri: Uri) {}
 }

@@ -55,6 +55,9 @@ class BookshelfRepositoryImpl(
     override suspend fun touchLastRead(bookId: Long, timestamp: Long) =
         bookDao.touchLastRead(bookId, timestamp)
 
+    override suspend fun markContentPrepared(bookId: Long, timestamp: Long) =
+        bookDao.markContentPrepared(bookId, timestamp)
+
     override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) {
         if (deleteLocalData) {
             progressDao.deleteByBookIds(bookIds)

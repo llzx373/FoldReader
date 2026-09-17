@@ -36,6 +36,12 @@ class ImportBookUseCase(
     private val convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
     /** 封面落盘目录（filesDir/covers）；null 时跳过封面提取。 */
     private val coversDir: File? = null,
+    /**
+     * 非 TXT 导入成功后的后台预热入队。默认空实现（JVM 单测无需真实队列）。
+     * 导入本身不等它——压平放到后台做，用户此刻不预期等待。
+     */
+    private val enqueuePrewarm: (bookId: Long, uriKey: String, format: BookFormat) -> Unit =
+        { _, _, _ -> },
 ) {
 
     constructor(
@@ -43,6 +49,7 @@ class ImportBookUseCase(
         bookshelfRepository: BookshelfRepository,
         convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
         coversDir: File? = null,
+        enqueuePrewarm: (bookId: Long, uriKey: String, format: BookFormat) -> Unit = { _, _, _ -> },
     ) : this(
         bookshelfRepository = bookshelfRepository,
         cleanedDir = File(context.filesDir, "cleaned"),
@@ -51,6 +58,7 @@ class ImportBookUseCase(
         traditionalMap = { TsCharMap.load(context) },
         convertedParsers = convertedParsers,
         coversDir = coversDir,
+        enqueuePrewarm = enqueuePrewarm,
     )
 
     sealed interface Result {
@@ -215,6 +223,9 @@ class ImportBookUseCase(
             convertedEntity(title, meta, uriKey, contentHash, format, source, coverPath),
         )
         onProgress(1f)
+        // 压平交给后台队列：导入即刻返回，等用户真去点开时通常已经命中缓存。
+        // 这里只是入队（非阻塞），失败也不影响导入结果。
+        runCatching { enqueuePrewarm(bookId, uriKey, format) }
         return Result.Imported(bookId, title, encodingConfidence = 1f)
     }
 

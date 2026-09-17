@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
@@ -611,6 +612,11 @@ class ReaderViewModel(
                 }
                 content = opened
                 appliedEncoding = book.encoding
+                // 能走到这里就说明压平产物已就绪（本次压平或命中缓存）：回写标记，书架角标随之消失。
+                // 预热失败或进程中途被杀时，这条就是兜底。
+                if (book.format != BookFormat.TXT) {
+                    runCatching { bookshelfRepository.markContentPrepared(bookId) }
+                }
                 verifyAnnotationSnapshots()
                 val progress = bookshelfRepository.getProgress(bookId)
                 baseReadingMillis = progress?.totalReadingMillis ?: 0L

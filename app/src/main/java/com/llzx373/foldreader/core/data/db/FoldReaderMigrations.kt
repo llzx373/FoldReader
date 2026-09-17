@@ -54,3 +54,13 @@ val MIGRATION_11_12: Migration = object : Migration(11, 12) {
         )
     }
 }
+
+/**
+ * v12 → v13：`books` 新增 `contentPreparedAt`（EPUB/FB2 压平就绪时间，书架角标用）。
+ * 可空、无默认值，旧行留 null 即"未就绪"——语义正确，下次打开会补上。
+ */
+val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `contentPreparedAt` INTEGER")
+    }
+}

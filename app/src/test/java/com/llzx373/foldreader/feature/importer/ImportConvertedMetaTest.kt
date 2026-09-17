@@ -40,6 +40,8 @@ class ImportConvertedMetaTest {
             throw UnsupportedOperationException()
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) =
             throw UnsupportedOperationException()
+        override suspend fun markContentPrepared(bookId: Long, timestamp: Long) =
+            throw UnsupportedOperationException()
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) =
             throw UnsupportedOperationException()
         override fun observeGroupNames() = throw UnsupportedOperationException()

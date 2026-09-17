@@ -100,6 +100,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.db.BookWithProgress
+import com.llzx373.foldreader.core.data.db.needsContentPreparation
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
@@ -820,6 +821,26 @@ private fun ExternalSourceBadge(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 待解析角标：EPUB/FB2 还没做整本压平时的提示。
+ * 导入后由后台预热队列处理，完成即写入 `books.contentPreparedAt`，角标随书架刷新自动消失。
+ */
+@Composable
+private fun PendingParseBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier,
+    ) {
+        Text(
+            text = "待解析",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
 @Composable
 private fun EmptyBookshelf(onImportClick: () -> Unit) {
     EmptyState(
@@ -972,6 +993,13 @@ private fun BookGridItem(
                         .padding(6.dp),
                 )
             }
+            if (book.needsContentPreparation()) {
+                PendingParseBadge(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp),
+                )
+            }
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
@@ -1089,6 +1117,14 @@ private fun BookList(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // 列表视图封面只有 46dp，放不下角标，改在副标题下补一行
+                        if (book.needsContentPreparation()) {
+                            Text(
+                                text = "待解析",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                            )
+                        }
                     }
                     if (selectionMode) {
                         Checkbox(checked = selected, onCheckedChange = null)

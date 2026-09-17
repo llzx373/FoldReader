@@ -101,6 +101,8 @@ dependencies {
     testImplementation(libs.kxml2)
     // 需要真实 Android API 的单测（Paint 字宽 / BitmapFactory / Room 迁移 / Compose 重组）
     testImplementation(libs.robolectric)
+    // 确定性驱动协程（后台队列/节流这类异步行为的单测）
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

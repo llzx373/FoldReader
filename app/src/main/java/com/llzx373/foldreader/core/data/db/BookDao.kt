@@ -77,6 +77,9 @@ interface BookDao {
     @Query("UPDATE books SET lastReadAt = :timestamp WHERE id = :bookId")
     suspend fun touchLastRead(bookId: Long, timestamp: Long)
 
+    @Query("UPDATE books SET contentPreparedAt = :timestamp WHERE id = :bookId")
+    suspend fun markContentPrepared(bookId: Long, timestamp: Long)
+
     @Query("DELETE FROM books WHERE id IN (:bookIds)")
     suspend fun deleteByIds(bookIds: List<Long>)
 }

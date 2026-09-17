@@ -42,6 +42,7 @@ class AppContainer(context: Context) {
             .addMigrations(
                 com.llzx373.foldreader.core.data.db.MIGRATION_10_11,
                 com.llzx373.foldreader.core.data.db.MIGRATION_11_12,
+                com.llzx373.foldreader.core.data.db.MIGRATION_12_13,
             )
             .build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
@@ -145,6 +146,15 @@ class AppContainer(context: Context) {
         ),
     )
     val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
+    /**
+     * 导入后后台预热：把 EPUB/FB2 的整本压平提前做掉，让首次打开通常直接命中缓存。
+     * 复用 parserScope；失败静默（预热只是加速）。
+     */
+    val bookPrewarmQueue = com.llzx373.foldreader.core.format.BookPrewarmQueue(
+        scope = parserScope,
+        parserFor = { format -> bookParsers.parserFor(format) },
+        onPrepared = { bookId -> bookshelfRepository.markContentPrepared(bookId) },
+    )
     val backupManager = com.llzx373.foldreader.core.backup.BackupManager(
         context = appContext,
         bookshelfRepository = bookshelfRepository,
@@ -160,6 +170,7 @@ class AppContainer(context: Context) {
             BookFormat.FB2 to fb2BookParser,
         ),
         coversDir = coversDir,
+        enqueuePrewarm = bookPrewarmQueue::enqueue,
     )
     val batchImportUseCase = com.llzx373.foldreader.feature.importer.BatchImportUseCase(
         context = context,

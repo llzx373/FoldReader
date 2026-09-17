@@ -160,6 +160,9 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun upsert(book: BookEntity): Long = book.id
         override suspend fun update(book: BookEntity) = Unit
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
+        override suspend fun markContentPrepared(bookId: Long, timestamp: Long) {
+            books.replaceAll { if (it.id == bookId) it.copy(contentPreparedAt = timestamp) else it }
+        }
         override suspend fun deleteByIds(bookIds: List<Long>) {
             books.removeAll { it.id in bookIds }
         }

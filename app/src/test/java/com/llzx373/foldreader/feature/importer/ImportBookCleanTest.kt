@@ -150,6 +150,7 @@ class ImportBookCleanTest {
             return id
         }
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
+        override suspend fun markContentPrepared(bookId: Long, timestamp: Long) = Unit
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) = Unit
         override fun observeGroupNames(): Flow<List<String>> = flowOf(emptyList())
         override fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>> =

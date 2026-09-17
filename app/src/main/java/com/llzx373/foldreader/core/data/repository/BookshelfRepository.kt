@@ -21,6 +21,12 @@ interface BookshelfRepository {
     suspend fun findByContentHash(contentHash: String): BookEntity?
     suspend fun upsertBook(book: BookEntity): Long
     suspend fun touchLastRead(bookId: Long, timestamp: Long = System.currentTimeMillis())
+
+    /**
+     * 标记内容已就绪（EPUB/FB2 的整本压平已完成）。由后台预热队列与阅读器各自回写，
+     * 书架角标据此显示/隐藏。
+     */
+    suspend fun markContentPrepared(bookId: Long, timestamp: Long = System.currentTimeMillis())
     suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean = true)
 
     fun observeGroupNames(): Flow<List<String>>
