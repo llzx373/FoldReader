@@ -27,8 +27,8 @@ ksp = "2.2.10-2.0.2"
 commonsCompress = "1.28.0"
 # 7z 的 LZMA/LZMA2 解码由 xz 提供（commons-compress 把它声明为可选依赖，
 # 但不加它真实 .7z 一律解不开）
-xz = "1.10"
-junrar = "7.6.0"
+xz = "1.12"
+junrar = "8.1.1"
 # PDF：androidx.pdf 负责渲染（只取 pdf-core + pdf-document-service，不引成品 UI），
 # PdfBox 负责元数据/目录/页码标签/文本提取
 androidxPdf = "1.0.0-beta01"
