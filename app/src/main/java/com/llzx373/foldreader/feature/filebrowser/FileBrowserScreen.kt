@@ -5,6 +5,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -174,6 +178,7 @@ fun FileBrowserScreen(
                     onEnter = viewModel::enterDirectory,
                     onOpen = viewModel::openFile,
                     onImportDirectory = startDirectoryImport,
+                    onOpenAsComic = viewModel::openAsComic,
                 )
             }
             if (openingFile || batchEnumerating) {
@@ -287,6 +292,7 @@ private fun RootList(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntryList(
     entries: List<BrowserEntry>,
@@ -294,21 +300,27 @@ private fun EntryList(
     onEnter: (BrowserEntry) -> Unit,
     onOpen: (BrowserEntry) -> Unit,
     onImportDirectory: (BrowserEntry) -> Unit,
+    onOpenAsComic: (BrowserEntry) -> Unit,
 ) {
     if (!loading && entries.isEmpty()) {
         EmptyState(
-            title = "此文件夹没有可导入的书籍",
-            description = "仅显示子文件夹和支持的电子书（TXT / EPUB / FB2）",
+            title = "此文件夹没有可导入的内容",
+            description = "仅显示子文件夹与支持的书籍/漫画（TXT / EPUB / FB2 / CBZ / CBR / CBT / CB7）",
         )
         return
     }
+    // 长按弹出的操作菜单目标
+    var menuTarget by remember { mutableStateOf<BrowserEntry?>(null) }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(entries, key = { it.documentId }) { entry ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { if (entry.isDirectory) onEnter(entry) else onOpen(entry) }
+                    .combinedClickable(
+                        onClick = { if (entry.isDirectory) onEnter(entry) else onOpen(entry) },
+                        onLongClick = { menuTarget = entry },
+                    )
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 if (entry.isDirectory) {
@@ -331,6 +343,28 @@ private fun EntryList(
                             contentDescription = "将「${entry.name}」全部导入为分组",
                         )
                     }
+                }
+            }
+            // 目录也能"以漫画打开"（一个图片目录 = 一本），文件则是容器的直接入口
+            DropdownMenu(
+                expanded = menuTarget?.documentId == entry.documentId,
+                onDismissRequest = { menuTarget = null },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("以漫画打开") },
+                    onClick = {
+                        menuTarget = null
+                        onOpenAsComic(entry)
+                    },
+                )
+                if (entry.isDirectory) {
+                    DropdownMenuItem(
+                        text = { Text("整个目录导入为分组") },
+                        onClick = {
+                            menuTarget = null
+                            onImportDirectory(entry)
+                        },
+                    )
                 }
             }
         }

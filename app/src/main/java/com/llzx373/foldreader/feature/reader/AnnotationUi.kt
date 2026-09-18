@@ -77,15 +77,21 @@ private fun ColorDots(
     }
 }
 
-/** 选区操作条：多色划线（点色即存）+ 笔记 + 书签 + 复制 + 取消。 */
+/**
+ * 选区操作条：多色划线（点色即存）+ 笔记 + 下划线 + 书签 + 复制 + 取消。
+ *
+ * 传 null 的项不显示——页式（漫画 / PDF）没有笔记与文字层，那里只给
+ * 「色点高亮 / 下划线 / 书签 / 复制（有文字层时）/ 取消」。
+ */
 @Composable
 fun SelectionActionBar(
     colors: ReaderColors,
     onPickColor: (Long) -> Unit,
-    onNote: () -> Unit,
     onBookmark: () -> Unit,
-    onCopy: () -> Unit,
     onCancel: () -> Unit,
+    onNote: (() -> Unit)? = null,
+    onUnderline: (() -> Unit)? = null,
+    onCopy: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -101,9 +107,10 @@ fun SelectionActionBar(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             ColorDots(selectedArgb = -1L, onPick = onPickColor)
-            TextButton(onClick = onNote) { Text("笔记") }
+            if (onNote != null) TextButton(onClick = onNote) { Text("笔记") }
+            if (onUnderline != null) TextButton(onClick = onUnderline) { Text("下划线") }
             TextButton(onClick = onBookmark) { Text("书签") }
-            TextButton(onClick = onCopy) { Text("复制") }
+            if (onCopy != null) TextButton(onClick = onCopy) { Text("复制") }
             TextButton(onClick = onCancel) { Text("取消") }
         }
     }
@@ -190,7 +197,7 @@ fun AnnotationEditDialog(
     )
 }
 
-/** 标注列表：按章节分组；点击跳转，长按编辑。shifted 的灰显并提示。 */
+/** 标注列表：文本按章节分组、页式按页平铺；点击跳转，长按编辑。shifted 的灰显并提示。 */
 @Composable
 fun AnnotationListDialog(
     annotations: List<AnnotationEntity>,
@@ -200,8 +207,16 @@ fun AnnotationListDialog(
     onJump: (AnnotationEntity) -> Unit,
     onEdit: (AnnotationEntity) -> Unit,
     onDismiss: () -> Unit,
+    /** 页式（漫画 / PDF）没有章节分组可言，按页平铺即可。 */
+    groupByChapter: Boolean = true,
+    emptyText: String = "还没有划线，长按正文选中文字即可划线",
 ) {
-    val sorted = remember(annotations) { annotations.sortedBy { it.startCharOffset } }
+    // 排序对两种锚点都给对顺序：文本按字符偏移（pageIndex 恒 null），页式按页序号 + 页内纵向位置
+    val sorted = remember(annotations) {
+        annotations.sortedWith(
+            compareBy({ it.pageIndex ?: -1L }, { it.startCharOffset }, { it.regionY ?: 0f }),
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
@@ -212,7 +227,7 @@ fun AnnotationListDialog(
         text = {
             if (sorted.isEmpty()) {
                 Text(
-                    text = "还没有划线，长按正文选中文字即可划线",
+                    text = emptyText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
@@ -222,7 +237,7 @@ fun AnnotationListDialog(
                     sorted.forEach { ann ->
                         val chapterIndex = chapters.indexOfLast { ann.startCharOffset >= it.charStart }
                             .coerceAtLeast(0)
-                        if (chapterIndex != lastChapter) {
+                        if (groupByChapter && chapterIndex != lastChapter) {
                             lastChapter = chapterIndex
                             item(key = "header-$chapterIndex-${ann.id}") {
                                 Text(
@@ -274,7 +289,10 @@ private fun AnnotationRow(
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = annotation.selectedText,
+                // 页式框选没有文字可选，回退到页号，否则列表里是一行空
+                text = annotation.selectedText.ifEmpty {
+                    annotation.pageIndex?.let { pageLabelOf(it.toInt()) }.orEmpty()
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
                 maxLines = 2,

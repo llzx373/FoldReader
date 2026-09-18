@@ -163,6 +163,41 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun markContentPrepared(bookId: Long, timestamp: Long) {
             books.replaceAll { if (it.id == bookId) it.copy(contentPreparedAt = timestamp) else it }
         }
+        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) {
+            books.replaceAll { if (it.id == bookId) it.copy(comicPageCount = pageCount) else it }
+        }
+        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) {
+            books.replaceAll { if (it.id == bookId) it.copy(coverPath = coverPath) else it }
+        }
+
+        override suspend fun backfillPdfMetadata(
+            bookId: Long,
+            title: String?,
+            author: String?,
+            description: String?,
+            subjects: String?,
+        ) {
+            books.replaceAll {
+                if (it.id != bookId) {
+                    it
+                } else {
+                    it.copy(
+                        title = title ?: it.title,
+                        author = author ?: it.author,
+                        description = description ?: it.description,
+                        subjects = subjects ?: it.subjects,
+                    )
+                }
+            }
+        }
+        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) {
+            books.replaceAll { if (it.id == bookId) it.copy(comicLocalPath = localPath) else it }
+        }
+        override suspend fun updateConvertedFile(
+            bookId: Long,
+            cleanedFilePath: String?,
+            totalChars: Long,
+        ) = Unit
         override suspend fun deleteByIds(bookIds: List<Long>) {
             books.removeAll { it.id in bookIds }
         }

@@ -30,6 +30,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.llzx373.foldreader.core.comic.ComicContainer
+import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,6 +61,37 @@ fun formatReadingProgress(charOffset: Long?, totalChars: Long): String =
     } else {
         "已读 ${(charOffset * 100 / totalChars).coerceIn(0, 100)}%"
     }
+
+/**
+ * 漫画进度按页序号算（与文本的字符偏移语义分开）。
+ * 页数为 null 表示还没解析出来（rar/tar/7z 待预热），此时只能显示「未开始」。
+ */
+fun formatComicProgress(comicPage: Int?, pageCount: Int?): String =
+    if (comicPage == null || pageCount == null || pageCount <= 0) {
+        "未开始"
+    } else {
+        "已读 ${(comicPage * 100 / pageCount).coerceIn(0, 100)}%"
+    }
+
+/** 页式格式（漫画 / PDF）：进度按页序号算，详情页不展示文本类字段。 */
+fun isPagedFormat(format: BookFormat): Boolean =
+    format == BookFormat.COMIC || format == BookFormat.PDF
+
+/** 页式格式在书架上显示的短标签。 */
+fun pagedFormatLabel(book: BookEntity): String = when (book.format) {
+    BookFormat.PDF -> "PDF"
+    else -> comicContainerLabel(book.comicContainer)
+}
+
+/** 漫画容器在书架上的短标签。 */
+fun comicContainerLabel(container: ComicContainer?): String = when (container) {
+    ComicContainer.ZIP -> "CBZ"
+    ComicContainer.RAR -> "CBR"
+    ComicContainer.TAR -> "CBT"
+    ComicContainer.SEVEN_ZIP -> "CB7"
+    ComicContainer.FOLDER -> "文件夹"
+    null -> "漫画"
+}
 
 fun formatLastRead(timestamp: Long?): String? =
     timestamp?.let { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(it)) }

@@ -79,7 +79,7 @@ fun ReaderOverlay(
                     LocalSavedStateRegistryOwner provides entry,
                 ) {
                     saveableStateHolder.SaveableStateProvider(entry.id) {
-                        ReaderScreen(
+                        ReaderHost(
                             bookId = entry.arguments?.getLong(Routes.ARG_BOOK_ID) ?: 0L,
                             initialAnchor = entry.arguments?.getLong(Routes.ARG_ANCHOR) ?: -1L,
                             onBack = { navController.popBackStack() },
@@ -88,6 +88,12 @@ fun ReaderOverlay(
                             sharedTransitionScope = sharedTransitionScope,
                             animatedVisibilityScope = this,
                             coverTitle = coverTitle,
+                            // 切到同系列的其它卷：替换掉当前阅读页，返回时回书架而不是退回上一卷
+                            onOpenBook = { newBookId ->
+                                navController.navigate(Routes.reader(newBookId)) {
+                                    popUpTo(Routes.READER) { inclusive = true }
+                                }
+                            },
                         )
                     }
                 }

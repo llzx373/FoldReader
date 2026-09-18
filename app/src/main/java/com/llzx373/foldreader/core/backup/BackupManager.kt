@@ -53,6 +53,10 @@ class BackupManager(
     }
 
     companion object {
-        const val BACKUP_VERSION = 4
+        /**
+         * v5：书签/标注增加页式锚点（页序号 + 归一化页内坐标），中间点击区动作入备份。
+         * 导入侧对老版本仍然兼容——新字段缺失即按 null / 默认值处理。
+         */
+        const val BACKUP_VERSION = 5
     }
 }

@@ -4,8 +4,9 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.llzx373.foldreader.core.comic.ComicContainer
 
-enum class BookFormat { TXT, EPUB, FB2 }
+enum class BookFormat { TXT, EPUB, FB2, COMIC, PDF }
 
 enum class BookSource { IMPORT, EXTERNAL }
 
@@ -46,11 +47,32 @@ data class BookEntity(
      * 另一方面书架 Flow 在阅读期间会被进度更新反复触发，逐本查文件不划算。
      */
     val contentPreparedAt: Long? = null,
+    /** 以下为漫画（[BookFormat.COMIC]）专用字段；其它格式留空。 */
+    /** 容器类型；FOLDER 表示「一个图片目录」就是一本漫画。 */
+    val comicContainer: ComicContainer? = null,
+    /**
+     * 页数；null = 待解析。zip/目录能直接读中央目录或列目录，导入即知；
+     * rar/tar/7z 必须解压一遍才知道，交给后台预热回填。
+     */
+    val comicPageCount: Int? = null,
+    /** 用户选择「复制到本地」后的页目录（filesDir/comics/local/<hash>/pages）；null = 引用外部源。 */
+    val comicLocalPath: String? = null,
 )
 
+/** 需要先解压才知道内容的容器（zip 可直接按条目随机读，目录可直接列）。 */
+private val EXTRACT_REQUIRED_CONTAINERS =
+    setOf(ComicContainer.RAR, ComicContainer.TAR, ComicContainer.SEVEN_ZIP)
+
 /**
- * 内容是否还需要后台压平：EPUB/FB2 且尚未就绪。
- * TXT 没有压平步骤（它的偏移索引在打开时边建边读），恒为 false。
+ * 内容是否还需要后台准备：
+ * - TXT 没有压平步骤（偏移索引在打开时边建边读），恒为 false；
+ * - 漫画 = 页数未知，或需要解压的容器还没解压过；
+ * - EPUB/FB2 = 整本压平尚未完成。
  */
-fun BookEntity.needsContentPreparation(): Boolean =
-    format != BookFormat.TXT && contentPreparedAt == null
+fun BookEntity.needsContentPreparation(): Boolean = when (format) {
+    BookFormat.TXT -> false
+    BookFormat.COMIC ->
+        comicPageCount == null ||
+            (comicLocalPath == null && comicContainer in EXTRACT_REQUIRED_CONTAINERS)
+    else -> contentPreparedAt == null
+}

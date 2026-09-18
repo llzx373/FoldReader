@@ -95,7 +95,7 @@ fun BookmarkOverviewDialog(
                                 OverviewRow(
                                     primary = bookmark.label.ifEmpty { bookmark.snapshotText },
                                     secondary = "书签 · ${formatTime(bookmark.createdAt)}",
-                                    onClick = { onJump(group.bookId, bookmark.charOffset) },
+                                    onClick = { onJump(group.bookId, bookmark.readerAnchor()) },
                                 )
                             }
                         }
@@ -108,7 +108,7 @@ fun BookmarkOverviewDialog(
                                         annotation.note?.takeIf { it.isNotEmpty() },
                                     ).joinToString(" · "),
                                     markerColor = Color(annotation.color.toInt()),
-                                    onClick = { onJump(group.bookId, annotation.startCharOffset) },
+                                    onClick = { onJump(group.bookId, annotation.readerAnchor()) },
                                 )
                             }
                         }

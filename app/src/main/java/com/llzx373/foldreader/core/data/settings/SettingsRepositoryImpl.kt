@@ -37,6 +37,8 @@ class SettingsRepositoryImpl(
         val AVOID_CAMERA_CUTOUT = booleanPreferencesKey("avoid_camera_cutout")
         val PAGE_TURN_MODE = stringPreferencesKey("page_turn_mode")
         val PAGE_TURN_HOTSPOT_RATIO = floatPreferencesKey("page_turn_hotspot_ratio")
+        val MIDDLE_TAP_ACTION = stringPreferencesKey("middle_tap_action")
+        val MIDDLE_DOUBLE_TAP_ACTION = stringPreferencesKey("middle_double_tap_action")
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
         val BRIGHTNESS_GESTURE_ENABLED = booleanPreferencesKey("brightness_gesture_enabled")
         val SWIPE_GESTURE_ENABLED = booleanPreferencesKey("swipe_gesture_enabled")
@@ -56,6 +58,11 @@ class SettingsRepositoryImpl(
         val BOOKSHELF_SORT = stringPreferencesKey("bookshelf_sort")
         val CUSTOM_CHAPTER_RULES = stringPreferencesKey("custom_chapter_rules")
         val AD_CLEAN_RULES = stringPreferencesKey("ad_clean_rules")
+        val COMIC_DIRECTION = stringPreferencesKey("comic_direction")
+        val COMIC_DUAL_PAGE_COVER_ALONE = booleanPreferencesKey("comic_dual_page_cover_alone")
+        val COMIC_SPREAD_AUTO_DETECT = booleanPreferencesKey("comic_spread_auto_detect")
+        val COMIC_FIT_MODE = stringPreferencesKey("comic_fit_mode")
+        val COMIC_SCROLL_GAP_DP = intPreferencesKey("comic_scroll_gap_dp")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -83,6 +90,11 @@ class SettingsRepositoryImpl(
                 pageTurnMode = enumOrDefault(prefs[Keys.PAGE_TURN_MODE], defaults.pageTurnMode),
                 pageTurnHotspotRatio = prefs[Keys.PAGE_TURN_HOTSPOT_RATIO]
                     ?: defaults.pageTurnHotspotRatio,
+                middleTapAction = enumOrDefault(prefs[Keys.MIDDLE_TAP_ACTION], defaults.middleTapAction),
+                middleDoubleTapAction = enumOrDefault(
+                    prefs[Keys.MIDDLE_DOUBLE_TAP_ACTION],
+                    defaults.middleDoubleTapAction,
+                ),
                 volumeKeyPagingEnabled = prefs[Keys.VOLUME_KEY_PAGING_ENABLED]
                     ?: defaults.volumeKeyPagingEnabled,
                 brightnessGestureEnabled = prefs[Keys.BRIGHTNESS_GESTURE_ENABLED]
@@ -105,6 +117,13 @@ class SettingsRepositoryImpl(
                 bookshelfSort = enumOrDefault(prefs[Keys.BOOKSHELF_SORT], defaults.bookshelfSort),
                 customChapterRules = decodeCustomChapterRules(prefs[Keys.CUSTOM_CHAPTER_RULES]),
                 adCleanRules = decodeRuleList(prefs[Keys.AD_CLEAN_RULES]),
+                comicDirection = enumOrDefault(prefs[Keys.COMIC_DIRECTION], defaults.comicDirection),
+                comicDualPageCoverAlone = prefs[Keys.COMIC_DUAL_PAGE_COVER_ALONE]
+                    ?: defaults.comicDualPageCoverAlone,
+                comicSpreadAutoDetect = prefs[Keys.COMIC_SPREAD_AUTO_DETECT]
+                    ?: defaults.comicSpreadAutoDetect,
+                comicFitMode = enumOrDefault(prefs[Keys.COMIC_FIT_MODE], defaults.comicFitMode),
+                comicScrollGapDp = prefs[Keys.COMIC_SCROLL_GAP_DP] ?: defaults.comicScrollGapDp,
             )
         }
 
@@ -177,6 +196,14 @@ class SettingsRepositoryImpl(
 
     override suspend fun setPageTurnHotspotRatio(ratio: Float) {
         context.readingPreferencesStore.edit { it[Keys.PAGE_TURN_HOTSPOT_RATIO] = ratio }
+    }
+
+    override suspend fun setMiddleTapAction(action: TapAction) {
+        context.readingPreferencesStore.edit { it[Keys.MIDDLE_TAP_ACTION] = action.name }
+    }
+
+    override suspend fun setMiddleDoubleTapAction(action: TapAction) {
+        context.readingPreferencesStore.edit { it[Keys.MIDDLE_DOUBLE_TAP_ACTION] = action.name }
     }
 
     override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) {
@@ -264,6 +291,28 @@ class SettingsRepositoryImpl(
         val cleaned = rules.map { it.trim() }.filter { it.isNotEmpty() }
         context.readingPreferencesStore.edit {
             it[Keys.AD_CLEAN_RULES] = encodeRuleList(cleaned)
+        }
+    }
+
+    override suspend fun setComicDirection(direction: ComicDirection) {
+        context.readingPreferencesStore.edit { it[Keys.COMIC_DIRECTION] = direction.name }
+    }
+
+    override suspend fun setComicDualPageCoverAlone(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.COMIC_DUAL_PAGE_COVER_ALONE] = enabled }
+    }
+
+    override suspend fun setComicSpreadAutoDetect(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.COMIC_SPREAD_AUTO_DETECT] = enabled }
+    }
+
+    override suspend fun setComicFitMode(mode: ComicFitMode) {
+        context.readingPreferencesStore.edit { it[Keys.COMIC_FIT_MODE] = mode.name }
+    }
+
+    override suspend fun setComicScrollGapDp(gapDp: Int) {
+        context.readingPreferencesStore.edit {
+            it[Keys.COMIC_SCROLL_GAP_DP] = gapDp.coerceIn(0, 64)
         }
     }
 }

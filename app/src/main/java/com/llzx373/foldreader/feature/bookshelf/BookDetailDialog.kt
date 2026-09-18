@@ -71,14 +71,32 @@ fun BookDetailDialog(
                 Text("加载中…")
             } else {
                 val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                val percent = if (book.totalChars > 0 && progress != null) {
-                    "${(progress.charOffset * 100 / book.totalChars).coerceIn(0, 100)}%"
-                } else {
-                    "未开始"
+                val isComic = isPagedFormat(book.format)
+                val percent = when {
+                    isComic -> formatComicProgress(progress?.comicPage, book.comicPageCount)
+                    book.totalChars > 0 && progress != null ->
+                        "${(progress.charOffset * 100 / book.totalChars).coerceIn(0, 100)}%"
+                    else -> "未开始"
                 }
                 val totalMillis = progress?.totalReadingMillis ?: 0L
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    DetailRow("作者", book.author ?: "未知作者")
+                    if (isComic) {
+                        DetailRow(
+                            "类型",
+                            if (book.format == BookFormat.PDF) "PDF 文档"
+                            else "漫画 · ${comicContainerLabel(book.comicContainer)}",
+                        )
+                        DetailRow(
+                            "页数",
+                            book.comicPageCount?.let { "$it 页" } ?: "待解析",
+                        )
+                        DetailRow(
+                            "存储",
+                            if (book.comicLocalPath != null) "已复制到本地" else "引用外部文件",
+                        )
+                    } else {
+                        DetailRow("作者", book.author ?: "未知作者")
+                    }
                     book.seriesName?.let { series ->
                         DetailRow(
                             "丛书",
@@ -95,7 +113,9 @@ fun BookDetailDialog(
                     }
                     book.description?.let { DetailRow("简介", it) }
                     DetailRow("分组", book.groupName ?: "未分组")
-                    DetailRow("总字数", "%,d 字".format(book.totalChars))
+                    if (!isComic) {
+                        DetailRow("总字数", "%,d 字".format(book.totalChars))
+                    }
                     DetailRow("阅读进度", percent)
                     DetailRow("累计时长", formatDurationZh(totalMillis))
                     DetailRow(
@@ -111,29 +131,60 @@ fun BookDetailDialog(
                         "阅读天数",
                         if (readingDays > 0) "$readingDays 天" else "—",
                     )
-                    DetailRow(
-                        "平均速度",
-                        averageCharsPerMinute(progress?.charsReadTotal ?: 0L, totalMillis)
-                            .let { if (it > 0) "$it 字/分钟" else "—" },
-                    )
-                    DetailRow(
-                        label = "编码",
-                        value = book.encoding.ifBlank { "自动检测" },
-                        // 非 TXT 格式固定 UTF-8（压平产物），不提供编码切换
-                        onClick = if (book.format == BookFormat.TXT) {
-                            { showEncodingPicker = true }
+                    if (!isComic) {
+                        DetailRow(
+                            "平均速度",
+                            averageCharsPerMinute(progress?.charsReadTotal ?: 0L, totalMillis)
+                                .let { if (it > 0) "$it 字/分钟" else "—" },
+                        )
+                        DetailRow(
+                            label = "编码",
+                            value = book.encoding.ifBlank { "自动检测" },
+                            // 非 TXT 格式固定 UTF-8（压平产物），不提供编码切换
+                            onClick = if (book.format == BookFormat.TXT) {
+                                { showEncodingPicker = true }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                    if (isComic) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // 「复制到本地」让漫画脱离 SAF 授权：源被移动/删除也还能读
+                        if (book.comicLocalPath == null) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.copyComicLocal(bookId) { message ->
+                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                        refreshTick++
+                                    }
+                                },
+                            ) {
+                                Text("复制到本地")
+                            }
                         } else {
-                            null
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(
-                        onClick = {
-                            viewModel.rebuildChapters(bookId)
-                            Toast.makeText(context, "正在按最新规则重建目录", Toast.LENGTH_SHORT).show()
-                        },
-                    ) {
-                        Text("重建目录")
+                            TextButton(
+                                onClick = {
+                                    viewModel.removeComicLocal(bookId) { message ->
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                        refreshTick++
+                                    }
+                                },
+                            ) {
+                                Text("删除本地副本")
+                            }
+                        }
+                    }
+                    if (!isComic) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = {
+                                viewModel.rebuildChapters(bookId)
+                                Toast.makeText(context, "正在按最新规则重建目录", Toast.LENGTH_SHORT).show()
+                            },
+                        ) {
+                            Text("重建目录")
+                        }
                     }
                 }
             }

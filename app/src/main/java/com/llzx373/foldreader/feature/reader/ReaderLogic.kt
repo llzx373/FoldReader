@@ -2,6 +2,8 @@ package com.llzx373.foldreader.feature.reader
 
 import androidx.compose.ui.geometry.Rect
 import com.llzx373.foldreader.core.data.settings.DualPageMode
+import com.llzx373.foldreader.core.data.settings.PdfReadingMode
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.foldable.FoldingPosture
 import com.llzx373.foldreader.core.foldable.HingeOrientation
 import com.llzx373.foldreader.core.foldable.Posture
@@ -9,7 +11,46 @@ import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.reader.PageAvoidance
 
-enum class TapZone { PREVIOUS, MENU, NEXT }
+/**
+ * 点击分区。中间区（[MIDDLE]）不是一个动作，而是一块**可配置**的区域：
+ * 单击与双击各绑一个 [TapAction]，默认分别是「开关菜单」与「切换缩放」。
+ */
+enum class TapZone { PREVIOUS, MIDDLE, NEXT }
+
+/**
+ * 某阅读器能否执行该动作。
+ *
+ * 用途不只是禁用菜单项：中间区只要配了双击动作就得挂一层点击层，而点击层会让**单击**
+ * 也等一个双击超时。所以文本阅读器遇到自己不支持的动作（如 [TapAction.TOGGLE_ZOOM]）
+ * 必须整层不挂，才能保住既有的零延迟点击。
+ */
+fun supportsTapAction(action: TapAction, paged: Boolean): Boolean = when (action) {
+    TapAction.NONE -> false
+    TapAction.TOGGLE_ZOOM -> paged
+    else -> true
+}
+
+/**
+ * 两次按下是否构成双击。
+ *
+ * 只服务中间区：左右翻页区不做双击等待（让每次单击都等一个双击超时会直接毁掉翻页跟手性）。
+ */
+fun isDoubleTap(
+    firstX: Float,
+    firstY: Float,
+    secondX: Float,
+    secondY: Float,
+    elapsedMs: Long,
+    timeoutMs: Long,
+    slopPx: Float,
+): Boolean {
+    if (elapsedMs < 0L || elapsedMs > timeoutMs) return false
+    return kotlin.math.abs(secondX - firstX) <= slopPx && kotlin.math.abs(secondY - firstY) <= slopPx
+}
+
+/** 中间区动作解析：双击动作未配置（[TapAction.NONE]）时，永远退回单击动作。 */
+fun resolveMiddleTap(single: TapAction, double: TapAction, isDouble: Boolean): TapAction =
+    if (isDouble && double != TapAction.NONE) double else single
 
 enum class PageLayoutMode { SINGLE, DUAL }
 
@@ -167,6 +208,28 @@ fun isDualColumnScroll(
     tabletopActive: Boolean,
 ): Boolean = layoutMode == PageLayoutMode.DUAL && scrollMode && !tabletopActive
 
+/** 热区比例的合法区间：太小点不准，太大就没有中间区了。 */
+private fun hotspotRatioClamped(hotspotRatio: Float): Float = hotspotRatio.coerceIn(0.05f, 0.45f)
+
+/**
+ * 中间区矩形（相对阅读器根容器的 px）。
+ *
+ * 它就是「点击后判定为 [TapZone.MIDDLE] 的那块区域」——中间点击层照它铺，才能保证：
+ * 左右翻页区与底边翻页条都不被点击层覆盖（那两处一旦被覆盖，单击就要等一个双击超时）。
+ * 因此这里的几何必须与 [tapZoneOf] 完全一致，改一个就得改另一个。
+ */
+fun middleZoneRect(widthPx: Float, heightPx: Float, hotspotRatio: Float): ContentRect {
+    val ratio = hotspotRatioClamped(hotspotRatio)
+    val left = widthPx * ratio
+    val right = widthPx * (1f - ratio)
+    return ContentRect(
+        left = left,
+        top = 0f,
+        width = (right - left).coerceAtLeast(0f),
+        height = (heightPx * (1f - ratio)).coerceAtLeast(0f),
+    )
+}
+
 fun tapZoneOf(
     x: Float,
     widthPx: Float,
@@ -174,13 +237,14 @@ fun tapZoneOf(
     y: Float = -1f,
     heightPx: Float = 0f,
 ): TapZone {
-    if (widthPx <= 0f) return TapZone.MENU
-    val ratio = hotspotRatio.coerceIn(0.05f, 0.45f)
+    if (widthPx <= 0f) return TapZone.MIDDLE
+    val ratio = hotspotRatioClamped(hotspotRatio)
+    // 底边整条都是「下一页」：单手拇指够得着，与左右分区无关
     if (heightPx > 0f && y > heightPx * (1f - ratio)) return TapZone.NEXT
     return when {
         x < widthPx * ratio -> TapZone.PREVIOUS
         x > widthPx * (1f - ratio) -> TapZone.NEXT
-        else -> TapZone.MENU
+        else -> TapZone.MIDDLE
     }
 }
 
@@ -210,6 +274,16 @@ fun inChapterFraction(chapters: List<Chapter>, index: Int, anchor: Long): Float 
     if (span <= 0L) return -1f
     return ((anchor - ch.charStart).toFloat() / span).coerceIn(0f, 1f)
 }
+
+/**
+ * PDF 用哪个阅读器。
+ *
+ * 用户手动定过就听用户的；没定过则看文档本身：抽得出正文就当电子书读
+ * （可重排、可调字号、能全文搜索），扫描件只能按页渲染。
+ * 这只是**默认值**——两种模式随时可切，不是给这本书判了刑。
+ */
+fun resolvePdfReadingMode(preference: PdfReadingMode?, hasExtractedText: Boolean): PdfReadingMode =
+    preference ?: if (hasExtractedText) PdfReadingMode.TEXT else PdfReadingMode.PAGED
 
 /** 章节进度文本：无目录（<=1 章）返回 null；inChapter < 0 时只给章序号。 */
 fun chapterProgressText(index: Int, count: Int, inChapter: Float): String? {

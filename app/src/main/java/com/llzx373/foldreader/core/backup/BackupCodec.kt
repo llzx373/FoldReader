@@ -10,8 +10,11 @@ import com.llzx373.foldreader.core.data.db.ReadingSessionDao
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
@@ -90,7 +93,12 @@ class BackupCodec(
                                 .put("chapterIndex", b.chapterIndex)
                                 .put("snapshotText", b.snapshotText)
                                 .put("label", b.label)
-                                .put("createdAt", b.createdAt),
+                                .put("createdAt", b.createdAt)
+                                .put("pageIndex", b.pageIndex ?: JSONObject.NULL)
+                                .put("anchorX", b.anchorX?.toDouble() ?: JSONObject.NULL)
+                                .put("anchorY", b.anchorY?.toDouble() ?: JSONObject.NULL)
+                                .put("anchorW", b.anchorW?.toDouble() ?: JSONObject.NULL)
+                                .put("anchorH", b.anchorH?.toDouble() ?: JSONObject.NULL),
                         )
                     }
                 },
@@ -108,7 +116,12 @@ class BackupCodec(
                                 .put("note", a.note ?: JSONObject.NULL)
                                 .put("style", a.style)
                                 .put("createdAt", a.createdAt)
-                                .put("updatedAt", a.updatedAt),
+                                .put("updatedAt", a.updatedAt)
+                                .put("pageIndex", a.pageIndex ?: JSONObject.NULL)
+                                .put("regionX", a.regionX?.toDouble() ?: JSONObject.NULL)
+                                .put("regionY", a.regionY?.toDouble() ?: JSONObject.NULL)
+                                .put("regionW", a.regionW?.toDouble() ?: JSONObject.NULL)
+                                .put("regionH", a.regionH?.toDouble() ?: JSONObject.NULL),
                         )
                     }
                 },
@@ -212,50 +225,52 @@ class BackupCodec(
             }
 
             val existingBookmarks = bookshelfRepository.observeBookmarks(local.id).first()
-            val existingOffsets = existingBookmarks.mapTo(HashSet()) { it.charOffset }
+            val existingBookmarkKeys = existingBookmarks.mapTo(HashSet()) { bookmarkKey(it) }
             bookJson.optJSONArray("bookmarks")?.let { arr ->
                 for (j in 0 until arr.length()) {
                     val b = arr.getJSONObject(j)
-                    val offset = b.optLong("charOffset")
-                    if (!existingOffsets.add(offset)) continue
-                    bookshelfRepository.addBookmark(
-                        BookmarkEntity(
-                            bookId = local.id,
-                            charOffset = offset,
-                            chapterIndex = b.optInt("chapterIndex"),
-                            snapshotText = b.optString("snapshotText"),
-                            label = b.optString("label"),
-                            createdAt = b.optLong("createdAt"),
-                        ),
+                    val entity = BookmarkEntity(
+                        bookId = local.id,
+                        charOffset = b.optLong("charOffset"),
+                        chapterIndex = b.optInt("chapterIndex"),
+                        snapshotText = b.optString("snapshotText"),
+                        label = b.optString("label"),
+                        createdAt = b.optLong("createdAt"),
+                        pageIndex = b.optLongOrNull("pageIndex"),
+                        anchorX = b.optFloatOrNull("anchorX"),
+                        anchorY = b.optFloatOrNull("anchorY"),
+                        anchorW = b.optFloatOrNull("anchorW"),
+                        anchorH = b.optFloatOrNull("anchorH"),
                     )
+                    if (!existingBookmarkKeys.add(bookmarkKey(entity))) continue
+                    bookshelfRepository.addBookmark(entity)
                     restoredBookmarks++
                 }
             }
 
             val existingAnnotations = bookshelfRepository.observeAnnotations(local.id).first()
-            val existingKeys = existingAnnotations.mapTo(HashSet()) {
-                "${it.startCharOffset}:${it.endCharOffset}:${it.selectedText}"
-            }
+            val existingAnnotationKeys = existingAnnotations.mapTo(HashSet()) { annotationKey(it) }
             bookJson.optJSONArray("annotations")?.let { arr ->
                 for (j in 0 until arr.length()) {
                     val a = arr.getJSONObject(j)
-                    val start = a.optLong("startCharOffset")
-                    val end = a.optLong("endCharOffset")
-                    val selectedText = a.optString("selectedText")
-                    if (!existingKeys.add("$start:$end:$selectedText")) continue
-                    bookshelfRepository.addAnnotation(
-                        AnnotationEntity(
-                            bookId = local.id,
-                            startCharOffset = start,
-                            endCharOffset = end,
-                            selectedText = selectedText,
-                            color = a.optLong("color"),
-                            note = if (a.isNull("note")) null else a.optString("note"),
-                            style = a.optString("style", AnnotationEntity.STYLE_HIGHLIGHT),
-                            createdAt = a.optLong("createdAt"),
-                            updatedAt = a.optLong("updatedAt"),
-                        ),
+                    val entity = AnnotationEntity(
+                        bookId = local.id,
+                        startCharOffset = a.optLong("startCharOffset"),
+                        endCharOffset = a.optLong("endCharOffset"),
+                        selectedText = a.optString("selectedText"),
+                        color = a.optLong("color"),
+                        note = if (a.isNull("note")) null else a.optString("note"),
+                        style = a.optString("style", AnnotationEntity.STYLE_HIGHLIGHT),
+                        createdAt = a.optLong("createdAt"),
+                        updatedAt = a.optLong("updatedAt"),
+                        pageIndex = a.optLongOrNull("pageIndex"),
+                        regionX = a.optFloatOrNull("regionX"),
+                        regionY = a.optFloatOrNull("regionY"),
+                        regionW = a.optFloatOrNull("regionW"),
+                        regionH = a.optFloatOrNull("regionH"),
                     )
+                    if (!existingAnnotationKeys.add(annotationKey(entity))) continue
+                    bookshelfRepository.addAnnotation(entity)
                     restoredAnnotations++
                 }
             }
@@ -313,6 +328,8 @@ class BackupCodec(
         .put("avoidCameraCutout", p.avoidCameraCutout)
         .put("pageTurnMode", p.pageTurnMode.name)
         .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
+        .put("middleTapAction", p.middleTapAction.name)
+        .put("middleDoubleTapAction", p.middleDoubleTapAction.name)
         .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
         .put("brightnessGestureEnabled", p.brightnessGestureEnabled)
         .put("swipeGestureEnabled", p.swipeGestureEnabled)
@@ -331,6 +348,11 @@ class BackupCodec(
         .put("bookshelfGridView", p.bookshelfGridView)
         .put("customChapterRules", JSONArray().apply { p.customChapterRules.forEach { put(it) } })
         .put("adCleanRules", JSONArray().apply { p.adCleanRules.forEach { put(it) } })
+        .put("comicDirection", p.comicDirection.name)
+        .put("comicDualPageCoverAlone", p.comicDualPageCoverAlone)
+        .put("comicSpreadAutoDetect", p.comicSpreadAutoDetect)
+        .put("comicFitMode", p.comicFitMode.name)
+        .put("comicScrollGapDp", p.comicScrollGapDp)
 
     private suspend fun applyPreferences(json: JSONObject) {
         val current = settingsRepository.preferences.first()
@@ -387,6 +409,16 @@ class BackupCodec(
         if (json.has("pageTurnHotspotRatio")) {
             settingsRepository.setPageTurnHotspotRatio(json.optDouble("pageTurnHotspotRatio").toFloat())
         }
+        if (json.has("middleTapAction")) {
+            settingsRepository.setMiddleTapAction(
+                enumOrDefault(json.optString("middleTapAction"), TapAction.TOGGLE_MENU),
+            )
+        }
+        if (json.has("middleDoubleTapAction")) {
+            settingsRepository.setMiddleDoubleTapAction(
+                enumOrDefault(json.optString("middleDoubleTapAction"), TapAction.TOGGLE_ZOOM),
+            )
+        }
         if (json.has("volumeKeyPagingEnabled")) {
             settingsRepository.setVolumeKeyPagingEnabled(json.optBoolean("volumeKeyPagingEnabled"))
         }
@@ -437,12 +469,55 @@ class BackupCodec(
         if (json.has("adCleanRules")) {
             settingsRepository.setAdCleanRules(json.stringList("adCleanRules"))
         }
+        if (json.has("comicDirection")) {
+            settingsRepository.setComicDirection(
+                enumOrDefault(json.optString("comicDirection"), ComicDirection.LTR),
+            )
+        }
+        if (json.has("comicDualPageCoverAlone")) {
+            settingsRepository.setComicDualPageCoverAlone(json.optBoolean("comicDualPageCoverAlone"))
+        }
+        if (json.has("comicSpreadAutoDetect")) {
+            settingsRepository.setComicSpreadAutoDetect(json.optBoolean("comicSpreadAutoDetect"))
+        }
+        if (json.has("comicFitMode")) {
+            settingsRepository.setComicFitMode(
+                enumOrDefault(json.optString("comicFitMode"), ComicFitMode.FIT_PAGE),
+            )
+        }
+        if (json.has("comicScrollGapDp")) {
+            settingsRepository.setComicScrollGapDp(json.optInt("comicScrollGapDp"))
+        }
     }
 
     private fun JSONObject.stringList(key: String): List<String> {
         val arr = optJSONArray(key) ?: return emptyList()
         return (0 until arr.length()).map { arr.getString(it) }
     }
+
+    /**
+     * 书签去重键。
+     *
+     * 页式（漫画 / PDF）书签的 [BookmarkEntity.charOffset] 恒为 0，只按字符偏移去重会让
+     * 「同一页上的多条书签」在导入时互相吞掉，所以页式锚点必须改用页序号 + 页内坐标。
+     */
+    private fun bookmarkKey(b: BookmarkEntity): String =
+        if (b.pageIndex != null) "p:${b.pageIndex}:${b.anchorX}:${b.anchorY}" else "t:${b.charOffset}"
+
+    /** 标注去重键，理由同 [bookmarkKey]：页式高亮按区域去重，文本标注按字符区间。 */
+    private fun annotationKey(a: AnnotationEntity): String =
+        if (a.pageIndex != null) {
+            "p:${a.pageIndex}:${a.regionX}:${a.regionY}:${a.regionW}:${a.regionH}"
+        } else {
+            "t:${a.startCharOffset}:${a.endCharOffset}:${a.selectedText}"
+        }
+
+    /** 可空数值列（页内坐标）：键缺失或显式 null 都还原成 null，老备份天然兼容。 */
+    private fun JSONObject.optLongOrNull(key: String): Long? =
+        if (!has(key) || isNull(key)) null else optLong(key)
+
+    private fun JSONObject.optFloatOrNull(key: String): Float? =
+        if (!has(key) || isNull(key)) null else optDouble(key).toFloat()
 
     private fun bookPrefsJson(p: BookPrefsEntity) = JSONObject()
         .put("fontSizeSp", p.fontSizeSp.toDouble())
@@ -459,6 +534,8 @@ class BackupCodec(
         .put("dualPageMode", p.dualPageMode)
         .put("pageTurnMode", p.pageTurnMode)
         .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
+        .put("middleTapAction", p.middleTapAction)
+        .put("middleDoubleTapAction", p.middleDoubleTapAction)
         .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
         .put("keepScreenOn", p.keepScreenOn)
         .put("showChapterTitle", p.showChapterTitle)
@@ -512,6 +589,8 @@ class BackupCodec(
                 "pageTurnHotspotRatio",
                 defaults.pageTurnHotspotRatio.toDouble(),
             ).toFloat(),
+            middleTapAction = json.optString("middleTapAction", defaults.middleTapAction),
+            middleDoubleTapAction = json.optString("middleDoubleTapAction", defaults.middleDoubleTapAction),
             volumeKeyPagingEnabled = json.optBoolean(
                 "volumeKeyPagingEnabled",
                 defaults.volumeKeyPagingEnabled,

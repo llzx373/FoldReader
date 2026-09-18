@@ -108,6 +108,7 @@ import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.LinkHit
@@ -138,6 +139,8 @@ fun ReaderScreen(
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
     coverTitle: String? = null,
+    /** PDF 文本模式下的「切到页式」出口（由 ReaderHost 决定给不给）。 */
+    onSwitchToPagedMode: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as FoldReaderApplication
@@ -375,7 +378,6 @@ fun ReaderScreen(
             readerTransition.targetState == EnterExitState.Visible &&
             !readerTransition.isRunning)
 
-    var barsRestoreRequested by remember { mutableStateOf(false) }
     val localView = LocalView.current
 
     // 进阅读页即记一次"系统栏可见"的外壳 inset：此刻系统栏一定可见（转场期间不隐藏），
@@ -389,69 +391,14 @@ fun ReaderScreen(
         onDispose { }
     }
 
-    // 离开阅读页（返回书架/去设置）前：先把系统栏恢复为常驻（BEHAVIOR_DEFAULT + show），
-    // 再等外壳真正参与布局的 inset（systemBars ∪ displayCutout）回到"系统栏可见时的实测值"
-    // 并连续两帧稳定，之后才导航——目标页首帧即最终布局。
-    //
-    // 两个坑（都踩过）：
-    //  1) 只看 systemBars 不够：挖孔屏横屏下 displayCutout 的侧边 inset 会晚 ~500ms 才消失，
-    //     书架首帧会按带挖孔 inset 的宽度布局、随后右边缘外扩（封面/右上动作整体右跳）；
-    //  2) 只看 ignoringVisibility 不够：displayCutout 的值不受显隐影响，平台会返回"沉浸中"
-    //     的那个值，门控照样提前放行。所以以沉浸前的实测快照为准（ShellInsets.visibleReference）。
-    fun leaveReader(navigate: () -> Unit) {
-        if (barsRestoreRequested) return
-        barsRestoreRequested = true
-        val window = (localView.context as? Activity)?.window
-        if (window == null) {
-            navigate()
-            return
-        }
-        val controller = WindowCompat.getInsetsController(window, localView)
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-        controller.show(WindowInsetsCompat.Type.systemBars())
-        val reference = ShellInsets.visibleReference()
-        val expected = reference ?: ShellInsets.ignoringVisibility(localView)
-        val gate = BarsRestoreGate(expected)
-        ReturnTrace.log(
-            "leaveReader: bars shown reference=$reference expected=$expected " +
-                "systemBars=${ShellInsets.systemBars(localView)} cutout=${ShellInsets.cutout(localView)}",
-        )
-        scope.launch {
-            // 逐帧轮询而非 snapshotFlow：inset 稳定后 snapshotFlow 不再发射（去重），
-            // "连续两帧不变"永远等不到第二帧，门控会退化成盲等超时——慢设备上
-            // inset 动画晚于超时落地，目标页仍被挤压（横屏右缘导航栏即如此）
-            var frames = 0
-            val start = SystemClock.uptimeMillis()
-            var passed = false
-            // 正常 5 帧内（~100ms）即达标；超时只在厂商 inset 派发异常时触发，届时宁可
-            // 多等也不要带着未落地的 inset 导航（那正是书架整体右跳的来源）
-            while (SystemClock.uptimeMillis() - start < 800L) {
-                val snap = ShellInsets.current(localView)
-                frames++
-                ReturnTrace.log("leaveReader gate frame#$frames shell=$snap")
-                if (gate.onFrame(snap)) {
-                    passed = true
-                    break
-                }
-                withFrameNanos { }
-            }
-            ReturnTrace.log(
-                if (passed) {
-                    "leaveReader: gate passed after $frames frames, navigate"
-                } else {
-                    "leaveReader: gate TIMEOUT($frames frames) shell=${ShellInsets.current(localView)} " +
-                        "systemBars=${ShellInsets.systemBars(localView)} " +
-                        "cutout=${ShellInsets.cutout(localView)}，navigate——若书架仍有跳动，看这里"
-                },
-            )
-            navigate()
-        }
-    }
+    // 离开阅读页（返回书架/去设置）：先把系统栏恢复常驻，等外壳 inset 落地并连续两帧稳定
+    // 再导航，目标页首帧即最终布局。细节见 rememberReaderExit 的注释。
+    val exit = rememberReaderExit()
 
-    BackHandler { leaveReader(onBack) }
+    BackHandler { exit.leaveTo(onBack) }
 
     SystemBarEffects(
-        menuVisible = menuVisible || readerExiting || !readerSettled || barsRestoreRequested,
+        menuVisible = menuVisible || readerExiting || !readerSettled || exit.requested,
         keepScreenOn = prefs.keepScreenOn,
     )
     BrightnessEffect(prefs.readerBrightness)
@@ -726,6 +673,84 @@ fun ReaderScreen(
         return true
     }
 
+    /** 中间点击区可分配的动作。翻页档是**逻辑**上一页/下一页，与阅读方向无关（标签是显式的）。 */
+    val runTapAction: (TapAction) -> Unit = { action ->
+        when (action) {
+            TapAction.TOGGLE_MENU -> menuVisible = !menuVisible
+            TapAction.PREVIOUS_PAGE -> latestTurn(false)
+            TapAction.NEXT_PAGE -> latestTurn(true)
+            // 双页时锚左页，与页式格式「锚在跨页首页」的口径一致
+            TapAction.TOGGLE_BOOKMARK -> viewModel.toggleBookmark(leftPage = true)
+            // 文本阅读器没有页面缩放，这一档对它不生效（中间点击层也不会因此挂载）
+            TapAction.TOGGLE_ZOOM -> Unit
+            TapAction.NONE -> Unit
+        }
+    }
+
+    /**
+     * 点击处理。
+     *
+     * 根手势层与中间点击层共用它：中间区那层要能把双击传进来，别的分支必须一字不差，
+     * 否则「配了双击之后点击行为变了」会变成很难查的差异。链接/划线的优先级也在这里，
+     * 所以中间区的双击不会绕过它们——点在链接上仍然是跳转。
+     */
+    val handleTap: (Offset, Boolean) -> Unit = tap@{ offset, isDouble ->
+        viewModel.noteManualInteraction()
+        if (selection != null) {
+            clearSelection()
+            return@tap
+        }
+        if (menuVisible) {
+            menuVisible = false
+            return@tap
+        }
+        if (scrollMode) {
+            val relX = offset.x - contentRect.left
+            val relY = offset.y - contentRect.top
+            // 链接/脚注引用点按优先（命中即消费，不弹菜单）
+            if (consumeLink(scrollLinkHitAt(relX, relY))) return@tap
+            val caret = scrollCaretAt(relX, relY)
+            if (caret != null) {
+                val ann = annotations.firstOrNull {
+                    caret >= it.startCharOffset && caret < it.endCharOffset
+                }
+                if (ann != null) {
+                    editingAnnotation = ann
+                    return@tap
+                }
+            }
+            menuVisible = true
+            return@tap
+        }
+        // 链接/脚注引用点按优先（先于划线查看与翻页热区）
+        if (consumeLink(hitLink(offset))) return@tap
+        // 点击已有划线 → 查看/编辑（先于翻页热区）
+        val caret = hitCaret(offset)
+        if (caret != null) {
+            val ann = annotations.firstOrNull {
+                caret >= it.startCharOffset && caret < it.endCharOffset
+            }
+            if (ann != null) {
+                editingAnnotation = ann
+                return@tap
+            }
+        }
+        when (
+            tapZoneOf(
+                offset.x,
+                size.width.toFloat(),
+                prefs.pageTurnHotspotRatio,
+                y = offset.y,
+                heightPx = size.height.toFloat(),
+            )
+        ) {
+            TapZone.PREVIOUS -> latestTurn(false)
+            TapZone.NEXT -> latestTurn(true)
+            TapZone.MIDDLE -> runTapAction(
+                resolveMiddleTap(prefs.middleTapAction, prefs.middleDoubleTapAction, isDouble),
+            )
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -764,59 +789,7 @@ fun ReaderScreen(
                 }
             }
             .pointerInput(prefs.pageTurnHotspotRatio, scrollMode) {
-                detectTapGestures { offset ->
-                    viewModel.noteManualInteraction()
-                    if (selection != null) {
-                        clearSelection()
-                        return@detectTapGestures
-                    }
-                    if (menuVisible) {
-                        menuVisible = false
-                        return@detectTapGestures
-                    }
-                    if (scrollMode) {
-                        val relX = offset.x - contentRect.left
-                        val relY = offset.y - contentRect.top
-                        // 链接/脚注引用点按优先（命中即消费，不弹菜单）
-                        if (consumeLink(scrollLinkHitAt(relX, relY))) return@detectTapGestures
-                        val caret = scrollCaretAt(relX, relY)
-                        if (caret != null) {
-                            val ann = annotations.firstOrNull {
-                                caret >= it.startCharOffset && caret < it.endCharOffset
-                            }
-                            if (ann != null) {
-                                editingAnnotation = ann
-                                return@detectTapGestures
-                            }
-                        }
-                        menuVisible = true
-                        return@detectTapGestures
-                    }
-                    // 链接/脚注引用点按优先（先于划线查看与翻页热区）
-                    if (consumeLink(hitLink(offset))) return@detectTapGestures
-                    // 点击已有划线 → 查看/编辑（先于翻页热区）
-                    val caret = hitCaret(offset)
-                    if (caret != null) {
-                        val ann = annotations.firstOrNull {
-                            caret >= it.startCharOffset && caret < it.endCharOffset
-                        }
-                        if (ann != null) {
-                            editingAnnotation = ann
-                            return@detectTapGestures
-                        }
-                    }
-                    when (tapZoneOf(
-                        offset.x,
-                        size.width.toFloat(),
-                        prefs.pageTurnHotspotRatio,
-                        y = offset.y,
-                        heightPx = size.height.toFloat(),
-                    )) {
-                        TapZone.PREVIOUS -> latestTurn(false)
-                        TapZone.NEXT -> latestTurn(true)
-                        TapZone.MENU -> menuVisible = true
-                    }
-                }
+                detectTapGestures { offset -> handleTap(offset, false) }
             }
             .pointerInput(scrollMode, dual) {
                 // 长按进入选择模式，拖动扩展选区，越出页边缘自动翻页继续选择
@@ -912,7 +885,7 @@ fun ReaderScreen(
                 actionLabel = "重试",
                 onAction = viewModel::retry,
                 secondaryActionLabel = "返回书架",
-                onSecondaryAction = { leaveReader(onBack) },
+                onSecondaryAction = { exit.leaveTo(onBack) },
                 modifier = Modifier.align(Alignment.Center),
             )
             else -> Box(
@@ -996,6 +969,20 @@ fun ReaderScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // 中间点击层：只有配了本阅读器能执行的双击动作时才铺。
+        // 它只盖住「判定为中间区」的那块矩形，左右翻页与底边翻页条都保持抬手即响应；
+        // 单击分支与下层完全一致，链接/划线的优先级不受影响。
+        if (uiState.error == null && !uiState.loading) {
+            val doubleAction = prefs.middleDoubleTapAction
+            if (supportsTapAction(doubleAction, paged = false)) {
+                MiddleTapLayer(
+                    hotspotRatio = prefs.pageTurnHotspotRatio,
+                    doubleTapAction = doubleAction,
+                    onTap = { offset, isDouble -> handleTap(offset, isDouble) },
+                )
             }
         }
 
@@ -1204,7 +1191,7 @@ fun ReaderScreen(
                 bookTitle = uiState.bookTitle,
                 chapterTitle = position.chapterTitle,
                 colors = colors,
-                onBack = { leaveReader(onBack) },
+                onBack = { exit.leaveTo(onBack) },
                 dualPage = uiState.dualPage,
                 hasRightPage = uiState.spread?.right != null,
                 leftBookmarked = uiState.spread?.left?.charStart in bookmarkedOffsets,
@@ -1231,6 +1218,7 @@ fun ReaderScreen(
                     }
                 },
                 onOpenCatalog = { catalogVisible = true },
+                onSwitchToPagedMode = onSwitchToPagedMode,
                 onOpenAnnotations = { annotationsVisible = true },
                 onCyclePageTurnMode = {
                     viewModel.setPageTurnMode(nextPageTurnMode(rawMode))
@@ -1267,7 +1255,7 @@ fun ReaderScreen(
                             viewModel.setAutoPageSpeedPx(nextAutoPageSpeedPx(prefs.autoPageSpeedPx))
                     }
                 },
-                onOpenSettings = { leaveReader(onOpenSettings) },
+                onOpenSettings = { exit.leaveTo(onOpenSettings) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding(),
@@ -1869,65 +1857,6 @@ private fun ScrollContent(
                     imageProvider = viewModel.imageProvider,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SystemBarEffects(menuVisible: Boolean, keepScreenOn: Boolean) {
-    val view = LocalView.current
-    DisposableEffect(menuVisible) {
-        val window = (view.context as? Activity)?.window ?: return@DisposableEffect onDispose {}
-        val controller = WindowCompat.getInsetsController(window, view)
-        if (menuVisible) {
-            // 不碰 behavior：退出路径由 leaveReader 先复位为 BEHAVIOR_DEFAULT 再 show，
-            // 常驻栏 inset 在导航前到位；菜单期保持 transient 覆盖层，菜单布局不被推动
-            controller.show(WindowInsetsCompat.Type.systemBars())
-        } else {
-            // 沉浸之前先把"系统栏可见"的外壳 inset 记账：返回门控以它为期望值
-            // （displayCutout 在沉浸期间会上报额外的侧边 inset，平台不会随 show 立即清掉）
-            ShellInsets.rememberVisibleReference(view)
-            ReturnTrace.log(
-                "reader immersive: reference=${ShellInsets.visibleReference()} " +
-                    "systemBars=${ShellInsets.systemBars(view)} cutout=${ShellInsets.cutout(view)}",
-            )
-            // transient 模式：系统栏以覆盖层形式显隐，不改变 app 的 WindowInsets，
-            // 阅读期间滑动唤出/隐藏系统栏都不会引发正文重排
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-        }
-        onDispose {
-            // behavior 是窗口级状态：不复位的话，transient 模式 show 出的系统栏
-            // 会在几秒后自动隐藏（书架/设置页系统栏自己消失）
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-            controller.show(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-    DisposableEffect(keepScreenOn) {
-        val window = (view.context as? Activity)?.window ?: return@DisposableEffect onDispose {}
-        if (keepScreenOn) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-        onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-    }
-}
-
-@Composable
-private fun BrightnessEffect(brightness: Float) {
-    val view = LocalView.current
-    DisposableEffect(brightness) {
-        val window = (view.context as? Activity)?.window ?: return@DisposableEffect onDispose {}
-        val previous = window.attributes.screenBrightness
-        val lp = window.attributes
-        lp.screenBrightness = brightness
-        window.attributes = lp
-        onDispose {
-            val restored = window.attributes
-            restored.screenBrightness = previous
-            window.attributes = restored
         }
     }
 }

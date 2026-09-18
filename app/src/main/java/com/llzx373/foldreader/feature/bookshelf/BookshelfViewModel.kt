@@ -16,6 +16,7 @@ import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.OffsetIndexStore
 import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.feature.importer.BatchImportUseCase
+import com.llzx373.foldreader.feature.importer.ComicImportUseCase
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,7 +40,8 @@ private fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): L
         }
     }
 
-sealed interface ImportUiState {    data object Idle : ImportUiState
+sealed interface ImportUiState {
+    data object Idle : ImportUiState
 
     /** [progress] 小于 0 表示不确定进度（未启用清理）。 */
     data class Importing(val progress: Float = -1f) : ImportUiState
@@ -78,6 +80,7 @@ class BookshelfViewModel(
     private val settingsRepository: SettingsRepository,
     private val parsers: BookParsers,
     private val offsetIndexStore: OffsetIndexStore,
+    private val comicImport: ComicImportUseCase,
 ) : ViewModel() {
 
     val books: StateFlow<List<BookWithProgress>> = combine(
@@ -270,6 +273,33 @@ class BookshelfViewModel(
         }
     }
 
+    /**
+     * 「复制到本地」：把漫画内容解包进应用私有目录，此后不再依赖外部授权。
+     * [onResult] 回传提示文案（成功/失败都要让用户知道）。
+     */
+    fun copyComicLocal(bookId: Long, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching { comicImport.copyLocal(bookId) }
+                .fold(
+                    onSuccess = { "已复制到本地，源文件不再需要保持可读" },
+                    onFailure = { "复制失败：${it.message ?: "未知错误"}" },
+                )
+            onResult(message)
+        }
+    }
+
+    /** 删除本地副本，回到引用外部源。 */
+    fun removeComicLocal(bookId: Long, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching { comicImport.removeLocalCopy(bookId) }
+                .fold(
+                    onSuccess = { "已删除本地副本" },
+                    onFailure = { "删除失败：${it.message ?: "未知错误"}" },
+                )
+            onResult(message)
+        }
+    }
+
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -280,6 +310,7 @@ class BookshelfViewModel(
                     settingsRepository = container.settingsRepository,
                     parsers = container.bookParsers,
                     offsetIndexStore = container.offsetIndexStore,
+                    comicImport = container.comicImportUseCase,
                 )
             }
         }

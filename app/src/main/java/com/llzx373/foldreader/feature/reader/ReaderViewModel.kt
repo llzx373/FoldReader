@@ -222,12 +222,21 @@ class ReaderViewModel(
     private val autoPageTurnRequests = AutoPageTurnRequests()
     val autoPageTurns: kotlinx.coroutines.flow.SharedFlow<Boolean> = autoPageTurnRequests.requests
 
+    /**
+     * 只保留**文本锚点**的书签。
+     *
+     * 同一本书可能两种锚点都有（文本型 PDF 既能当电子书读、也能按页读），
+     * 页式书签的 [BookmarkEntity.charOffset] 恒为 0，混进来会全部挤在第 0 字符上。
+     */
     val bookmarks: StateFlow<List<com.llzx373.foldreader.core.data.db.BookmarkEntity>> =
         bookshelfRepository.observeBookmarks(bookId)
+            .map { list -> list.filter { it.pageIndex == null } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** 同理只保留文本锚点的标注；页式高亮由页式阅读器负责渲染。 */
     val annotations: StateFlow<List<com.llzx373.foldreader.core.data.db.AnnotationEntity>> =
         bookshelfRepository.observeAnnotations(bookId)
+            .map { list -> list.filter { it.pageIndex == null } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 快照校对不通过的标注 id（打开书时抽样校验，标记"可能错位"，不删）。 */
@@ -317,7 +326,7 @@ class ReaderViewModel(
         val source = content ?: return
         val anns = withContext(Dispatchers.IO) {
             bookshelfRepository.observeAnnotations(bookId).first()
-        }
+        }.filter { it.pageIndex == null }
         val shifted = mutableSetOf<Long>()
         anns.forEach { ann ->
             val range = snapshotVerifyRange(
@@ -534,6 +543,12 @@ class ReaderViewModel(
                 _uiState.update { it.copy(loading = false, error = "书籍不存在") }
                 return@launch
             }
+            // 防御性断言：漫画由 ComicReaderViewModel 承担，路由分流见 ReaderHost。
+            // 真走到这里说明分发出了问题——明确报错，而不是把压缩包当文本解出满屏乱码。
+            if (book.format == BookFormat.COMIC) {
+                _uiState.update { it.copy(loading = false, error = "漫画请用漫画阅读器打开") }
+                return@launch
+            }
             runCatching { bookPrefsRepository.ensureInitialized(bookId) }
             try {
                 val uri = Uri.parse(book.fileUri)
@@ -729,7 +744,9 @@ class ReaderViewModel(
 
     private suspend fun persistProgress(offset: Long) {
         val nowMs = System.currentTimeMillis()
-        bookshelfRepository.saveProgress(buildProgress(offset, nowMs))
+        // 文本与页式（页式 PDF）共用一行进度，整行 REPLACE 保存前先把页式锚点带过来
+        val existing = bookshelfRepository.getProgress(bookId)
+        bookshelfRepository.saveProgress(buildProgress(offset, nowMs).keepPagedAnchor(existing))
         bookshelfRepository.touchLastRead(bookId)
         flushReadingSession(nowMs)
     }
@@ -1371,7 +1388,8 @@ class ReaderViewModel(
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
                 if (offset != null) {
-                    bookshelfRepository.saveProgress(buildProgress(offset, nowMs))
+                    val existing = bookshelfRepository.getProgress(bookId)
+                    bookshelfRepository.saveProgress(buildProgress(offset, nowMs).keepPagedAnchor(existing))
                 }
                 bookshelfRepository.touchLastRead(bookId, nowMs)
                 flushReadingSession(nowMs)

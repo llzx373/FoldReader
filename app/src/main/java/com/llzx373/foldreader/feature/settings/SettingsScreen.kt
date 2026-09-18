@@ -49,9 +49,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.backup.BackupManager
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.format.ChapterRules
@@ -257,10 +260,113 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 format = { "%.0f%%".format(it * 100) },
                 onChange = viewModel::updateHotspotRatio,
             )
+            SegmentedSetting(
+                label = "中间点击",
+                options = listOf("菜单", "上页", "下页", "书签", "无"),
+                selectedIndex = when (prefs.middleTapAction) {
+                    TapAction.PREVIOUS_PAGE -> 1
+                    TapAction.NEXT_PAGE -> 2
+                    TapAction.TOGGLE_BOOKMARK -> 3
+                    TapAction.NONE -> 4
+                    else -> 0
+                },
+                onSelect = { index ->
+                    viewModel.updateMiddleTapAction(
+                        when (index) {
+                            1 -> TapAction.PREVIOUS_PAGE
+                            2 -> TapAction.NEXT_PAGE
+                            3 -> TapAction.TOGGLE_BOOKMARK
+                            4 -> TapAction.NONE
+                            else -> TapAction.TOGGLE_MENU
+                        },
+                    )
+                },
+            )
+            SegmentedSetting(
+                label = "中间双击",
+                options = listOf("无", "缩放", "菜单", "书签"),
+                selectedIndex = when (prefs.middleDoubleTapAction) {
+                    TapAction.TOGGLE_ZOOM -> 1
+                    TapAction.TOGGLE_MENU -> 2
+                    TapAction.TOGGLE_BOOKMARK -> 3
+                    else -> 0
+                },
+                onSelect = { index ->
+                    viewModel.updateMiddleDoubleTapAction(
+                        when (index) {
+                            1 -> TapAction.TOGGLE_ZOOM
+                            2 -> TapAction.TOGGLE_MENU
+                            3 -> TapAction.TOGGLE_BOOKMARK
+                            else -> TapAction.NONE
+                        },
+                    )
+                },
+            )
             SwitchSetting("音量键翻页", prefs.volumeKeyPagingEnabled, viewModel::updateVolumeKeyPaging)
             SwitchSetting("左侧滑动调亮度", prefs.brightnessGestureEnabled, viewModel::updateBrightnessGesture)
             SwitchSetting("滑动翻页手势", prefs.swipeGestureEnabled, viewModel::updateSwipeGesture)
             SwitchSetting("屏幕常亮", prefs.keepScreenOn, viewModel::updateKeepScreenOn)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("漫画")
+            SegmentedSetting(
+                label = "阅读方向",
+                options = listOf("左→右", "右→左（日漫）"),
+                selectedIndex = if (prefs.comicDirection == ComicDirection.RTL) 1 else 0,
+                onSelect = { index ->
+                    viewModel.updateComicDirection(
+                        if (index == 1) ComicDirection.RTL else ComicDirection.LTR,
+                    )
+                },
+            )
+            SegmentedSetting(
+                label = "适应模式",
+                options = listOf("整页", "宽度", "高度", "原图"),
+                selectedIndex = when (prefs.comicFitMode) {
+                    ComicFitMode.FIT_PAGE -> 0
+                    ComicFitMode.FIT_WIDTH -> 1
+                    ComicFitMode.FIT_HEIGHT -> 2
+                    ComicFitMode.ORIGINAL -> 3
+                },
+                onSelect = { index ->
+                    viewModel.updateComicFitMode(
+                        when (index) {
+                            1 -> ComicFitMode.FIT_WIDTH
+                            2 -> ComicFitMode.FIT_HEIGHT
+                            3 -> ComicFitMode.ORIGINAL
+                            else -> ComicFitMode.FIT_PAGE
+                        },
+                    )
+                },
+            )
+            SwitchSetting(
+                "封面单独成页（双页从第 2 页开始配对）",
+                prefs.comicDualPageCoverAlone,
+                viewModel::updateComicCoverAlone,
+            )
+            SwitchSetting(
+                "跨页大图独占整宽",
+                prefs.comicSpreadAutoDetect,
+                viewModel::updateComicSpreadAutoDetect,
+            )
+            SegmentedSetting(
+                label = "纵向滚动页间距",
+                options = listOf("无缝", "小", "大"),
+                selectedIndex = when {
+                    prefs.comicScrollGapDp <= 0 -> 0
+                    prefs.comicScrollGapDp <= 8 -> 1
+                    else -> 2
+                },
+                onSelect = { index ->
+                    viewModel.updateComicScrollGap(
+                        when (index) {
+                            1 -> 8
+                            2 -> 24
+                            else -> 0
+                        },
+                    )
+                },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("页眉页脚")

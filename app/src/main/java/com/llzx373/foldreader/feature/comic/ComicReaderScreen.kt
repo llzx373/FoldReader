@@ -1,0 +1,1153 @@
+package com.llzx373.foldreader.feature.comic
+
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
+import android.view.KeyEvent
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.comic.ComicSeriesCandidate
+import com.llzx373.foldreader.core.data.db.AnnotationEntity
+import com.llzx373.foldreader.core.data.settings.AutoPageMode
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.TapAction
+import com.llzx373.foldreader.core.data.settings.PdfReadingMode
+import com.llzx373.foldreader.core.foldable.FoldableUiState
+import com.llzx373.foldreader.feature.bookshelf.BookCover
+import com.llzx373.foldreader.feature.reader.AnnotationEditDialog
+import com.llzx373.foldreader.feature.reader.AnnotationListDialog
+import com.llzx373.foldreader.feature.reader.BookmarkListDialog
+import com.llzx373.foldreader.feature.reader.BrightnessEffect
+import com.llzx373.foldreader.feature.reader.ChapterListDialog
+import com.llzx373.foldreader.feature.reader.MiddleTapLayer
+import com.llzx373.foldreader.feature.reader.PageLayoutMode
+import com.llzx373.foldreader.feature.reader.SelectionActionBar
+import com.llzx373.foldreader.feature.reader.SpineOverlay
+import com.llzx373.foldreader.feature.reader.SystemBarEffects
+import com.llzx373.foldreader.feature.reader.TapZone
+import com.llzx373.foldreader.feature.reader.VolumeKeyDispatch
+import com.llzx373.foldreader.feature.reader.annotationColorPalette
+import com.llzx373.foldreader.feature.reader.contentRectFor
+import com.llzx373.foldreader.feature.reader.dualSplit
+import com.llzx373.foldreader.feature.reader.pageLabelOf
+import com.llzx373.foldreader.feature.reader.readerColors
+import com.llzx373.foldreader.feature.reader.rememberReaderExit
+import com.llzx373.foldreader.feature.reader.resolvePageLayoutMode
+import com.llzx373.foldreader.feature.reader.resolveMiddleTap
+import com.llzx373.foldreader.feature.reader.resolveTabletopLayout
+import com.llzx373.foldreader.feature.reader.supportsTapAction
+import com.llzx373.foldreader.feature.reader.tapZoneOf
+import com.llzx373.foldreader.feature.reader.volumeKeyDispatch
+import com.llzx373.foldreader.ui.EmptyState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.abs
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+
+private val ANIM_MS = 220
+
+/**
+ * 漫画阅读页。与文本阅读器同构：全窗口覆盖层里渲染，沉浸、折叠适配、主题、计时全部沿用
+ * 同一套共享件（[SystemBarEffects] / [BrightnessEffect] / [rememberReaderExit] / ReaderLogic）。
+ */
+@OptIn(
+    ExperimentalSharedTransitionApi::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+)
+@Composable
+fun ComicReaderScreen(
+    bookId: Long,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
+    foldableUiState: FoldableUiState,
+    initialPage: Int = -1,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    coverTitle: String? = null,
+    /** 跳到同系列的其它卷（由导航层替换当前阅读页）。 */
+    onOpenBook: (Long) -> Unit = {},
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as FoldReaderApplication
+    val viewModel: ComicReaderViewModel = viewModel(
+        key = "comic-$bookId",
+        factory = ComicReaderViewModel.factory(app.container, bookId, initialPage),
+    )
+    val uiState by viewModel.uiState.collectAsState()
+    val prefs by viewModel.preferences.collectAsState()
+    val position by viewModel.readingPosition.collectAsState()
+    val spreadIndex by viewModel.spreadIndex.collectAsState()
+    val features by viewModel.features.collectAsState()
+    val outline by viewModel.outline.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
+    val annotations by viewModel.annotations.collectAsState()
+    val series by viewModel.series.collectAsState()
+    val searchState by viewModel.search.collectAsState()
+    val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
+    // 日漫从右往左：点左侧是「下一页」，滑动方向与双页左右归属一并翻转。
+    // PDF 没有这个语义，features.rtl 为 false 时整片关闭。
+    val rtl = features.rtl && prefs.comicDirection == ComicDirection.RTL
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val density = LocalDensity.current
+
+    var menuVisible by remember { mutableStateOf(false) }
+    var thumbnailsVisible by remember { mutableStateOf(false) }
+    var outlineVisible by remember { mutableStateOf(false) }
+    var bookmarksVisible by remember { mutableStateOf(false) }
+    var annotationsVisible by remember { mutableStateOf(false) }
+    var seriesVisible by remember { mutableStateOf(false) }
+    var jumpVisible by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(false) }
+    var editingAnnotation by remember { mutableStateOf<AnnotationEntity?>(null) }
+
+    // 同系列的前后卷：直接从状态列表推，避免在组合期调用 ViewModel 函数（那样系列载入后不会重组）
+    val seriesIndex = series.indexOfFirst { it.bookId == bookId }
+    val prevVolume = if (seriesIndex > 0) series[seriesIndex - 1] else null
+    val nextVolume = if (seriesIndex >= 0 && seriesIndex < series.lastIndex) {
+        series[seriesIndex + 1]
+    } else {
+        null
+    }
+    val seriesPosition = if (seriesIndex >= 0 && series.size > 1) {
+        "${seriesIndex + 1}/${series.size}"
+    } else {
+        null
+    }
+
+    /** 打开系列里的某一卷：已入库直接跳；未入库先按需导入，成功后再跳。 */
+    val openSeriesEntry: (ComicSeriesCandidate) -> Unit = { candidate ->
+        seriesVisible = false
+        val existing = candidate.bookId
+        if (existing != null) {
+            onOpenBook(existing)
+        } else {
+            scope.launch {
+                viewModel.resolveSeriesEntry(candidate)?.let(onOpenBook)
+            }
+        }
+    }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    var windowOffsetX by remember { mutableStateOf(0f) }
+    var windowOffsetY by remember { mutableStateOf(0f) }
+    var brightnessHint by remember { mutableStateOf<Float?>(null) }
+
+    val layoutMode = resolvePageLayoutMode(
+        posture = foldableUiState.posture,
+        widthCategory = foldableUiState.widthCategory,
+        windowPortrait = foldableUiState.windowPortrait,
+        pref = prefs.dualPageMode,
+        wideScreenDualPage = prefs.wideScreenDualPage,
+    )
+    val hingeLocal = foldableUiState.posture.hingeBounds
+        ?.takeIf { it.width > 0f || it.height > 0f }
+        ?.let {
+            Rect(
+                it.left - windowOffsetX,
+                it.top - windowOffsetY,
+                it.right - windowOffsetX,
+                it.bottom - windowOffsetY,
+            )
+        }
+    val tabletop = resolveTabletopLayout(
+        posture = foldableUiState.posture,
+        hingeLocal = hingeLocal,
+        widthPx = size.width.toFloat(),
+        heightPx = size.height.toFloat(),
+    )
+    val scrollMode = prefs.pageTurnMode == PageTurnMode.SCROLL
+    // 纵向连续滚动没有"左右两页"可言，双页一律退回单栏
+    val dual = layoutMode == PageLayoutMode.DUAL && tabletop == null && !scrollMode
+    val (splitLeftPx, splitRightPx) = dualSplit(
+        posture = foldableUiState.posture,
+        hingeLocal = hingeLocal,
+        widthPx = size.width.toFloat(),
+    )
+    val contentRect = tabletop?.content ?: contentRectFor(
+        posture = foldableUiState.posture,
+        hingeLocal = hingeLocal,
+        widthPx = size.width.toFloat(),
+        heightPx = size.height.toFloat(),
+    )
+
+    LaunchedEffect(dual) { viewModel.setDualPage(dual) }
+
+    // 解码目标 = 单页实际可用的槽位尺寸；折叠/旋转改变尺寸时重解码
+    val decodeTargetW = (
+        if (dual) maxOf(splitLeftPx, size.width - splitRightPx) else contentRect.width
+        ).roundToInt()
+    val decodeTargetH = contentRect.height.roundToInt()
+    LaunchedEffect(decodeTargetW, decodeTargetH) {
+        viewModel.setDecodeTarget(decodeTargetW, decodeTargetH)
+    }
+
+    val exit = rememberReaderExit()
+    BackHandler { exit.leaveTo(onBack) }
+
+    val readerTransition = animatedVisibilityScope?.transition
+    val readerExiting = readerTransition != null &&
+        readerTransition.targetState != EnterExitState.Visible
+    val readerSettled = readerTransition == null ||
+        (readerTransition.currentState == EnterExitState.Visible &&
+            readerTransition.targetState == EnterExitState.Visible &&
+            !readerTransition.isRunning)
+
+    SystemBarEffects(
+        menuVisible = menuVisible || readerExiting || !readerSettled || exit.requested,
+        keepScreenOn = prefs.keepScreenOn,
+    )
+    BrightnessEffect(prefs.readerBrightness)
+
+    var foreground by remember { mutableStateOf(true) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> foreground = true
+                Lifecycle.Event.ON_PAUSE -> foreground = false
+                Lifecycle.Event.ON_STOP -> viewModel.flushReadingSessionNow()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error) {
+        viewModel.setReadingActive(
+            foreground && !menuVisible && !uiState.loading && uiState.error == null,
+        )
+    }
+
+    // 内存吃紧时丢掉已解码的页；回到前台由可见页重新解码
+    DisposableEffect(viewModel, context) {
+        val callback = object : ComponentCallbacks2 {
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+            override fun onLowMemory() = viewModel.clearImageBitmaps()
+            override fun onTrimMemory(level: Int) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) viewModel.clearImageBitmaps()
+            }
+        }
+        context.registerComponentCallbacks(callback)
+        onDispose { context.unregisterComponentCallbacks(callback) }
+    }
+
+    LaunchedEffect(brightnessHint) {
+        if (brightnessHint != null) {
+            delay(1200)
+            brightnessHint = null
+        }
+    }
+
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    val scrollListState = rememberLazyListState()
+
+    fun scrollByScreen(direction: Int) {
+        scope.launch {
+            val info = scrollListState.layoutInfo
+            val viewport = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+            if (viewport > 0f) scrollListState.animateScrollBy(viewport * 0.9f * direction)
+        }
+    }
+
+    // 进入滚动模式（或首次加载完成）时落到保存的页；之后滚动位置反过来写进度
+    LaunchedEffect(scrollMode, uiState.loading) {
+        if (scrollMode && !uiState.loading && uiState.pageCount > 0) {
+            scrollListState.scrollToItem(uiState.pageIndex.coerceIn(0, uiState.pageCount - 1))
+        }
+    }
+    LaunchedEffect(scrollMode) {
+        if (!scrollMode) return@LaunchedEffect
+        snapshotFlow { scrollListState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { viewModel.onScrollAnchor(it) }
+    }
+
+    // 覆盖滑动：正在滑入的页组，底下仍画当前页
+    val animX = remember { Animatable(0f) }
+    var animPages by remember { mutableStateOf<List<Int>?>(null) }
+
+    fun turn(forward: Boolean) {
+        scope.launch {
+            if (animPages != null) return@launch
+            val state = uiState
+            val target = if (forward) spreadIndex.next(state.pageIndex)
+            else spreadIndex.previous(state.pageIndex)
+            if (target == null) return@launch
+            if (prefs.pageTurnMode == PageTurnMode.NONE || size.width <= 0) {
+                viewModel.goToPage(target, countRead = true)
+                return@launch
+            }
+            animPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
+            // 覆盖滑入：新跨页从它"身后"那一侧滑进来，日漫方向相反
+            val fromRight = forward != rtl
+            animX.snapTo(if (fromRight) size.width.toFloat() else -size.width.toFloat())
+            animX.animateTo(0f, tween(ANIM_MS))
+            viewModel.goToPage(target, countRead = true)
+            animPages = null
+        }
+    }
+    val latestTurn by rememberUpdatedState<(Boolean) -> Unit> { forward -> turn(forward) }
+
+    // 自动翻页·间隔模式：到点由 ViewModel 发请求。滚动模式下翻页要顺手把列表滚过去，
+    // 否则页号变了而画面还在原处（列表只在进入滚动模式时对过一次页号）。
+    LaunchedEffect(viewModel, scrollMode) {
+        viewModel.autoPageTurns.collect { forward ->
+            if (scrollMode) {
+                val next = spreadIndex.next(uiState.pageIndex) ?: return@collect
+                scope.launch { scrollListState.animateScrollToItem(next) }
+                viewModel.goToPage(next)
+            } else {
+                latestTurn(forward)
+            }
+        }
+    }
+
+    // 自动翻页·滚动模式：条漫按 px/s 匀速推进。用户自己拖动时（isScrollInProgress）让位。
+    LaunchedEffect(
+        scrollMode,
+        prefs.autoPageEnabled,
+        prefs.autoPageMode,
+        prefs.autoPageSpeedPx,
+        menuVisible,
+    ) {
+        if (!scrollMode || !prefs.autoPageEnabled || prefs.autoPageMode != AutoPageMode.SCROLL) {
+            return@LaunchedEffect
+        }
+        var lastFrameNs = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (menuVisible || scrollListState.isScrollInProgress) {
+                    lastFrameNs = 0L
+                } else if (lastFrameNs != 0L) {
+                    val dtSec = (now - lastFrameNs) / 1_000_000_000f
+                    // dispatchRawDelta 是同步的：在帧回调里直接用，不必为每一帧起一个协程
+                    scrollListState.dispatchRawDelta(prefs.autoPageSpeedPx * dtSec)
+                    lastFrameNs = now
+                } else {
+                    lastFrameNs = now
+                }
+            }
+        }
+    }
+
+    // 页内选区（动作条据此出现）。翻页即清空：选区是页内坐标，跨页没有意义。
+    var pageSelection by remember { mutableStateOf<PageSelection?>(null) }
+    LaunchedEffect(uiState.pageIndex) { pageSelection = null }
+
+    /**
+     * 页内锚点上下文。
+     *
+     * `onSelectionUpdate` 刻意不接：拖框过程中页面自己按本地状态绘制（见 ComicPageView），
+     * 每帧回写阅读器状态会让整棵界面跟着重组；只有松手定型才回写一次。
+     */
+    val anchorHost = PageAnchorHost(
+        bookmarks = bookmarks,
+        annotations = annotations,
+        selection = pageSelection,
+        onAnchorPoint = { page, x, y -> viewModel.toggleBookmark(page, x, y) },
+        onSelectionCommit = { page, selection ->
+            // 先按手指画的框亮出来（动作条立刻可用），有文字层时再换成文档自己的选区
+            pageSelection = selection
+            scope.launch {
+                val snapped = viewModel.snapSelectionToText(page, selection.rect)
+                // 期间用户可能已经取消或改了选区：只替换仍然属于这一页的那一个
+                if (snapped != null && pageSelection?.pageIndex == page) pageSelection = snapped
+            }
+        },
+    )
+
+    /** 中间点击区可分配的动作。翻页档用的是**逻辑**上一页/下一页，与 RTL 无关（标签是显式的）。 */
+    val runTapAction: (TapAction) -> Unit = { action ->
+        when (action) {
+            TapAction.TOGGLE_MENU -> menuVisible = !menuVisible
+            TapAction.PREVIOUS_PAGE -> latestTurn(false)
+            TapAction.NEXT_PAGE -> latestTurn(true)
+            TapAction.TOGGLE_BOOKMARK -> viewModel.toggleBookmarkOnCurrentPage()
+            TapAction.TOGGLE_ZOOM -> viewModel.toggleZoomFit()
+            TapAction.NONE -> Unit
+        }
+    }
+
+    /**
+     * 点击处理。
+     *
+     * 根手势层与中间点击层共用它——中间区那层要能把双击传进来，其余分支必须完全一致，
+     * 否则「配了双击之后点击行为变了」会变成很难查的差异。
+     */
+    val handleTap: (Offset, Boolean) -> Unit = { offset, isDouble ->
+        viewModel.noteManualInteraction()
+        if (pageSelection != null) {
+            // 有选区时点一下先收起选区，与文本阅读器的「点一下退选」一致
+            pageSelection = null
+        } else if (menuVisible) {
+            menuVisible = false
+        } else if (scrollMode) {
+            // 连续滚动里左右热区没有意义（页面是竖向连成一条的），点哪都呼出菜单
+            menuVisible = true
+        } else {
+            when (
+                tapZoneOf(
+                    offset.x,
+                    size.width.toFloat(),
+                    prefs.pageTurnHotspotRatio,
+                    y = offset.y,
+                    heightPx = size.height.toFloat(),
+                )
+            ) {
+                // 热区是屏幕左右，与阅读方向无关：日漫点左侧才是下一页
+                TapZone.PREVIOUS -> latestTurn(rtl)
+                TapZone.NEXT -> latestTurn(!rtl)
+                TapZone.MIDDLE -> runTapAction(
+                    resolveMiddleTap(prefs.middleTapAction, prefs.middleDoubleTapAction, isDouble),
+                )
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .onSizeChanged { size = it }
+            .onGloballyPositioned {
+                val bounds = it.boundsInWindow()
+                windowOffsetX = bounds.left
+                windowOffsetY = bounds.top
+            }
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent { event ->
+                val native = event.nativeKeyEvent
+                if (native.action != KeyEvent.ACTION_DOWN) return@onKeyEvent false
+                // 外接键盘 / 桌面模式的常规翻页键（音量键那档是可选项，见下）
+                when (native.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_PAGE_DOWN,
+                    KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_NEXT,
+                    -> {
+                        if (scrollMode) scrollByScreen(1) else latestTurn(!rtl)
+                        return@onKeyEvent true
+                    }
+
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_PAGE_UP,
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                    -> {
+                        if (scrollMode) scrollByScreen(-1) else latestTurn(rtl)
+                        return@onKeyEvent true
+                    }
+
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        scrollByScreen(1)
+                        return@onKeyEvent true
+                    }
+
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        scrollByScreen(-1)
+                        return@onKeyEvent true
+                    }
+                }
+                if (!prefs.volumeKeyPagingEnabled) return@onKeyEvent false
+                when (native.keyCode) {
+                    KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                        val up = native.keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        when (volumeKeyDispatch(up, scrollMode = scrollMode)) {
+                            VolumeKeyDispatch.SCROLL_BACK -> scrollByScreen(-1)
+                            VolumeKeyDispatch.SCROLL_FORTH -> scrollByScreen(1)
+                            VolumeKeyDispatch.PAGE_PREV -> latestTurn(false)
+                            VolumeKeyDispatch.PAGE_NEXT -> latestTurn(true)
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            // 鼠标滚轮：桌面模式与外接鼠标上最顺手的翻页方式
+            .pointerInput(scrollMode, rtl) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type != PointerEventType.Scroll) continue
+                        val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                        if (dy == 0f) continue
+                        event.changes.forEach { it.consume() }
+                        if (scrollMode) {
+                            scrollByScreen(if (dy > 0f) 1 else -1)
+                        } else {
+                            latestTurn(if (dy > 0f) !rtl else rtl)
+                        }
+                    }
+                }
+            }
+            .pointerInput(uiState.pageCount, prefs.pageTurnHotspotRatio, scrollMode) {
+                detectTapGestures { offset -> handleTap(offset, false) }
+            }
+            .pointerInput(prefs.swipeGestureEnabled, rtl, scrollMode) {
+                if (!prefs.swipeGestureEnabled || scrollMode) return@pointerInput
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onHorizontalDrag = { change, delta ->
+                        change.consume()
+                        dragged += delta
+                    },
+                    onDragEnd = {
+                        val threshold = size.width * 0.15f
+                        // 左滑前进（从左往右读）；日漫反过来
+                        val forward = if (rtl) dragged > threshold else dragged < -threshold
+                        if (abs(dragged) > threshold) latestTurn(forward)
+                    },
+                )
+            }
+            .pointerInput(prefs.brightnessGestureEnabled) {
+                if (!prefs.brightnessGestureEnabled) return@pointerInput
+                var current = prefs.readerBrightness
+                detectVerticalDragGestures(
+                    onDragStart = { offset ->
+                        current = prefs.readerBrightness
+                        if (offset.x < size.width / 3f) brightnessHint = current
+                    },
+                    onVerticalDrag = { change, delta ->
+                        if (change.position.x >= size.width / 3f) return@detectVerticalDragGestures
+                        change.consume()
+                        val step = -delta / (size.height.coerceAtLeast(1).toFloat())
+                        val next = (current + step * 2f).coerceIn(0f, 1f)
+                        current = next
+                        brightnessHint = next
+                        viewModel.setReaderBrightness(next)
+                    },
+                    onDragEnd = { brightnessHint = null },
+                    onDragCancel = { brightnessHint = null },
+                )
+            },
+    ) {
+        when {
+            uiState.error != null -> EmptyState(
+                title = "无法打开这本漫画",
+                description = uiState.error ?: "",
+                actionLabel = "返回",
+                onAction = { exit.leaveTo(onBack) },
+                modifier = Modifier.align(Alignment.Center),
+            )
+
+            else -> {
+                if (scrollMode) {
+                    ComicScrollContent(
+                        pageCount = uiState.pageCount,
+                        viewModel = viewModel,
+                        background = colors.background,
+                        gap = prefs.comicScrollGapDp.dp,
+                        listState = scrollListState,
+                        host = anchorHost,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    return@Box
+                }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
+                        .width(with(density) { contentRect.width.toDp() })
+                        .height(with(density) { contentRect.height.toDp() })
+                        .clipToBounds(),
+                ) {
+                    val currentPages = viewModel.currentPages()
+                    ComicSpread(
+                        pages = currentPages,
+                        viewModel = viewModel,
+                        background = colors.background,
+                        dual = dual,
+                        rtl = rtl,
+                        fitMode = prefs.comicFitMode,
+                        splitLeftPx = splitLeftPx,
+                        splitRightPx = splitRightPx,
+                        windowWidthPx = contentRect.width,
+                        host = anchorHost,
+                    )
+                    val sliding = animPages
+                    if (sliding != null) {
+                        ComicSpread(
+                            pages = sliding,
+                            viewModel = viewModel,
+                            background = colors.background,
+                            dual = dual,
+                            rtl = rtl,
+                            fitMode = prefs.comicFitMode,
+                            splitLeftPx = splitLeftPx,
+                            splitRightPx = splitRightPx,
+                            windowWidthPx = contentRect.width,
+                            host = anchorHost,
+                            modifier = Modifier.graphicsLayer { translationX = animX.value },
+                        )
+                    }
+                }
+            }
+        }
+
+        // 中间点击层：只有配了本阅读器能执行的双击动作时才铺。
+        // 它只盖住「判定为中间区」的那块矩形，左右翻页与底边翻页条都保持抬手即响应；
+        // 连续滚动模式下没有左右热区的概念（上面已提前 return），所以这里也不用铺。
+        if (uiState.error == null) {
+            val doubleAction = prefs.middleDoubleTapAction
+            if (supportsTapAction(doubleAction, paged = true)) {
+                MiddleTapLayer(
+                    hotspotRatio = prefs.pageTurnHotspotRatio,
+                    doubleTapAction = doubleAction,
+                    onTap = { offset, isDouble -> handleTap(offset, isDouble) },
+                )
+            }
+        }
+
+        // 页内选区的动作条：色点即高亮，另有下划线 / 书签 / 取消。
+        // 页式没有文字层，所以不给「笔记」；「复制」等 N5 接上页内选字后再出现。
+        pageSelection?.let { sel ->
+            SelectionActionBar(
+                colors = colors,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 28.dp),
+                onPickColor = { argb ->
+                    viewModel.addPageAnnotation(
+                        sel.pageIndex,
+                        sel.rect,
+                        AnnotationEntity.STYLE_HIGHLIGHT,
+                        argb,
+                        sel.text.orEmpty(),
+                    )
+                    pageSelection = null
+                },
+                onUnderline = {
+                    viewModel.addPageAnnotation(
+                        sel.pageIndex,
+                        sel.rect,
+                        AnnotationEntity.STYLE_UNDERLINE,
+                        annotationColorPalette.first().toArgb().toLong() and 0xFFFFFFFFL,
+                        sel.text.orEmpty(),
+                    )
+                    pageSelection = null
+                },
+                onBookmark = {
+                    viewModel.toggleBookmark(
+                        pageIndex = sel.pageIndex,
+                        x = sel.rect.left,
+                        y = sel.rect.top,
+                        w = sel.rect.width,
+                        h = sel.rect.height,
+                    )
+                    pageSelection = null
+                },
+                onCopy = sel.text?.takeIf { it.isNotBlank() }?.let { text ->
+                    {
+                        clipboard.setText(AnnotatedString(text))
+                        pageSelection = null
+                    }
+                },
+                onCancel = { pageSelection = null },
+            )
+        }
+
+        // 封面共享元素只用于"进书"：加载时承接书架飞入，加载完成后淡出并摘掉共享注册
+        val sharedScope = sharedTransitionScope
+        val animScope = animatedVisibilityScope
+        if (sharedScope != null && animScope != null) {
+            val coverAlpha by animateFloatAsState(
+                targetValue = if (uiState.loading) 1f else 0f,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "coverAlpha",
+            )
+            with(sharedScope) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BookCover(
+                        title = coverTitle ?: uiState.bookTitle,
+                        modifier = Modifier
+                            .then(
+                                if (uiState.loading) {
+                                    Modifier.sharedElement(
+                                        sharedContentState = rememberSharedContentState(key = "cover-$bookId"),
+                                        animatedVisibilityScope = animScope,
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .width(160.dp)
+                            .graphicsLayer { alpha = coverAlpha },
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(modifier = Modifier.height(48.dp), contentAlignment = Alignment.Center) {
+                        if (uiState.loading) LoadingIndicator(color = colors.accent)
+                    }
+                }
+            }
+        }
+
+        brightnessHint?.let { value ->
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(16.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text = "亮度 ${(value * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        if (!uiState.loading && uiState.error == null) {
+            AnimatedVisibility(
+                visible = menuVisible,
+                enter = fadeIn(tween(ANIM_MS)) + slideInVertically { -it / 3 },
+                exit = fadeOut(tween(ANIM_MS)) + slideOutVertically { -it / 3 },
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                ComicTopBar(
+                    title = uiState.bookTitle,
+                    pageText = comicPageNumberText(viewModel.currentPages(), uiState.pageCount),
+                    colors = colors,
+                    onBack = { exit.leaveTo(onBack) },
+                    onOpenSettings = { exit.leaveTo(onOpenSettings) },
+                    onOpenThumbnails = {
+                        menuVisible = false
+                        thumbnailsVisible = true
+                    },
+                    bookmarked = viewModel.isPageBookmarked(uiState.pageIndex),
+                    onToggleBookmark = { viewModel.toggleBookmarkOnCurrentPage() },
+                    onOpenBookmarks = {
+                        menuVisible = false
+                        bookmarksVisible = true
+                    },
+                )
+            }
+            AnimatedVisibility(
+                visible = menuVisible,
+                enter = fadeIn(tween(ANIM_MS)) + slideInVertically { it / 3 },
+                exit = fadeOut(tween(ANIM_MS)) + slideOutVertically { it / 3 },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                ComicMenuPanel(
+                    prefs = prefs,
+                    colors = colors,
+                    features = features,
+                    progressFraction = position.progressFraction,
+                    pageText = comicPageNumberText(viewModel.currentPages(), uiState.pageCount),
+                    onSeekFraction = viewModel::seekToFraction,
+                    onOpenJumpToPage = {
+                        // 关掉菜单再开输入框：两者同时出现会互相抢焦点
+                        menuVisible = false
+                        jumpVisible = true
+                    },
+                    largeFileHintMb = uiState.largeFileMb,
+                    onOpenThumbnails = {
+                        menuVisible = false
+                        thumbnailsVisible = true
+                    },
+                    hasOutline = outline.size > 1,
+                    onOpenOutline = {
+                        menuVisible = false
+                        outlineVisible = true
+                    },
+                    onOpenAnnotations = {
+                        menuVisible = false
+                        annotationsVisible = true
+                    },
+                    onOpenSearch = {
+                        menuVisible = false
+                        searchVisible = true
+                    },
+                    onPrevVolume = prevVolume?.let { { menuVisible = false; openSeriesEntry(it) } },
+                    onNextVolume = nextVolume?.let { { menuVisible = false; openSeriesEntry(it) } },
+                    seriesPosition = seriesPosition,
+                    onOpenSeries = {
+                        menuVisible = false
+                        seriesVisible = true
+                    },
+                    onToggleAutoPage = viewModel::setAutoPageEnabled,
+                    onCycleAutoPageSetting = viewModel::cycleAutoPageSetting,
+                    onCycleAutoPageMode = viewModel::cycleAutoPageMode,
+                    onSwitchToTextMode = if (features.textLayer) {
+                        {
+                            menuVisible = false
+                            viewModel.setPdfReadingMode(PdfReadingMode.TEXT)
+                        }
+                    } else {
+                        null
+                    },
+                    onSelectPageTurnMode = viewModel::setPageTurnMode,
+                    onSelectDirection = viewModel::setComicDirection,
+                    onSelectFitMode = viewModel::setComicFitMode,
+                    onSelectScrollGap = viewModel::setComicScrollGapDp,
+                    onToggleCoverAlone = viewModel::setComicDualPageCoverAlone,
+                    onToggleSpreadAutoDetect = viewModel::setComicSpreadAutoDetect,
+                    onSetBrightness = viewModel::setReaderBrightness,
+                    onToggleKeepScreenOn = viewModel::setKeepScreenOn,
+                    onSelectTheme = viewModel::setTheme,
+                    onPickCustomBackground = { viewModel.setCustomColors(it, prefs.customTextArgb) },
+                    onPickCustomText = { viewModel.setCustomColors(prefs.customBackgroundArgb, it) },
+                    onOpenSettings = { exit.leaveTo(onOpenSettings) },
+                )
+            }
+        }
+
+        if (uiState.passwordRequired) {
+            PasswordDialog(
+                onSubmit = viewModel::submitPassword,
+                onDismiss = viewModel::cancelPassword,
+            )
+        }
+
+        if (outlineVisible) {
+            // 复用文本阅读器那套目录对话框（同样的层级缩进与高亮），只是锚点换成页序号
+            ChapterListDialog(
+                chapters = outline,
+                currentIndex = viewModel.outlineIndexFor(uiState.pageIndex),
+                remainingText = null,
+                colors = colors,
+                onSelect = { index ->
+                    outlineVisible = false
+                    viewModel.jumpToOutline(index)
+                },
+                onDismiss = { outlineVisible = false },
+            )
+        }
+
+        if (bookmarksVisible) {
+            BookmarkListDialog(
+                bookmarks = bookmarks,
+                chapters = outline,
+                colors = colors,
+                onJump = { bookmark ->
+                    bookmarksVisible = false
+                    viewModel.jumpToBookmark(bookmark)
+                },
+                onRename = { bookmark, label -> viewModel.renameBookmark(bookmark, label) },
+                onDelete = { bookmark -> viewModel.deleteBookmark(bookmark.id) },
+                onDismiss = { bookmarksVisible = false },
+            )
+        }
+
+        if (searchVisible) {
+            ComicSearchDialog(
+                state = searchState,
+                colors = colors,
+                // 扫描件与漫画没有文字层：直接说明，而不是让人搜完一场空
+                textSearchable = features.textLayer,
+                onSearch = viewModel::search,
+                onJump = { page ->
+                    if (scrollMode) {
+                        scope.launch { scrollListState.scrollToItem(page) }
+                    } else {
+                        viewModel.goToPage(page)
+                    }
+                },
+                onDismiss = {
+                    searchVisible = false
+                    viewModel.clearSearch()
+                },
+            )
+        }
+
+        if (jumpVisible) {
+            ComicJumpDialog(
+                pageCount = uiState.pageCount,
+                currentPage = uiState.pageIndex,
+                onJump = { page ->
+                    if (scrollMode) {
+                        scope.launch { scrollListState.scrollToItem(page) }
+                    } else {
+                        viewModel.goToPage(page)
+                    }
+                },
+                onDismiss = { jumpVisible = false },
+            )
+        }
+
+        if (seriesVisible) {
+            ComicSeriesDialog(
+                entries = series,
+                currentBookId = bookId,
+                colors = colors,
+                onOpenBook = { id ->
+                    seriesVisible = false
+                    onOpenBook(id)
+                },
+                onImport = openSeriesEntry,
+                onDismiss = { seriesVisible = false },
+            )
+        }
+
+        if (annotationsVisible) {
+            AnnotationListDialog(
+                annotations = annotations,
+                chapters = outline,
+                // 页式锚点与正文字符偏移无关，没有「原书内容已变化」这回事
+                shiftedIds = emptySet(),
+                colors = colors,
+                groupByChapter = false,
+                emptyText = "还没有高亮。长按页面拖动即可框选，再选颜色或下划线",
+                onJump = { annotation ->
+                    annotationsVisible = false
+                    viewModel.jumpToAnnotation(annotation)
+                },
+                onEdit = { annotation ->
+                    annotationsVisible = false
+                    editingAnnotation = annotation
+                },
+                onDismiss = { annotationsVisible = false },
+            )
+        }
+
+        editingAnnotation?.let { target ->
+            AnnotationEditDialog(
+                selectedText = target.selectedText.ifEmpty {
+                    target.pageIndex?.let { pageLabelOf(it.toInt()) }.orEmpty()
+                },
+                initialColorArgb = target.color,
+                initialNote = target.note,
+                initialStyle = target.style,
+                shifted = false,
+                colors = colors,
+                onSave = { color, note, style ->
+                    viewModel.updateAnnotation(target, color, note, style)
+                    editingAnnotation = null
+                },
+                onDelete = {
+                    viewModel.deleteAnnotation(target.id)
+                    editingAnnotation = null
+                },
+                onDismiss = { editingAnnotation = null },
+            )
+        }
+
+        if (thumbnailsVisible && uiState.pageCount > 0) {
+            ComicThumbnailSheet(
+                pageCount = uiState.pageCount,
+                currentPage = uiState.pageIndex,
+                viewModel = viewModel,
+                onJump = { index ->
+                    thumbnailsVisible = false
+                    if (scrollMode) {
+                        scope.launch { scrollListState.scrollToItem(index) }
+                    } else {
+                        viewModel.goToPage(index)
+                    }
+                },
+                onDismiss = { thumbnailsVisible = false },
+            )
+        }
+    }
+}
+
+/**
+ * 一组页在内容区里的摆放。
+ *
+ * - 单页 / 跨页大图（span）：铺满整宽；
+ * - 双页：按铰链安全区左右分栏，中缝留白并叠书脊；
+ * - 日漫（rtl）：同一对页里低序号页放在**右边**。
+ */
+@Composable
+private fun BoxScope.ComicSpread(
+    pages: List<Int>,
+    viewModel: ComicReaderViewModel,
+    background: Color,
+    dual: Boolean,
+    rtl: Boolean,
+    fitMode: ComicFitMode,
+    splitLeftPx: Float,
+    splitRightPx: Float,
+    windowWidthPx: Float,
+    host: PageAnchorHost,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val images = viewModel.images
+    val failed = viewModel.failedPages
+    when {
+        !dual || pages.isEmpty() -> ComicPageView(
+            image = pages.firstOrNull()?.let { images[it] },
+            failed = pages.firstOrNull()?.let { failed[it] } == true,
+            background = background,
+            fitMode = fitMode,
+            resetKey = pages.firstOrNull() ?: -1,
+            pageIndex = pages.firstOrNull() ?: -1,
+            host = host,
+            modifier = modifier.fillMaxSize(),
+        )
+
+        pages.size == 1 -> {
+            if (viewModel.isWideSpan(pages[0])) {
+                // 跨页大图：独占整宽，这才是原书的呈现
+                ComicPageView(
+                    image = images[pages[0]],
+                    failed = failed[pages[0]] == true,
+                    background = background,
+                    fitMode = fitMode,
+                    resetKey = pages[0],
+                    pageIndex = pages[0],
+                    host = host,
+                    modifier = modifier.fillMaxSize(),
+                )
+            } else {
+                // 封面（或末页落单）单独一页：占自己那半边，另一半留出"空白页"的观感
+                val pageWidth = density.run { splitLeftPx.toDp() }
+                val hingeWidth = density.run { (splitRightPx - splitLeftPx).coerceAtLeast(0f).toDp() }
+                val rightWidth = density.run { (windowWidthPx - splitRightPx).coerceAtLeast(0f).toDp() }
+                Row(modifier = modifier.fillMaxSize()) {
+                    if (rtl) {
+                        Box(modifier = Modifier.width(pageWidth).fillMaxHeight())
+                        Box(modifier = Modifier.width(hingeWidth).fillMaxHeight())
+                        Box(modifier = Modifier.width(rightWidth).fillMaxHeight()) {
+                            ComicPageView(
+                                image = images[pages[0]],
+                                failed = failed[pages[0]] == true,
+                                background = background,
+                                fitMode = fitMode,
+                                resetKey = pages[0],
+                                pageIndex = pages[0],
+                                host = host,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    } else {
+                        Box(modifier = Modifier.width(pageWidth).fillMaxHeight()) {
+                            ComicPageView(
+                                image = images[pages[0]],
+                                failed = failed[pages[0]] == true,
+                                background = background,
+                                fitMode = fitMode,
+                                resetKey = pages[0],
+                                pageIndex = pages[0],
+                                host = host,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        Box(modifier = Modifier.width(hingeWidth).fillMaxHeight())
+                        Box(modifier = Modifier.width(rightWidth).fillMaxHeight())
+                    }
+                }
+            }
+        }
+
+        else -> {
+            // 日漫：序号小的页在右侧
+            val leftIndex = if (rtl) pages[1] else pages[0]
+            val rightIndex = if (rtl) pages[0] else pages[1]
+            val leftWidth = density.run { splitLeftPx.toDp() }
+            val hingeWidth = density.run { (splitRightPx - splitLeftPx).coerceAtLeast(0f).toDp() }
+            val rightWidth = density.run { (windowWidthPx - splitRightPx).coerceAtLeast(0f).toDp() }
+            Row(modifier = modifier.fillMaxSize()) {
+                Box(modifier = Modifier.width(leftWidth).fillMaxHeight()) {
+                    ComicPageView(
+                        image = images[leftIndex],
+                        failed = failed[leftIndex] == true,
+                        background = background,
+                        fitMode = fitMode,
+                        resetKey = leftIndex,
+                        pageIndex = leftIndex,
+                        host = host,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Box(modifier = Modifier.width(hingeWidth).fillMaxHeight().background(background)) {
+                    SpineOverlay(modifier = Modifier.fillMaxSize())
+                }
+                Box(modifier = Modifier.width(rightWidth).fillMaxHeight()) {
+                    ComicPageView(
+                        image = images[rightIndex],
+                        failed = failed[rightIndex] == true,
+                        background = background,
+                        fitMode = fitMode,
+                        resetKey = rightIndex,
+                        pageIndex = rightIndex,
+                        host = host,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+    }
+}

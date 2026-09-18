@@ -27,6 +27,28 @@ interface BookshelfRepository {
      * 书架角标据此显示/隐藏。
      */
     suspend fun markContentPrepared(bookId: Long, timestamp: Long = System.currentTimeMillis())
+
+    /** 回填漫画页数（rar/tar/7z 首次打开才知道真实页数）。 */
+    suspend fun updateComicPageCount(bookId: Long, pageCount: Int)
+
+    /** 回填封面路径（漫画的封面要等后台解压完才拿得到）。 */
+    suspend fun updateCoverPath(bookId: Long, coverPath: String?)
+
+    /** PDF 预热回填元数据：只填空值，传 null 表示"没读到"而不是"清空"。 */
+    suspend fun backfillPdfMetadata(
+        bookId: Long,
+        title: String?,
+        author: String?,
+        description: String?,
+        subjects: String?,
+    )
+
+    /** 记录压平产物（PDF 文本模式用）；cleanedFilePath 为 null 表示没有可读正文。 */
+    suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long)
+
+    /** 记录/清除「复制到本地」的页目录（null = 回到引用外部源）。 */
+    suspend fun updateComicLocalPath(bookId: Long, localPath: String?)
+
     suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean = true)
 
     fun observeGroupNames(): Flow<List<String>>

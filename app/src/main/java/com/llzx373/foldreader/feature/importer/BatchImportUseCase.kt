@@ -3,10 +3,12 @@ package com.llzx373.foldreader.feature.importer
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import com.llzx373.foldreader.core.comic.ComicPageOrdering
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.core.format.isSupportedBookName
+import com.llzx373.foldreader.core.format.saf.SafTree
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -18,8 +20,9 @@ import kotlin.coroutines.coroutineContext
  * 枚举拆成「纯遍历决策 + DocumentsContract 薄壳」两段，前者不碰 Android 类，可在 JVM 单测。
  */
 class BatchImportUseCase private constructor(
-    private val context: Context?,
+    private val safTree: SafTree?,
     private val importOne: suspend (DocEntry) -> ImportBookUseCase.Result,
+    private val importComicDirectory: suspend (DocEntry) -> ImportBookUseCase.Result,
     private val assignGroup: suspend (bookIds: List<Long>, groupName: String?) -> Unit,
 ) {
 
@@ -27,8 +30,9 @@ class BatchImportUseCase private constructor(
         context: Context,
         importBook: ImportBookUseCase,
         bookshelfRepository: BookshelfRepository,
+        importComicDirectory: suspend (DocEntry) -> ImportBookUseCase.Result,
     ) : this(
-        context = context.applicationContext,
+        safTree = SafTree(context.applicationContext),
         importOne = { entry ->
             importBook.import(
                 uri = Uri.parse(entry.uri),
@@ -36,6 +40,7 @@ class BatchImportUseCase private constructor(
                 source = BookSource.EXTERNAL,
             )
         },
+        importComicDirectory = importComicDirectory,
         assignGroup = { ids, name -> bookshelfRepository.updateGroup(ids, name) },
     )
 
@@ -43,10 +48,33 @@ class BatchImportUseCase private constructor(
     internal constructor(
         importOne: suspend (DocEntry) -> ImportBookUseCase.Result,
         assignGroup: suspend (bookIds: List<Long>, groupName: String?) -> Unit,
-    ) : this(context = null, importOne = importOne, assignGroup = assignGroup)
+        importComicDirectory: suspend (DocEntry) -> ImportBookUseCase.Result = {
+            ImportBookUseCase.Result.Failure("目录漫画未接线")
+        },
+    ) : this(
+        safTree = null,
+        importOne = importOne,
+        importComicDirectory = importComicDirectory,
+        assignGroup = assignGroup,
+    )
 
-    /** 目录中的一个待导入书籍文档。uri 存 String，便于 JVM 测试构造。 */
-    data class DocEntry(val name: String, val uri: String, val documentId: String)
+    /**
+     * 目录中的一个待导入项：一本电子书文件，或**一个图片目录**（目录漫画 = 一本）。
+     * uri 存 String，便于 JVM 测试构造。
+     */
+    data class DocEntry(
+        val name: String,
+        val uri: String,
+        val documentId: String,
+        val isDirectory: Boolean = false,
+    )
+
+    /** 遍历产出的候选（纯逻辑段用，不含 uri）。 */
+    internal data class Candidate(
+        val documentId: String,
+        val name: String,
+        val isDirectory: Boolean,
+    )
 
     data class EnumerateResult(val entries: List<DocEntry>, val truncated: Boolean)
 
@@ -62,28 +90,47 @@ class BatchImportUseCase private constructor(
     )
 
     /**
-     * 纯遍历决策：BFS 展开目录树，收集支持格式的文件，按名称排序保证确定性。
+     * 纯遍历决策：BFS 展开目录树，收集支持格式的文件与「图片目录」。
+     *
+     * 目录漫画的判定：目录**直接**含的图片数 ≥ [MIN_COMIC_DIR_IMAGES]。命中即视为一本，
+     * 不再往下展开——一卷一个目录正是最常见的漫画存放方式。门槛而不是「有图就算」，
+     * 是为了不把文字书库里的零散插图目录当成一本书。
+     *
      * [childrenOf] 返回某目录的直接子项（documentId, 名称, MIME；目录 MIME 为 [DIR_MIME]）。
-     * 达到 [limit] 即截断并置 truncated。返回（documentId, 名称）列表。
+     * 达到 [limit] 即截断并置 truncated。
      */
     internal fun enumerateTree(
         rootId: String,
         childrenOf: (documentId: String) -> List<Triple<String, String, String?>>,
         limit: Int = BATCH_IMPORT_LIMIT,
-    ): Pair<List<Pair<String, String>>, Boolean> {
-        val found = ArrayList<Pair<String, String>>()
+        rootName: String? = null,
+    ): Pair<List<Candidate>, Boolean> {
+        val found = ArrayList<Candidate>()
         val pending = ArrayDeque<String>()
         val visited = HashSet<String>()
+        // 目录名只在"这个目录本身就是一本书"时才需要（取作书名），随手记下即可
+        val names = HashMap<String, String>()
+        rootName?.let { names[rootId] = it }
         pending.add(rootId)
         visited.add(rootId)
         var truncated = false
         while (pending.isNotEmpty() && !truncated) {
             val dirId = pending.removeFirst()
-            for ((childId, name, mime) in childrenOf(dirId)) {
+            val children = childrenOf(dirId)
+            val images = children.count { it.third != DIR_MIME && ComicPageOrdering.isImageName(it.second) }
+            if (images >= MIN_COMIC_DIR_IMAGES) {
+                found += Candidate(dirId, names[dirId] ?: dirId, isDirectory = true)
+                if (found.size >= limit) truncated = true
+                continue
+            }
+            for ((childId, name, mime) in children) {
                 if (mime == DIR_MIME) {
-                    if (visited.add(childId)) pending.add(childId)
+                    if (visited.add(childId)) {
+                        names[childId] = name
+                        pending.add(childId)
+                    }
                 } else if (isSupportedBookName(name, mime)) {
-                    found += childId to name
+                    found += Candidate(childId, name, isDirectory = false)
                     if (found.size >= limit) {
                         truncated = true
                         break
@@ -91,7 +138,7 @@ class BatchImportUseCase private constructor(
                 }
             }
         }
-        found.sortWith(compareBy({ it.second.lowercase() }, { it.first }))
+        found.sortWith(compareBy({ it.name.lowercase() }, { it.documentId }))
         return found to truncated
     }
 
@@ -100,17 +147,19 @@ class BatchImportUseCase private constructor(
         treeUri: Uri,
         startDocumentId: String = DocumentsContract.getTreeDocumentId(treeUri),
     ): EnumerateResult = withContext(Dispatchers.IO) {
-        val ctx = checkNotNull(context) { "enumerate 需要 Android Context" }
+        val tree = checkNotNull(safTree) { "enumerate 需要 Android Context" }
         val (found, truncated) = enumerateTree(
             rootId = startDocumentId,
-            childrenOf = { dirId -> queryChildren(ctx, treeUri, dirId) },
+            childrenOf = { dirId -> tree.childTriples(treeUri, dirId) },
+            rootName = tree.displayName(tree.documentUri(treeUri, startDocumentId)),
         )
         EnumerateResult(
-            entries = found.map { (docId, name) ->
+            entries = found.map { candidate ->
                 DocEntry(
-                    name = name,
-                    uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId).toString(),
-                    documentId = docId,
+                    name = candidate.name,
+                    uri = tree.documentUri(treeUri, candidate.documentId).toString(),
+                    documentId = candidate.documentId,
+                    isDirectory = candidate.isDirectory,
                 )
             },
             truncated = truncated,
@@ -119,41 +168,8 @@ class BatchImportUseCase private constructor(
 
     /** 取授权树根（或任意树内文档）的显示名，用于默认分组名。 */
     fun treeDisplayName(treeUri: Uri): String? {
-        val ctx = context ?: return null
-        val docUri = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri),
-        )
-        return ctx.contentResolver.query(
-            docUri,
-            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-            null, null, null,
-        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-    }
-
-    private fun queryChildren(
-        context: Context,
-        treeUri: Uri,
-        documentId: String,
-    ): List<Triple<String, String, String?>> {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
-        val children = ArrayList<Triple<String, String, String?>>()
-        context.contentResolver.query(
-            childrenUri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-            ),
-            null, null, null,
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val childId = cursor.getString(0) ?: continue
-                val name = cursor.getString(1) ?: continue
-                children += Triple(childId, name, cursor.getString(2))
-            }
-        }
-        return children
+        val tree = safTree ?: return null
+        return tree.displayName(tree.documentUri(treeUri, tree.treeDocumentId(treeUri)))
     }
 
     /**
@@ -175,7 +191,9 @@ class BatchImportUseCase private constructor(
             try {
                 coroutineContext.ensureActive()
                 onProgress(index, entries.size, entry.name)
-                when (val result = importOne(entry)) {
+                // 目录漫画（一个图片目录 = 一本）不走文本导入那条路，交给漫画登记
+                val result = if (entry.isDirectory) importComicDirectory(entry) else importOne(entry)
+                when (result) {
                     is ImportBookUseCase.Result.Imported -> {
                         importedIds += result.bookId
                         imported += result.bookId to result.title
@@ -212,6 +230,12 @@ class BatchImportUseCase private constructor(
 
     companion object {
         const val BATCH_IMPORT_LIMIT = 500
+
+        /**
+         * 目录直接被判定为一本漫画所需的图片数。
+         * 门槛而不是「有图就算」：文字书库里零散的插图目录不该被当成一本书。
+         */
+        const val MIN_COMIC_DIR_IMAGES = 3
 
         /** DocumentsContract.Document.MIME_TYPE_DIR 的字面值，纯逻辑段不引用 Android 类。 */
         private const val DIR_MIME = "vnd.android.document/directory"

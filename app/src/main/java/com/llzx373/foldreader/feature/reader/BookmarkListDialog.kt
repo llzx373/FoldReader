@@ -54,7 +54,7 @@ fun BookmarkListDialog(
         text = {
             if (sorted.isEmpty()) {
                 Text(
-                    text = "还没有书签，点顶栏缎带图标给当前页加书签",
+                    text = "还没有书签。顶栏缎带图标给当前页加书签，长按页面上某处可以加一个带位置的书签",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 16.dp),
                 )

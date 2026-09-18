@@ -125,7 +125,7 @@ class BookshelfRepositoryGroupTest {
         override fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>> =
             flowOf(
                 books.filter { it.groupName == groupName }
-                    .map { BookWithProgress(book = it, charOffset = null) },
+                    .map { BookWithProgress(book = it, charOffset = null, comicPage = null) },
             )
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
             updateGroupCalls++
@@ -147,6 +147,19 @@ class BookshelfRepositoryGroupTest {
         override suspend fun update(book: BookEntity) = Unit
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
         override suspend fun markContentPrepared(bookId: Long, timestamp: Long) = Unit
+                override suspend fun backfillPdfMetadata(
+            bookId: Long,
+            title: String?,
+            author: String?,
+            description: String?,
+            subjects: String?,
+        ) = Unit
+        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) {
+            books.replaceAll { if (it.id == bookId) it.copy(comicPageCount = pageCount) else it }
+        }
+        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
+        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit
+        override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) = Unit
         override suspend fun deleteByIds(bookIds: List<Long>) {
             books.removeAll { it.id in bookIds }
         }

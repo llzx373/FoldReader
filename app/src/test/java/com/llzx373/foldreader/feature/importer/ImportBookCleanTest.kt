@@ -151,6 +151,17 @@ class ImportBookCleanTest {
         }
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
         override suspend fun markContentPrepared(bookId: Long, timestamp: Long) = Unit
+                override suspend fun backfillPdfMetadata(
+            bookId: Long,
+            title: String?,
+            author: String?,
+            description: String?,
+            subjects: String?,
+        ) = Unit
+        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) = Unit
+        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
+        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit
+        override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) = Unit
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) = Unit
         override fun observeGroupNames(): Flow<List<String>> = flowOf(emptyList())
         override fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>> =

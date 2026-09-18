@@ -20,6 +20,8 @@ interface SettingsRepository {
     suspend fun setAvoidCameraCutout(enabled: Boolean)
     suspend fun setPageTurnMode(mode: PageTurnMode)
     suspend fun setPageTurnHotspotRatio(ratio: Float)
+    suspend fun setMiddleTapAction(action: TapAction)
+    suspend fun setMiddleDoubleTapAction(action: TapAction)
     suspend fun setVolumeKeyPagingEnabled(enabled: Boolean)
     suspend fun setBrightnessGestureEnabled(enabled: Boolean)
     suspend fun setSwipeGestureEnabled(enabled: Boolean)
@@ -39,4 +41,9 @@ interface SettingsRepository {
     suspend fun setBookshelfSort(sort: BookshelfSort)
     suspend fun setCustomChapterRules(rules: List<String>)
     suspend fun setAdCleanRules(rules: List<String>)
+    suspend fun setComicDirection(direction: ComicDirection)
+    suspend fun setComicDualPageCoverAlone(enabled: Boolean)
+    suspend fun setComicSpreadAutoDetect(enabled: Boolean)
+    suspend fun setComicFitMode(mode: ComicFitMode)
+    suspend fun setComicScrollGapDp(gapDp: Int)
 }

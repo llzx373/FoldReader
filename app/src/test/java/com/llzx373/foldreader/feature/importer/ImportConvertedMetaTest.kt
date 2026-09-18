@@ -42,6 +42,21 @@ class ImportConvertedMetaTest {
             throw UnsupportedOperationException()
         override suspend fun markContentPrepared(bookId: Long, timestamp: Long) =
             throw UnsupportedOperationException()
+                override suspend fun backfillPdfMetadata(
+            bookId: Long,
+            title: String?,
+            author: String?,
+            description: String?,
+            subjects: String?,
+        ) = Unit
+        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) =
+            throw UnsupportedOperationException()
+        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) =
+            throw UnsupportedOperationException()
+        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) =
+            throw UnsupportedOperationException()
+        override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) =
+            throw UnsupportedOperationException()
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) =
             throw UnsupportedOperationException()
         override fun observeGroupNames() = throw UnsupportedOperationException()

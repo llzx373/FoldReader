@@ -475,6 +475,232 @@
 
 ---
 
+## M7 漫画阅读模式（已完成）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v2.0 漫画阅读模式」。
+> 决策：融入现有书架（`BookFormat.COMIC`）、默认引用外部源 + 可选复制到本地、格式全量、
+> 首批功能全上（缩放平移 + 适应模式、左右方向、纵向连续滚动、双页与跨页）。
+
+### M7.1 漫画内容层（core/comic）
+- [x] 容器统一接口 `ComicArchive`：按页序号取字节 + 只读图片头拿尺寸 + 字节 LRU
+- [x] `ZipComicArchive`：commons-compress `ZipFile` + `SeekableByteChannel`，读中央目录按条目取图
+- [x] 顺序容器一次性解压：`ComicArchiveExtractor`（tar / 7z / rar），junrar 走 UnRAR License
+- [x] `ComicExtractionStore`：`cache/<hash>` 可回收 + `local/<hash>` 用户副本 + per-hash 锁 + GC
+- [x] 页序与噪音过滤 `ComicPageOrdering`（自然序、`__MACOSX`/`._*`/`Thumbs.db`）
+- [x] 容器识别 `ComicContainers`（魔数优先；`ustar` 需扩展名印证，避免文本误判）
+- [x] 图片头尺寸解析 `ComicImageSizing`（纯 Java，PNG/JPEG/GIF/BMP/WebP）
+- [x] 依赖：commons-compress 1.28 + org.tukaani:xz（LZMA）+ junrar；R8 `-dontwarn` 可选后端
+- [x] SAF 目录访问抽成共用的 `SafTree`（文件浏览器 / 批量导入 / 目录漫画三处共用）
+
+### M7.2 数据模型与导入
+- [x] `BookFormat.COMIC` + `comicContainer` / `comicPageCount` / `comicLocalPath`（DB v1 基线下重导出 schema）
+- [x] `reading_progress.comicPage`：漫画位置按页序号存，不与字符偏移混用
+- [x] `ComicImportUseCase`：只登记元数据 + 抽首页封面（zip/目录）+ 页数未知时标记待预热
+- [x] 导入分支接线（`ImportBookUseCase` / `FormatDetector` / `isSupportedBookName`）
+- [x] 书架：容器徽标、页码进度、详情页漫画分支（页数/容器/存储方式）
+- [x] 页数回填用专用 `UPDATE`（`INSERT OR REPLACE` 会因外键 NO_ACTION 在已有进度时失败）
+
+### M7.3 阅读器（feature/comic）
+- [x] `ReaderHost` 按格式分流；文本阅读器对 `COMIC` 防御性报错
+- [x] 沉浸外壳共享件抽出：`ReaderEffects`（系统栏/亮度）+ `rememberReaderExit`（返回落地门控）
+- [x] 单页阅读：点击热区 / 横滑 / 音量键 / 覆盖滑动（COVER）与无动画（NONE）
+- [x] 进度：页序号锚点、防抖落库、恢复上次位置、阅读时长按天分桶
+- [x] 双页与跨页：`ComicSpreadIndex` 预计算配对（封面单独 / 宽图独占整宽）
+- [x] 阅读方向 RTL：热区、滑动、双页左右归属
+- [x] 缩放与平移：双指缩放（中点锚）+ 拖动 + 四种适应模式；未溢出时单指拖动让给翻页
+- [x] 纵向连续滚动：按真实宽高比定条目高度、页间距 0–24dp、滚动位置反写进度
+- [x] 缩略图网格跳转：内存 → 磁盘 JPEG → 容器读页三级缓存，打开滚到当前页
+- [x] 动画 GIF / 动态 WebP：`ImageDecoder` 出 Drawable + 按帧驱动绘制失效
+- [x] `onTrimMemory` 释放、解码位图双预算、离当前页最远的页先淘汰
+
+### M7.4 漫画库入口
+- [x] 目录扫描识别「图片目录 = 一本」（≥3 张图片，命中即不下探）
+- [x] 「导入目录为分组」：卷目录与容器文件混排都收，目录漫画走独立登记路径
+- [x] 文件浏览器长按 → 「以漫画打开」/「整个目录导入为分组」
+- [x] `intent-filter` 补漫画 MIME（cbz/cbr/cbt/cb7 与通用压缩包写法）
+
+### M7.5 打磨
+- [x] 「复制到本地」/「删除本地副本」（详情页；脱离 SAF 授权）
+- [x] 后台预热：rar/tar/7z 解压 + 页数/封面回填，复用「待解析」角标
+- [x] 缓存 GC 接入启动维护（只清 cache，不动本地副本）
+- [x] 设置页「漫画」分区（方向/适应/封面单独/跨页识别/滚动页间距）
+- [x] 备份导出/导入含漫画偏好字段
+- [x] 单测：页序、容器、解压、提取存储、导入、配对索引、适应尺寸、平移钳制、格式判定
+
+### M7.6 待真机验证（非开发任务）
+- [ ] 推一个漫画目录进设备 → 文件浏览器长按「以漫画打开」并翻页
+- [ ] 用书架「导入目录为分组」导一个系列目录，确认卷目录各成一本
+- [ ] `.cbz` / `.cbt` / `.cb7` / `.cbr` 各一本：徽标、待解析角标与后台消失
+- [ ] 折叠展开双页 + 铰链避让、日漫 RTL、条漫滚动、缩略图跳转、双指缩放
+- [ ] 删源文件后打开 → 报错 → 「复制到本地」后恢复可读
+
+---
+
+## M8 PDF 阅读（进行中）
+
+> 渲染用 `androidx.pdf` 的沙箱文档服务，元数据/目录/文本用 PdfBox。
+> 页式阅读**复用漫画那条路径**（`PagedImageSource` 接缝），只有"来源"不同。
+
+### M8.1 依赖与可行性（已完成）
+- [x] `androidx.pdf:pdf-core` + `pdf-document-service`（1.0.0-beta01）+ `pdfbox-android`
+- [x] 冒烟：`SandboxedPdfLoader.openDocument` → `getPageBitmapSource(0).getBitmap` 出图；PdfBox 读元数据/正文
+- [x] **不要排除 `pdf-viewer`**：它是 `pdf-document-service` 的**运行时**依赖
+      （服务端 `getPageDimensions` 引用 `androidx.pdf.models.Dimensions`）。
+      一旦排除，独立进程在该调用上 `NoClassDefFoundError` → 进程 FATAL → binder 死 →
+      整个文档作废（现场只见 `DeadObjectException`）。P1 曾把它当"成品 UI"排掉，是错的。
+- [x] `PDFBoxResourceLoader.init(context)` 必须调（AFM/CMap 在 AAR 的 assets 里）
+- [x] 独立进程会重跑 `Application.onCreate`：加 `isIsolatedProcess()` 早退，
+      否则 `DiagnosticLog` 碰 SharedPreferences 直接杀进程，表现是 `openDocument` 永久挂起
+
+### M8.2 页式阅读器通用化（已完成）
+- [x] `core/paged/PagedImageSource`：页式阅读唯一接缝（页数 / 批量宽高比 / 出图 / 缩略图）
+- [x] `PagedPageImage`（Still / Animated）从漫画 ViewModel 上提到 core/paged
+- [x] `PagedReaderFeatures`：格式能力差异（PDF 关掉 RTL / 跨页配对 / 无缝拼接，菜单据此隐藏）
+- [x] `ComicPagedSource`：漫画容器适配（解码与动画判定留在漫画侧）
+- [x] 验收：555 个单测全绿，漫画零回归
+
+### M8.3 PDF 页式阅读（已完成）
+- [x] `PdfPagedSource`：沙箱渲染，**渲染串行化**（一次只能开一页）+ 批量宽高比 + 缩略图
+- [x] `PagedSourcePasswordRequired`：加密 PDF 弹密码框重试，密码不落库
+- [x] 导入：`PdfImportUseCase` 只登记（页数留给打开时回填 / 预热），`FormatDetector` 识别 PDF
+- [x] 预热：`BookPrewarmQueue.pdfPrepare` 开文档回填页数；加密的失败 → 「待解析」角标留着
+- [x] 书架/详情：PDF 徽标、按页进度、详情页走页式字段
+- [x] 验证：debug + release（R8 + 资源压缩）全绿；仪器化端到端（导入 → 出图 → 宽高比）通过
+
+### M8.4 元数据 / 目录 / 封面（已完成）
+- [x] `PdfBoxReader`：DocumentInformation（title/author/subject/keywords）+ 内嵌目录树
+      （展平成 depth + pageIndex）+ 首页封面渲染 + `AccessPermission.canExtractContent`
+- [x] 目录/封面写入：`chapters.pageIndex`（页式锚点，charStart/charEnd 写 0）、`covers/<hash>.jpg`
+- [x] `books.backfillPdfMetadata`：只填空值（COALESCE），不覆盖已有内容
+- [x] 预热接线：`preparePdf` → PdfBox；PdfBox 解析不了时退回"只用沙箱拿页数"
+- [x] 阅读器：菜单「目录」入口 + 复用文本阅读器的目录对话框（跳转到页序号）
+- [x] 验证：仪器化测试覆盖元数据/目录层级(0,1,0)/页锚点(1,2,4)/封面/预热写库全链路
+
+### M8.5 文本 PDF 额外当电子书（已完成）
+- [x] `PdfBoxReader` 抽正文：`PDFTextStripper` 用分页哨兵**一次遍历**同时拿全文与每页起始偏移
+- [x] 扫描件判定：平均每页字符数不足 → **不产出压平产物、也不报错**（不写空文件出来骗人）
+- [x] `PdfBookParser`：压平进 TXT 管线（分页/搜索/书签/划线/统计全部复用，零重写）
+- [x] 目录两套锚点并存：压平时实测页首偏移 → 同一目录项同时写 `pageIndex` 与 `charStart/charEnd`
+- [x] 纸书页码：按页写 `PageLabel`，「第 N 页」
+- [x] `book_prefs.pdfReadingMode`（PAGED/TEXT，null = 由文档决定）+ `resolvePdfReadingMode` 纯函数
+- [x] 路由：`ReaderHost` 观察书与偏好，模式一变**当场换阅读器**（不用退出去重进）
+- [x] 双向切换：页式菜单「切到文字模式」/ 文本菜单「页式」；扫描件显示「这是扫描件，暂不支持取字」
+- [x] `books.updateConvertedFile` 落 `cleanedFilePath` + `totalChars`（字符数流式数，不用字节数）
+- [x] 验证：仪器化覆盖 文本型压平可读 / 章头锚点落在正确页 / 扫描件无产物 / 预热全链路
+
+### M8.6 待真机验证（非开发任务）
+- [ ] 推一个文本型 PDF 与一个扫描型 PDF：进书架、翻页、缩略图、双指缩放
+- [ ] 文本型 PDF：切文字模式 → 调字号/搜索/加书签 → 切回页式，位置各自保持
+- [ ] 加密 PDF：弹密码框 → 输对可读、输错有提示
+- [ ] 一个 >250MB 的 PDF（官方已知性能问题，超阈值时给提示）
+- [ ] 折叠展开时 PDF 双页与铰链避让
+
+### M8.7 已知取舍（记录在案，不做）
+- [x] 扫描件 OCR：系统层没有可用的公开 OCR API（Pixel 的取字是 System Intelligence 内部组件），
+      界面显示「这是扫描件，暂不支持取字」而不是留一个点了没反应的按钮
+- [x] `androidx.pdf.ocr.OcrProvider` 只被它自己的 `PdfViewer` 消费，自绘路径用不上
+- [x] PdfBox 的可选 `com.gemalto.jp2`（JPEG2000）未打包：只影响嵌 JP2 图的解码与封面渲染，
+      R8 用 `-dontwarn` 放行
+- [x] PDF `PageLabels` 未接线：纸书页码先用「第 N 页」
+
+---
+
+## M9 页内锚点 + 可配中间点击区 + 同系列切换（已完成）
+
+方案：`~/.commandcode/plans/paged-anchor-tapzone-series.md`
+
+### M9.0 正确性修复（已完成）
+- [x] 双模式 PDF 进度互覆盖：`reading_progress` 是关键书一行 + 整行 REPLACE，
+      `ReaderViewModel` 保存时清空了 `comicPage`（页式读到第 50 页 → 切文本 → 切回，位置没了）。
+      改为对称的 `ReadingProgressEntity.keepPagedAnchor` / `keepTextAnchor`，两个阅读器都走它
+- [x] 页式书签跳转落到第 0 页：总览弹窗传的是 `charOffset`（页式恒为 0）。
+      加 `BookmarkEntity.readerAnchor()` / `AnnotationEntity.readerAnchor()`，总览统一走它
+- [x] 验证：`ReadingProgressAnchorTest`（含页式⇄文本来回切换的往返用例）
+
+### M9.1 中间点击区 + 单击/双击派发（已完成）
+- [x] `TapZone.MENU` → `TapZone.MIDDLE`（中间区不再天生等于「菜单」）；新增 `TapAction` 设置枚举
+- [x] 中间单击默认「菜单」、双击默认「缩放」（页式）；均可配（设置 → 阅读 → 中间点击 / 中间双击）
+- [x] `MiddleTapLayer`：**只覆盖「判定为中间区」的那块矩形**，所以左右翻页与底边翻页条保持抬手即响应
+      ——这正是之前否掉「双击缩放」的顾虑（给根手势加 `onDoubleTap` 会让每次单击都等 300ms）
+- [x] `supportsTapAction`：阅读器执行不了的动作（文本阅读器的「缩放」）**整层不挂**，单击零延迟
+- [x] 双击缩放 = 适配模式在「整页 ⇄ 宽度」间切换（本阅读器的缩放本来就每页重置，临时倍率翻页即失效）
+- [x] 验证：`middleZoneRect` 与 `tapZoneOf` 一致性、双击判定、动作回退、`supportsTapAction`
+
+### M9.2 页内锚点数据模型（已完成）
+- [x] `BookmarkEntity` 加 `pageIndex` + `anchorX/Y/W/H`；`AnnotationEntity` 加 `pageIndex` + `regionX/Y/W/H`
+      —— **一律归一化 0..1**：渲染尺寸随适配模式/缩放/窗口变化，存像素必错位
+- [x] 索引 `(bookId, pageIndex)`；DB 基线仍为 v1（预发布政策：只保证新安装，不写迁移）
+- [x] 备份 v4 → v5：导出/导入新字段；**去重键改为位置感知**（原先只按 `charOffset`，
+      页式书签全是 0 会互相吞掉）
+- [x] 文本/页式锚点互相隔离：文本阅读器只取 `pageIndex == null`，页式只取 `!= null`；
+      顺带修掉 `verifyAnnotationSnapshots` 会把页式标注全判成「错位」的问题
+- [x] 验证：`BookmarkLogicTest` 页式 toggle/容差/排序、`BackupCodecTest` v5
+
+### M9.3 页式长按锚点与框选（已完成）
+- [x] 纯几何：`comicDrawRect` / `comicNormalizedAt` / `comicScreenPosition` / `comicZoomAnchored`
+      （绘制、命中、反查、缩放锚点共用同一套落位公式）
+- [x] 顺带修正**双指缩放锚点漂移**：原公式漏了「捏合点相对页面中心」一项，偏离中心时不跟手
+- [x] 长按不动 = 点书签；长按拖动 = 框选（`MIN_SELECTION_SIZE` 区分，避免指腹抖动被当成框选）
+- [x] 有文字层时吸附成选字（`snapSelectionToText`），无文字层退化为自由矩形
+- [x] 锚点手势放在**页内部**（`ComicPageView`）：天然知道页序号与页内坐标，双页模式无需算铰链
+- [x] 纵向连续滚动模式暂不接受锚点手势（页内坐标与屏幕坐标不是一套换算），但锚点照常显示
+- [x] 验证：`ComicLogicTest`（归一化往返/缩放锚点/越界）、`PagedAnchorUiTest`（吸附与点判定）
+
+### M9.4 页式锚点渲染 + 列表 + 跳转（已完成）
+- [x] 绘制：书签点/区域描边、高亮半透明填充、下划线、选区框（归一化 × 当前绘制尺寸，随缩放贴合）
+- [x] 动作条：色点即高亮 / 下划线 / 书签(区域) / 取消（复用 `SelectionActionBar`，文本侧的「笔记」在页式隐藏）
+- [x] 顶栏书签缎带（页级书签开关）+ 书签列表入口 + 标注列表入口（跳转 / 改色 / 改样式 / 删除）
+- [x] 验证：编译 + 全量单测（578 项）
+
+### M9.5 PDF 页内选字（已完成）
+- [x] **API 探针**（`pdfprobe`，对 1.0.0-beta01 的 pdf-core）：`PdfDocument.getSelectionBounds(page, PointF, PointF)`
+      直接吃页内两点返回 `PageSelection`（含 `PdfPageTextContent` 的并集矩形与文字），
+      `getPageContent(page)` 给页文本，`searchDocument(q, range)` 给逐页命中，`getPageLinks(page)` 给链接
+- [x] 结论：**不自己取文本再吸附**，改用文档自己的选区——阅读顺序/连字/分栏只有它知道，且更准更省
+- [x] `PagedImageSource.selectText(index, startX/Y, stopX/Y)`（归一化进出；默认 null，漫画零改动）
+- [x] `PdfPagedSource`：页点尺寸与宽高比探测**共用一次 IPC 并缓存**；选字只调一次，拖框期间不回源
+- [x] 交互：先按手指画的框亮出动作条，松手后异步换成文档选区；失败/扫描件保留原始框
+- [x] 动作条「复制」只在拿到选中文字时出现；已确认扫描件直接跳过 IPC
+- [ ] 待真机：文字型 PDF 拖框是否跟手、多行选区是不是一整块（并集框，与「区域是一个框」的模型一致）
+
+### M9.6 漫画/PDF「同系列」前后切换（已完成）
+- [x] `core/comic/ComicSeriesMatch.kt`（纯逻辑 + 单测）：主干归一化（去扩展名/括号标签/全角/卷号）、
+      卷号提取（`第3卷`/`第三巻`/`v03`/`vol.3`/`ch.5`/`- 09`/`(11)`/`_04`）、同系列判等、排序、两来源合并
+- [x] 铁律：**只认「主干相等」，不做相似度匹配**——误判的代价是跳到一本不相干的书，宁可漏
+- [x] `SafTree.listSiblingsOfDocument`：SAF 没有取父目录的 API，从 documentId 反推（`primary:a/b/c.cbz` → `primary:a/b`）；
+      不透明 id 返回空 → 功能降级而不是猜错目标（附单测）
+- [x] 两个来源：同目录（可能未导入）+ 库内（同分组或同目录）；同 uri 去重且库内优先（带 bookId）
+- [x] 未入库的卷显示「未导入」，点击**按需导入**（复用外部导入链路）后打开
+- [x] UI：菜单「上一卷 / 下一卷 / 同系列」+「3/12」位置；切换用 `popUpTo`，返回回书架而不是退回上一卷
+- [ ] 待真机：授权失效/不透明 id 的提供方上，入口应安静禁用
+
+### M9.7 既有缺口补齐（部分完成）
+- [x] PDF `searchDocument` 接入：菜单「搜索」→ 逐页命中列表 → 点一条跳页
+      （命中只给字符下标，上下文按 `textStartIndex` 回取页文本切片；只给前 40 页取，避免一串 IPC）
+- [x] 自动翻页接页式：间隔模式到点发请求走**正常翻页动画**；滚动模式按 px/s 匀速推进
+      （`dispatchRawDelta` 同步推进，不必每帧起协程）；手动操作后暂停一段时间（沿用文本阅读器的时钟）
+- [x] 跳到指定页：页数多时进度条点不准，给数字输入（1 基显示、越界夹取）
+- [x] 外接键盘/鼠标：方向键 / PageUp-Down / 空格 / 媒体键翻页，滚轮翻页（滚动模式下滚动）
+- [x] >250MB 提示：菜单里一句「文件较大，翻页与缩放可能偏慢」（不挡开书）
+- [ ] **PDF 内链跳转未做**：需要「根坐标 → 页内坐标」的映射，而 M9.3 刻意把锚点手势放在页内部
+      以避开这层管道；链接只影响脚注/交叉引用这一类场景，暂不值得为此重做坐标层
+- [ ] **缩放跨页保持未做**：本阅读器的缩放是每页重置的设计（换页即复位），
+      临时倍率跨页保留会让「这一页为什么是放大的」变得不可预期；适配模式本身是持久化的
+- [ ] **纵向连续模式下的锚点手势未做**：条漫里页内坐标与屏幕坐标不是一套换算，
+      要像文本阅读器那样再维护一份滚动命中逻辑
+
+### M9.8 待真机验证（非开发任务）
+- [ ] 缩放/平移后长按，锚点是否仍落在按下处；切适配模式后是否跟随
+- [ ] 折叠展开双页模式下，左右页各自的锚点是否落在正确的页
+- [ ] 长按不动 vs 长按拖动能否稳定区分；长按绝不触发翻页
+- [ ] 中间区双击生效，且左右区单击**无额外延迟**
+- [ ] 文字型 PDF：拖框选字是否跟手、复制是否拿到文字；扫描件是否退化为框选
+- [ ] 同系列：同目录/分组能否认出前后卷；未导入的卷按需导入后能否直接打开
+- [ ] 自动翻页：间隔到点是否顺畅翻页、手动点按后是否暂停
+- [ ] 有旧安装的设备需清数据重装（DB 基线已变）
+
+---
+
 ## 全局持续事项（每个里程碑都做）
 - [x] 新增代码编译通过 + 关键路径单元测试
 - [ ] 折叠/展开/旋转手动回归一遍（待真机）

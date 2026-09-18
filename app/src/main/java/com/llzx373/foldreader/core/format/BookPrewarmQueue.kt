@@ -23,6 +23,16 @@ class BookPrewarmQueue(
     /** 某本预热成功后的回调（例如回写"内容已就绪"标记）。 */
     private val onPrepared: suspend (bookId: Long) -> Unit = {},
     private val betweenJobsDelayMs: Long = BETWEEN_JOBS_DELAY_MS,
+    /**
+     * 漫画预热：解压需要顺序读的容器（rar/tar/7z）并回填页数与封面。
+     * 单独立一个口子而不是塞进 [parserFor]：漫画走的是自己的容器层，不是 `BookParser` 那条管线。
+     */
+    private val comicPrepare: suspend (bookId: Long) -> Unit = {},
+    /**
+     * PDF 预热：打开文档拿页数并回填（P4 起还会用 PdfBox 补元数据/目录/封面）。
+     * 加密 PDF 在这里会失败——那是正确的，角标继续留着等用户输密码。
+     */
+    private val pdfPrepare: suspend (bookId: Long) -> Unit = {},
 ) {
 
     private class Job(val bookId: Long, val uri: Uri, val format: BookFormat)
@@ -32,10 +42,14 @@ class BookPrewarmQueue(
     init {
         scope.launch {
             for (job in pending) {
-                val parser = parserFor(job.format)
-                if (parser != null && runCatching { parser.prewarm(job.uri) }.isSuccess) {
-                    runCatching { onPrepared(job.bookId) }
+                val prepared = when (job.format) {
+                    BookFormat.COMIC -> runCatching { comicPrepare(job.bookId) }.isSuccess
+                    BookFormat.PDF -> runCatching { pdfPrepare(job.bookId) }.isSuccess
+                    else -> parserFor(job.format)
+                        ?.let { runCatching { it.prewarm(job.uri) }.isSuccess }
+                        ?: false
                 }
+                if (prepared) runCatching { onPrepared(job.bookId) }
                 if (betweenJobsDelayMs > 0) delay(betweenJobsDelayMs)
             }
         }

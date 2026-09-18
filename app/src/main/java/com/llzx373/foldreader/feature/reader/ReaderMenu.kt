@@ -149,7 +149,7 @@ fun ReaderTopBar(
 
 /** 书签缎带图标：filled 为填充态（已加书签），否则描边。 */
 @Composable
-private fun BookmarkRibbonIcon(filled: Boolean, tint: Color, contentDescription: String) {
+fun BookmarkRibbonIcon(filled: Boolean, tint: Color, contentDescription: String) {
     Canvas(
         modifier = Modifier
             .size(22.dp)
@@ -213,6 +213,11 @@ fun ReaderMenuPanel(
     colors: ReaderColors,
     onSeekFraction: (Float) -> Unit,
     onOpenCatalog: () -> Unit,
+    /**
+     * PDF 文本模式下的「切到页式」出口；null = 不给这个入口（其它格式没有这个问题）。
+     * 与 [onOpenCatalog] 并列放在操作区，因为它同样属于"换一种方式看这本书"。
+     */
+    onSwitchToPagedMode: (() -> Unit)? = null,
     onOpenAnnotations: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
     onSelectPageTurnMode: (PageTurnMode) -> Unit,
@@ -414,6 +419,9 @@ fun ReaderMenuPanel(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 clickableItem(onClick = onOpenCatalog, label = "目录", weight = 1f)
+                if (onSwitchToPagedMode != null) {
+                    clickableItem(onClick = onSwitchToPagedMode, label = "页式", weight = 1f)
+                }
                 toggleableItem(
                     checked = showLayout,
                     label = "版式",

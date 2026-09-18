@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.format
 
+import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.data.db.BookFormat
 
 /**
@@ -10,24 +11,29 @@ import com.llzx373.foldreader.core.data.db.BookFormat
 object FormatDetector {
 
     const val EPUB_MIME_TYPE = "application/epub+zip"
+    const val PDF_MIME_TYPE = "application/pdf"
 
     fun detect(displayName: String?, mimeType: String?, head: ByteArray): BookFormat? {
         if (isEpub(head)) return BookFormat.EPUB
         if (isFb2Zip(head)) return BookFormat.FB2
         if (isFb2(head)) return BookFormat.FB2
+        // PDF 的魔数是唯一的，也不与任何容器冲突，放在漫画判定之前
+        if (isPdf(head)) return BookFormat.PDF
         val name = displayName?.lowercase()
         val ext = name?.substringAfterLast('.', "")
         return when {
             ext == "epub" || mimeType == EPUB_MIME_TYPE -> BookFormat.EPUB
             ext == "fb2" || name?.endsWith(".fb2.zip") == true -> BookFormat.FB2
+            ext == "pdf" || mimeType == PDF_MIME_TYPE -> BookFormat.PDF
+            // 漫画判定放在 EPUB/FB2 之后（它们也是 zip）、TXT 之前
+            // （把 zip/rar 当纯文本解只会得到乱码）
+            ComicContainers.detect(displayName, mimeType, head) != null -> BookFormat.COMIC
             ext == "txt" || mimeType == "text/plain" -> BookFormat.TXT
             else -> null
         }
     }
 
-    fun isZip(head: ByteArray): Boolean =
-        head.size >= 4 && head[0] == 0x50.toByte() && head[1] == 0x4B.toByte() &&
-            head[2] == 0x03.toByte() && head[3] == 0x04.toByte()
+    fun isZip(head: ByteArray): Boolean = ComicContainers.isZip(head)
 
     /** EPUB = zip，且第一个条目是未压缩的 `mimetype`，内容为 `application/epub+zip`。 */
     fun isEpub(head: ByteArray): Boolean {

@@ -57,23 +57,29 @@ class FormatDetectorTest {
     }
 
     @Test
-    fun `PDF 头部不识别为已知格式但 isPdf 为真`() {
+    fun `PDF 按魔数与扩展名识别`() {
         val head = "%PDF-1.7\n".toByteArray()
-        assertNull(FormatDetector.detect("doc.pdf", "application/pdf", head))
+        assertEquals(BookFormat.PDF, FormatDetector.detect("doc.pdf", "application/pdf", head))
+        // 扩展名/MIME 单独也能认出来（魔数采样不到时）
+        assertEquals(BookFormat.PDF, FormatDetector.detect("doc.pdf", null, ByteArray(0)))
+        assertEquals(BookFormat.PDF, FormatDetector.detect(null, FormatDetector.PDF_MIME_TYPE, ByteArray(0)))
         assertTrue(FormatDetector.isPdf(head))
         assertFalse(FormatDetector.isPdf("not a pdf".toByteArray()))
     }
 
     @Test
-    fun `普通 zip（首条目非 mimetype）不误判 EPUB`() {
+    fun `普通 zip 不误判 EPUB 而是按漫画容器处理`() {
+        // 有意为之：相当一部分漫画就是没改名的 zip。判成漫画后若里面没有图片，
+        // 导入会明确报「压缩包内没有可显示的图片」，比当成文本解出满屏乱码好。
         val head = zipHead("AndroidManifest.xml", ByteArray(0))
-        assertNull(FormatDetector.detect("app.zip", null, head))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("app.zip", null, head))
     }
 
     @Test
     fun `mimetype 条目内容不符时不靠魔数误判 EPUB`() {
         val head = zipHead("mimetype", "text/plain".toByteArray())
-        assertNull(FormatDetector.detect("x.bin", null, head))
+        // 只有 EPUB 规范要求的 mimetype 内容才算 EPUB；不符就只是个普通 zip → 漫画容器
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("x.bin", null, head))
         // 魔数不符但扩展名是 epub → 仍按 EPUB（上层解析失败会回退/报错）
         assertEquals(BookFormat.EPUB, FormatDetector.detect("x.epub", null, head))
     }
@@ -105,7 +111,32 @@ class FormatDetectorTest {
         assertEquals(BookFormat.FB2, FormatDetector.detect(null, null, head))
         assertEquals(BookFormat.FB2, FormatDetector.detect("a.fb2.zip", null, ByteArray(0)))
         assertEquals(BookFormat.FB2, FormatDetector.detect("b.FB2", null, ByteArray(0)))
-        // 普通 zip（非 fb2 条目）不误判
-        assertNull(FormatDetector.detect("c.zip", null, zipHead("story.txt", ByteArray(0))))
+    }
+
+    @Test
+    fun `漫画容器按扩展名与魔数判定`() {
+        val rar4 = byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00, 0x01)
+        val sevenZip = byteArrayOf(0x37, 0x7A, 0xBC.toByte(), 0xAF.toByte(), 0x27, 0x1C, 0, 0)
+        val tar = ByteArray(512).also { "ustar".toByteArray(Charsets.US_ASCII).copyInto(it, 257) }
+
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.cbz", null, ByteArray(0)))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.cbr", null, ByteArray(0)))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.cbt", null, ByteArray(0)))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.cb7", null, ByteArray(0)))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect(null, null, rar4))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect(null, null, sevenZip))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.tar", null, tar))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect(null, "application/vnd.comicbook+zip", ByteArray(0)))
+    }
+
+    @Test
+    fun `tar 的 ustar 字节串出现在普通文本里不误判`() {
+        // 文本文件偏移 257 恰好是 ustar：没有扩展名印证时不能当 tar
+        val text = ByteArray(512) { 'a'.code.toByte() }
+            .also { "ustar".toByteArray(Charsets.US_ASCII).copyInto(it, 257) }
+
+        assertNull(FormatDetector.detect("readme.bin", null, text))
+        assertEquals(BookFormat.TXT, FormatDetector.detect("readme.txt", null, text))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("book.tar", null, text))
     }
 }

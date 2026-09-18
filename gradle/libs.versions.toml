@@ -23,6 +23,16 @@ datastore = "1.2.0"
 json = "20250517"
 room = "2.8.4"
 ksp = "2.2.10-2.0.2"
+# 漫画容器读取：commons-compress 覆盖 zip/tar/7z，junrar 覆盖 rar
+commonsCompress = "1.28.0"
+# 7z 的 LZMA/LZMA2 解码由 xz 提供（commons-compress 把它声明为可选依赖，
+# 但不加它真实 .7z 一律解不开）
+xz = "1.10"
+junrar = "7.6.0"
+# PDF：androidx.pdf 负责渲染（只取 pdf-core + pdf-document-service，不引成品 UI），
+# PdfBox 负责元数据/目录/页码标签/文本提取
+androidxPdf = "1.0.0-beta01"
+pdfboxAndroid = "2.0.27.0"
 # JVM 单测里的 Android API（Paint / BitmapFactory / SQLite / Compose UI）
 robolectric = "4.17"
 
@@ -59,6 +69,14 @@ androidx-room-runtime = { group = "androidx.room", name = "room-runtime", versio
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 org-json = { group = "org.json", name = "json", version.ref = "json" }
+# 漫画容器读取
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
+xz = { group = "org.tukaani", name = "xz", version.ref = "xz" }
+junrar = { group = "com.github.junrar", name = "junrar", version.ref = "junrar" }
+# PDF 渲染与解析
+androidx-pdf-core = { group = "androidx.pdf", name = "pdf-core", version.ref = "androidxPdf" }
+androidx-pdf-document-service = { group = "androidx.pdf", name = "pdf-document-service", version.ref = "androidxPdf" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 

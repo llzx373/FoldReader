@@ -4,6 +4,8 @@ import com.llzx373.foldreader.core.data.db.BookPrefsDao
 import com.llzx373.foldreader.core.data.db.BookPrefsEntity
 import com.llzx373.foldreader.core.data.db.toBookPrefsEntity
 import com.llzx373.foldreader.core.data.db.toReadingPreferences
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
@@ -11,6 +13,7 @@ import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.TapAction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -225,6 +228,8 @@ class BookPrefsRepositoryTest {
         override suspend fun setAvoidCameraCutout(enabled: Boolean) = Unit
         override suspend fun setPageTurnMode(mode: PageTurnMode) = Unit
         override suspend fun setPageTurnHotspotRatio(ratio: Float) = Unit
+        override suspend fun setMiddleTapAction(action: TapAction) = Unit
+        override suspend fun setMiddleDoubleTapAction(action: TapAction) = Unit
         override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) = Unit
         override suspend fun setBrightnessGestureEnabled(enabled: Boolean) = Unit
         override suspend fun setSwipeGestureEnabled(enabled: Boolean) = Unit
@@ -244,5 +249,10 @@ class BookPrefsRepositoryTest {
         override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) = Unit
         override suspend fun setCustomChapterRules(rules: List<String>) = Unit
         override suspend fun setAdCleanRules(rules: List<String>) = Unit
+        override suspend fun setComicDirection(direction: ComicDirection) = Unit
+        override suspend fun setComicDualPageCoverAlone(enabled: Boolean) = Unit
+        override suspend fun setComicSpreadAutoDetect(enabled: Boolean) = Unit
+        override suspend fun setComicFitMode(mode: ComicFitMode) = Unit
+        override suspend fun setComicScrollGapDp(gapDp: Int) = Unit
     }
 }

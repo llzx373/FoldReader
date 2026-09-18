@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.needsContentPreparation
@@ -822,8 +823,8 @@ private fun ExternalSourceBadge(modifier: Modifier = Modifier) {
 }
 
 /**
- * 待解析角标：EPUB/FB2 还没做整本压平时的提示。
- * 导入后由后台预热队列处理，完成即写入 `books.contentPreparedAt`，角标随书架刷新自动消失。
+ * 待解析角标：EPUB/FB2 的整本压平、漫画的 rar/tar/7z 解压尚未完成时的提示。
+ * 导入后由后台预热队列处理，完成即回写 `books.contentPreparedAt`，角标随书架刷新自动消失。
  */
 @Composable
 private fun PendingParseBadge(modifier: Modifier = Modifier) {
@@ -835,6 +836,23 @@ private fun PendingParseBadge(modifier: Modifier = Modifier) {
     ) {
         Text(
             text = "待解析",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
+/** 漫画容器角标（CBZ/CBR/CBT/CB7/文件夹），与电子书架同架时用来区分。 */
+@Composable
+private fun ComicBadge(label: String, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier,
+    ) {
+        Text(
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )
@@ -1000,6 +1018,14 @@ private fun BookGridItem(
                         .padding(6.dp),
                 )
             }
+            if (isPagedFormat(book.format)) {
+                ComicBadge(
+                    label = pagedFormatLabel(book),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                )
+            }
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
@@ -1108,7 +1134,12 @@ private fun BookList(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = book.author ?: "未知作者",
+                            // 列表视图封面只有 46dp 放不下角标，漫画改在这里标出容器类型
+                            text = if (isPagedFormat(book.format)) {
+                                pagedFormatLabel(book)
+                            } else {
+                                book.author ?: "未知作者"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1135,9 +1166,18 @@ private fun BookList(
     }
 }
 
+/**
+ * 书架副标题：页式格式（漫画 / PDF）按页数算进度，文本按字符偏移算。
+ * 两类位置语义完全不同，这里按格式分派而不是把页序号塞进 charOffset。
+ */
 private fun bookSubtitle(item: BookWithProgress): String {
-    val progress = formatReadingProgress(item.charOffset, item.book.totalChars)
-    val lastRead = formatLastRead(item.book.lastReadAt)
+    val book = item.book
+    val progress = if (isPagedFormat(book.format)) {
+        formatComicProgress(item.comicPage, book.comicPageCount)
+    } else {
+        formatReadingProgress(item.charOffset, book.totalChars)
+    }
+    val lastRead = formatLastRead(book.lastReadAt)
     return if (lastRead != null) "$progress · $lastRead" else progress
 }
 

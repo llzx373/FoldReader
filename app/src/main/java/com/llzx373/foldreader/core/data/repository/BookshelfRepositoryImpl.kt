@@ -30,6 +30,8 @@ class BookshelfRepositoryImpl(
     private val coversDir: java.io.File? = null,
     /** 页边界缓存；删除书籍时按 bookId 清理（改一次版式就多一份文件，不删则只增不减）。 */
     private val pageDiskCache: com.llzx373.foldreader.core.reader.PageDiskCache? = null,
+    /** 漫画解压缓存与本地副本；删除书籍时按 contentHash 清理。 */
+    private val comicStore: com.llzx373.foldreader.core.comic.ComicExtractionStore? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -57,6 +59,26 @@ class BookshelfRepositoryImpl(
 
     override suspend fun markContentPrepared(bookId: Long, timestamp: Long) =
         bookDao.markContentPrepared(bookId, timestamp)
+
+    override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) =
+        bookDao.updateComicPageCount(bookId, pageCount)
+
+    override suspend fun updateCoverPath(bookId: Long, coverPath: String?) =
+        bookDao.updateCoverPath(bookId, coverPath)
+
+    override suspend fun backfillPdfMetadata(
+        bookId: Long,
+        title: String?,
+        author: String?,
+        description: String?,
+        subjects: String?,
+    ) = bookDao.backfillPdfMetadata(bookId, title, author, description, subjects)
+
+    override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) =
+        bookDao.updateComicLocalPath(bookId, localPath)
+
+    override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) =
+        bookDao.updateConvertedFile(bookId, cleanedFilePath, totalChars)
 
     override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) {
         if (deleteLocalData) {
@@ -86,6 +108,10 @@ class BookshelfRepositoryImpl(
                 coversDir.listFiles { f -> f.name.startsWith("${book.contentHash}.") }
                     ?.forEach { it.delete() }
             }
+            if (book != null && comicStore != null && book.contentHash.isNotBlank()) {
+                // 漫画解压缓存与「复制到本地」的副本一并清掉（引用外部源的原始文件不动）
+                comicStore.deleteAll(book.contentHash)
+            }
         }
         bookDao.deleteByIds(bookIds)
     }
@@ -111,13 +137,14 @@ class BookshelfRepositoryImpl(
     override suspend fun saveProgress(progress: ReadingProgressEntity) =
         progressDao.upsert(progress)
 
+    private fun ChapterEntity.toChapter() =
+        Chapter(title = title, charStart = charStart, charEnd = charEnd, depth = depth, pageIndex = pageIndex)
+
     override suspend fun getChapters(bookId: Long): List<Chapter> =
-        chapterDao.getForBook(bookId).map { Chapter(it.title, it.charStart, it.charEnd, it.depth) }
+        chapterDao.getForBook(bookId).map { it.toChapter() }
 
     override fun observeChapters(bookId: Long): Flow<List<Chapter>> =
-        chapterDao.observeForBook(bookId).map { list ->
-            list.map { Chapter(it.title, it.charStart, it.charEnd, it.depth) }
-        }
+        chapterDao.observeForBook(bookId).map { list -> list.map { it.toChapter() } }
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
         chapterDao.replaceForBook(
@@ -130,6 +157,7 @@ class BookshelfRepositoryImpl(
                     charStart = chapter.charStart,
                     charEnd = chapter.charEnd,
                     depth = chapter.depth,
+                    pageIndex = chapter.pageIndex,
                 )
             },
         )

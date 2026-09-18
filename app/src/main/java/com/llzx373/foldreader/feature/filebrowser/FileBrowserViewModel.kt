@@ -3,17 +3,20 @@ package com.llzx373.foldreader.feature.filebrowser
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
+import com.llzx373.foldreader.core.comic.ComicContainer
+import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
 import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.core.format.isSupportedBookName
+import com.llzx373.foldreader.core.format.saf.SafTree
+import com.llzx373.foldreader.feature.importer.ComicImportUseCase
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,6 +55,8 @@ class FileBrowserViewModel(
     private val context: Context,
     private val rootsStore: FileBrowserRootsStore,
     private val importBook: ImportBookUseCase,
+    private val safTree: SafTree,
+    private val comicImport: ComicImportUseCase,
 ) : ViewModel() {
 
     // null = 尚未加载（DataStore 首次发射前），用于区分"加载中"与"无授权根"
@@ -103,7 +108,7 @@ class FileBrowserViewModel(
     fun enterRoot(root: BrowserRoot) {
         val treeUri = Uri.parse(root.treeUri)
         _path.value = listOf(
-            BrowserDir(root.name, root.treeUri, DocumentsContract.getTreeDocumentId(treeUri)),
+            BrowserDir(root.name, root.treeUri, safTree.treeDocumentId(treeUri)),
         )
         refresh()
     }
@@ -166,56 +171,67 @@ class FileBrowserViewModel(
         }
     }
 
+    /**
+     * 「以漫画打开」：目录 = 一本目录漫画，容器文件 = 一本压缩包漫画。
+     * 只登记元数据（引用外部，不复制），登记完直接进阅读器。
+     */
+    fun openAsComic(entry: BrowserEntry) {
+        if (_openingFile.value) return
+        viewModelScope.launch {
+            _openingFile.value = true
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    entry.uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            val container = if (entry.isDirectory) {
+                ComicContainer.FOLDER
+            } else {
+                ComicContainers.fromExtension(entry.name) ?: ComicContainer.ZIP
+            }
+            val result = comicImport.register(
+                uri = entry.uri,
+                container = container,
+                source = BookSource.EXTERNAL,
+            )
+            _openingFile.value = false
+            when (result) {
+                is ComicImportUseCase.Outcome.Registered ->
+                    _events.emit(FileBrowserEvent.OpenBook(result.bookId, result.title))
+                is ComicImportUseCase.Outcome.Duplicate ->
+                    _events.emit(FileBrowserEvent.OpenBook(result.bookId, result.title))
+                is ComicImportUseCase.Outcome.Failure ->
+                    _events.emit(FileBrowserEvent.Error(result.message ?: "无法作为漫画打开"))
+            }
+        }
+    }
+
     private fun rootOf(treeUri: String): BrowserRoot? = runCatching {
         val uri = Uri.parse(treeUri)
-        val docUri = DocumentsContract.buildDocumentUriUsingTree(
-            uri,
-            DocumentsContract.getTreeDocumentId(uri),
-        )
-        val name = queryDisplayName(docUri) ?: uri.lastPathSegment ?: treeUri
+        val docUri = safTree.documentUri(uri, safTree.treeDocumentId(uri))
+        val name = safTree.displayName(docUri) ?: uri.lastPathSegment ?: treeUri
         BrowserRoot(treeUri, name)
     }.getOrNull()
 
-    private fun queryDisplayName(docUri: Uri): String? =
-        context.contentResolver.query(
-            docUri,
-            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-            null, null, null,
-        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-
     /**
-     * 单次批量查询拿全目录元数据：一次 ContentResolver IPC 返回全部子项的
-     * id/名称/MIME（DocumentFile 路线每个子项每个属性都是一次独立 IPC，大目录会卡数秒）。
+     * 单次批量查询拿全目录元数据，再按支持格式过滤。
+     * 过滤规则与批量导入共用（`isSupportedBookName`），避免「浏览里看得到、导入时收不到」。
      */
     private fun listEntries(treeUri: Uri, documentId: String): List<BrowserEntry> {
         val t0 = System.nanoTime()
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
-        val entries = ArrayList<BrowserEntry>()
-        val cursor = context.contentResolver.query(
-            childrenUri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-            ),
-            null, null, null,
-        )
+        val children = safTree.listChildren(treeUri, documentId)
         val tQuery = System.nanoTime()
-        cursor?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val childId = cursor.getString(0) ?: continue
-                val name = cursor.getString(1) ?: continue
-                val mime = cursor.getString(2)
-                val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
-                if (!isDirectory && !isSupportedBook(name, mime)) continue
-                entries += BrowserEntry(
-                    name = name,
-                    uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId),
-                    documentId = childId,
-                    isDirectory = isDirectory,
+        val entries = children
+            .filter { it.isDirectory || isSupportedBook(it.name, it.mimeType) }
+            .map {
+                BrowserEntry(
+                    name = it.name,
+                    uri = it.uri,
+                    documentId = it.documentId,
+                    isDirectory = it.isDirectory,
                 )
             }
-        }
         val result = entries.sortedWith(
             compareByDescending<BrowserEntry> { it.isDirectory }.thenBy { it.name.lowercase() },
         )
@@ -240,6 +256,8 @@ class FileBrowserViewModel(
                     context = container.appContext,
                     rootsStore = container.fileBrowserRootsStore,
                     importBook = container.importBookUseCase,
+                    safTree = container.safTree,
+                    comicImport = container.comicImportUseCase,
                 )
             }
         }

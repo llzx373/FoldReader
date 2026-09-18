@@ -32,6 +32,11 @@ data class ChapterEntity(
     val charEnd: Long,
     /** 目录层级（0 为顶层），仅用于目录面板缩进；不影响跳转与进度。 */
     @ColumnInfo(defaultValue = "0") val depth: Int = 0,
+    /**
+     * 页式格式（PDF 目录）的跳转锚点：页序号；文本目录为 null。
+     * 与 charStart/charEnd 是两套不可互换的坐标，别互相顶替。
+     */
+    val pageIndex: Long? = null,
 )
 
 @Dao

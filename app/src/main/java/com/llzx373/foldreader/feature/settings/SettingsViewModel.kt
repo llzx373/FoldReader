@@ -9,12 +9,15 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.reader.FontManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,6 +90,10 @@ class SettingsViewModel(
         settingsRepository.setPageTurnMode(mode)
         bookPrefsRepository.applyGlobalPageTurnMode(mode)
     }
+    fun updateMiddleTapAction(action: TapAction) = launch { settingsRepository.setMiddleTapAction(action) }
+    fun updateMiddleDoubleTapAction(action: TapAction) = launch {
+        settingsRepository.setMiddleDoubleTapAction(action)
+    }
     fun updateDualPageMode(mode: DualPageMode) = launch { settingsRepository.setDualPageMode(mode) }
     fun updateWideScreenDualPage(enabled: Boolean) =
         launch { settingsRepository.setWideScreenDualPage(enabled) }
@@ -110,6 +117,16 @@ class SettingsViewModel(
     fun updateShowTime(enabled: Boolean) = launch { settingsRepository.setShowTime(enabled) }
     fun updateBookshelfGridView(gridView: Boolean) =
         launch { settingsRepository.setBookshelfGridView(gridView) }
+    fun updateComicDirection(direction: ComicDirection) =
+        launch { settingsRepository.setComicDirection(direction) }
+    fun updateComicFitMode(mode: ComicFitMode) =
+        launch { settingsRepository.setComicFitMode(mode) }
+    fun updateComicCoverAlone(enabled: Boolean) =
+        launch { settingsRepository.setComicDualPageCoverAlone(enabled) }
+    fun updateComicSpreadAutoDetect(enabled: Boolean) =
+        launch { settingsRepository.setComicSpreadAutoDetect(enabled) }
+    fun updateComicScrollGap(gapDp: Int) =
+        launch { settingsRepository.setComicScrollGapDp(gapDp) }
 
     /** 非法正则不保存，返回 false 供界面提示。 */
     fun addCustomChapterRule(pattern: String): Boolean {

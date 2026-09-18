@@ -11,6 +11,8 @@ import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionDao
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
@@ -18,6 +20,7 @@ import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.format.Chapter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -430,6 +433,10 @@ class BackupCodecTest {
             update { copy(pageTurnMode = mode) }
         override suspend fun setPageTurnHotspotRatio(ratio: Float) =
             update { copy(pageTurnHotspotRatio = ratio) }
+        override suspend fun setMiddleTapAction(action: TapAction) =
+            update { copy(middleTapAction = action) }
+        override suspend fun setMiddleDoubleTapAction(action: TapAction) =
+            update { copy(middleDoubleTapAction = action) }
         override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) =
             update { copy(volumeKeyPagingEnabled = enabled) }
         override suspend fun setBrightnessGestureEnabled(enabled: Boolean) =
@@ -468,6 +475,21 @@ class BackupCodecTest {
         override suspend fun setAdCleanRules(rules: List<String>) =
             update { copy(adCleanRules = rules) }
 
+        override suspend fun setComicDirection(direction: ComicDirection) =
+            update { copy(comicDirection = direction) }
+
+        override suspend fun setComicDualPageCoverAlone(enabled: Boolean) =
+            update { copy(comicDualPageCoverAlone = enabled) }
+
+        override suspend fun setComicSpreadAutoDetect(enabled: Boolean) =
+            update { copy(comicSpreadAutoDetect = enabled) }
+
+        override suspend fun setComicFitMode(mode: ComicFitMode) =
+            update { copy(comicFitMode = mode) }
+
+        override suspend fun setComicScrollGapDp(gapDp: Int) =
+            update { copy(comicScrollGapDp = gapDp) }
+
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()
         }
@@ -497,6 +519,17 @@ class BackupCodecTest {
         }
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
         override suspend fun markContentPrepared(bookId: Long, timestamp: Long) = Unit
+                override suspend fun backfillPdfMetadata(
+            bookId: Long,
+            title: String?,
+            author: String?,
+            description: String?,
+            subjects: String?,
+        ) = Unit
+        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) = Unit
+        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
+        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit
+        override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) = Unit
         override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) = Unit
         override fun observeGroupNames(): Flow<List<String>> = flowOf(emptyList())
         override fun observeBookshelfWithProgressInGroup(

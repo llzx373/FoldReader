@@ -49,9 +49,107 @@ class BatchImportUseCaseTest {
 
         assertFalse(truncated)
         assertEquals(
-            listOf("a.epub", "b.txt", "x.fb2.zip", "y.fb2"),
-            found.map { it.second },
+            listOf("a.epub", "b.txt", "c.pdf", "x.fb2.zip", "y.fb2"),
+            found.map { it.name },
         )
+    }
+
+    @Test
+    fun `含足量图片的目录按一本漫画收集且不再下探`() {
+        val children = treeOf(
+            "root" to listOf(dir("vol01"), dir("vol02")),
+            "vol01" to listOf(
+                file("p1", "001.jpg"),
+                file("p2", "002.jpg"),
+                file("p3", "003.png"),
+                dir("thumbs"),
+            ),
+            // 卷目录里有子目录也不下探：这一卷就是一本
+            "thumbs" to listOf(file("t1", "t1.jpg")),
+            "vol02" to listOf(dir("ch1")),
+            "ch1" to listOf(file("q1", "1.jpg"), file("q2", "2.jpg"), file("q3", "3.jpg")),
+        )
+
+        val (found, _) = useCase.enumerateTree("root", children, rootName = "系列名")
+
+        assertEquals(listOf("ch1", "vol01"), found.map { it.name })
+        assertTrue(found.all { it.isDirectory })
+    }
+
+    @Test
+    fun `零散图片的目录不当作漫画`() {
+        val children = treeOf(
+            "root" to listOf(dir("bookdir")),
+            "bookdir" to listOf(
+                file("f1", "novel.txt", "text/plain"),
+                file("f2", "cover.jpg"),
+            ),
+        )
+
+        val (found, _) = useCase.enumerateTree("root", children)
+
+        assertEquals(listOf("novel.txt"), found.map { it.name })
+    }
+
+    @Test
+    fun `根目录自身是图片目录时按一本收集并取根目录名`() {
+        val children = treeOf(
+            "root" to listOf(
+                file("p1", "001.jpg"),
+                file("p2", "002.jpg"),
+                file("p3", "003.jpg"),
+            ),
+        )
+
+        val (found, _) = useCase.enumerateTree("root", children, rootName = "第01卷")
+
+        assertEquals(listOf("第01卷"), found.map { it.name })
+        assertTrue(found.single().isDirectory)
+    }
+
+    @Test
+    fun `容器文件与卷目录混排时都收集`() {
+        val children = treeOf(
+            "root" to listOf(
+                file("z1", "extra.cbz"),
+                dir("vol01"),
+                file("z2", "note.txt", "text/plain"),
+            ),
+            "vol01" to listOf(
+                file("p1", "001.jpg"),
+                file("p2", "002.jpg"),
+                file("p3", "003.jpg"),
+            ),
+        )
+
+        val (found, _) = useCase.enumerateTree("root", children)
+
+        assertEquals(listOf("extra.cbz", "note.txt", "vol01"), found.map { it.name })
+        assertEquals(listOf(false, false, true), found.map { it.isDirectory })
+    }
+
+    @Test
+    fun `目录漫画走独立导入路径`() = runBlocking {
+        val directoryCalls = mutableListOf<String>()
+        val useCase = BatchImportUseCase(
+            importOne = { entry -> ImportBookUseCase.Result.Imported(1L, entry.name, 1f) },
+            assignGroup = { _, _ -> },
+            importComicDirectory = { entry ->
+                directoryCalls += entry.name
+                ImportBookUseCase.Result.Imported(2L, entry.name, 1f)
+            },
+        )
+
+        val result = useCase.importDirectory(
+            listOf(
+                BatchImportUseCase.DocEntry("卷1", "content://d/1", "d1", isDirectory = true),
+                BatchImportUseCase.DocEntry("a.txt", "content://d/2", "d2"),
+            ),
+            "新组",
+        )
+
+        assertEquals(listOf("卷1"), directoryCalls)
+        assertEquals(listOf(2L to "卷1", 1L to "a.txt"), result.imported)
     }
 
     @Test
@@ -65,7 +163,10 @@ class BatchImportUseCaseTest {
 
         val (found, _) = useCase.enumerateTree("root", children)
 
-        assertEquals(listOf("f1" to "README"), found)
+        assertEquals(
+            listOf(BatchImportUseCase.Candidate("f1", "README", isDirectory = false)),
+            found,
+        )
     }
 
     @Test
@@ -96,7 +197,7 @@ class BatchImportUseCaseTest {
         val (found, truncated) = useCase.enumerateTree("root", children)
 
         assertFalse(truncated)
-        assertEquals(listOf("a.txt", "b.txt"), found.map { it.second })
+        assertEquals(listOf("a.txt", "b.txt"), found.map { it.name })
     }
 
     private fun entry(name: String, id: String = name) =

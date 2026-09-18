@@ -3,6 +3,8 @@ package com.llzx373.foldreader.feature.reader
 import androidx.compose.ui.geometry.Rect
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.PdfReadingMode
+import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.foldable.FoldingPosture
 import com.llzx373.foldreader.core.foldable.HingeOrientation
 import com.llzx373.foldreader.core.foldable.Posture
@@ -16,6 +18,22 @@ import org.junit.Test
 
 class ReaderLogicTest {
 
+    @Test
+    fun `PDF 阅读模式：没定过时按文档是否有正文决定`() {
+        // 文本型默认当电子书读（能重排、能搜索、能调字号）
+        assertEquals(PdfReadingMode.TEXT, resolvePdfReadingMode(null, hasExtractedText = true))
+        // 扫描件只能按页渲染
+        assertEquals(PdfReadingMode.PAGED, resolvePdfReadingMode(null, hasExtractedText = false))
+    }
+
+    @Test
+    fun `PDF 阅读模式：用户定过就听用户的`() {
+        // 扫描件被手动切成文本模式也算用户的选择（首次打开会得到一句明确报错，不是白屏）
+        assertEquals(PdfReadingMode.TEXT, resolvePdfReadingMode(PdfReadingMode.TEXT, hasExtractedText = false))
+        // 文本型也能被手动切回页式——"能取字"不等于"必须取字"
+        assertEquals(PdfReadingMode.PAGED, resolvePdfReadingMode(PdfReadingMode.PAGED, hasExtractedText = true))
+    }
+
     private val chapters = listOf(
         Chapter("卷首", 0L, 100L),
         Chapter("第一章", 100L, 250L),
@@ -26,10 +44,10 @@ class ReaderLogicTest {
     fun `tap zones follow hotspot ratio`() {
         assertEquals(TapZone.PREVIOUS, tapZoneOf(10f, 1000f, 0.3f))
         assertEquals(TapZone.PREVIOUS, tapZoneOf(299f, 1000f, 0.3f))
-        assertEquals(TapZone.MENU, tapZoneOf(500f, 1000f, 0.3f))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(500f, 1000f, 0.3f))
         assertEquals(TapZone.NEXT, tapZoneOf(701f, 1000f, 0.3f))
         assertEquals(TapZone.NEXT, tapZoneOf(990f, 1000f, 0.3f))
-        assertEquals(TapZone.MENU, tapZoneOf(10f, 0f, 0.3f))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(10f, 0f, 0.3f))
     }
 
     @Test
@@ -37,10 +55,94 @@ class ReaderLogicTest {
         assertEquals(TapZone.NEXT, tapZoneOf(500f, 1000f, 0.3f, y = 950f, heightPx = 1000f))
         assertEquals(TapZone.NEXT, tapZoneOf(100f, 1000f, 0.3f, y = 900f, heightPx = 1000f))
         assertEquals(TapZone.NEXT, tapZoneOf(500f, 1000f, 0.3f, y = 701f, heightPx = 1000f))
-        assertEquals(TapZone.MENU, tapZoneOf(500f, 1000f, 0.3f, y = 700f, heightPx = 1000f))
-        assertEquals(TapZone.MENU, tapZoneOf(500f, 1000f, 0.3f, y = 100f, heightPx = 1000f))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(500f, 1000f, 0.3f, y = 700f, heightPx = 1000f))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(500f, 1000f, 0.3f, y = 100f, heightPx = 1000f))
         assertEquals(TapZone.PREVIOUS, tapZoneOf(100f, 1000f, 0.3f, y = 100f, heightPx = 1000f))
-        assertEquals(TapZone.MENU, tapZoneOf(500f, 1000f, 0.3f, y = 950f, heightPx = 0f))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(500f, 1000f, 0.3f, y = 950f, heightPx = 0f))
+    }
+
+    /**
+     * 中间点击层照 [middleZoneRect] 铺，所以这块矩形必须与 [tapZoneOf] 的判定完全对上——
+     * 对不上就会「点的位置被判成右区（翻页），却被点击层当成中间区接走」。
+     */
+    @Test
+    fun `middle zone rect matches tap zone judgement`() {
+        val width = 1000f
+        val height = 2000f
+        val rect = middleZoneRect(width, height, 0.3f)
+
+        assertEquals(300f, rect.left, 0.001f)
+        assertEquals(400f, rect.width, 0.001f)
+        // 高度只到「底边翻页条」之上：底边那一条判的是 NEXT，不能被点击层盖住
+        assertEquals(1400f, rect.height, 0.001f)
+
+        // 矩形内任意一点都必须判成中间区
+        assertEquals(TapZone.MIDDLE, tapZoneOf(rect.left, width, 0.3f, y = 0f, heightPx = height))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(rect.left + 1f, width, 0.3f, y = 10f, heightPx = height))
+        assertEquals(
+            TapZone.MIDDLE,
+            tapZoneOf(rect.left + rect.width - 1f, width, 0.3f, y = rect.height - 1f, heightPx = height),
+        )
+        // 矩形外一像素就必须不再是中间区
+        assertEquals(TapZone.PREVIOUS, tapZoneOf(rect.left - 1f, width, 0.3f, y = 10f, heightPx = height))
+        assertEquals(TapZone.NEXT, tapZoneOf(rect.left + rect.width + 1f, width, 0.3f, y = 10f, heightPx = height))
+        assertEquals(TapZone.NEXT, tapZoneOf(rect.left + 1f, width, 0.3f, y = rect.height + 1f, heightPx = height))
+        // 边界那一行本身判的是中间区（判定是 `y > 阈值`），而点击层的盒子上界是开的，
+        // 所以这一像素行会落回下层按单击处理——一像素的差可忽略，这里如实钉住语义
+        assertEquals(TapZone.MIDDLE, tapZoneOf(rect.left + 1f, width, 0.3f, y = rect.height, heightPx = height))
+    }
+
+    @Test
+    fun `middle zone rect clamps hotspot ratio like tap zone`() {
+        // 非法比例按同一套夹取，否则点击层与判定会各算各的
+        assertEquals(middleZoneRect(1000f, 1000f, 5f).left, 1000f * 0.45f, 0.001f)
+        assertEquals(middleZoneRect(1000f, 1000f, 0f).left, 1000f * 0.05f, 0.001f)
+    }
+
+    @Test
+    fun `double tap needs both time and position within limits`() {
+        val timeout = 300L
+        val slop = 40f
+
+        assertTrue(isDoubleTap(100f, 100f, 110f, 105f, elapsedMs = 120L, timeoutMs = timeout, slopPx = slop))
+        // 位置对但超时：算两次单击
+        assertFalse(isDoubleTap(100f, 100f, 110f, 105f, elapsedMs = 400L, timeoutMs = timeout, slopPx = slop))
+        // 时间对但位置差太远：算两次单击
+        assertFalse(isDoubleTap(100f, 100f, 300f, 105f, elapsedMs = 120L, timeoutMs = timeout, slopPx = slop))
+        assertFalse(isDoubleTap(100f, 100f, 110f, 300f, elapsedMs = 120L, timeoutMs = timeout, slopPx = slop))
+        // 边界：恰好卡在超时与容差上算双击
+        assertTrue(isDoubleTap(100f, 100f, 140f, 140f, elapsedMs = timeout, timeoutMs = timeout, slopPx = slop))
+        assertFalse(isDoubleTap(100f, 100f, 141f, 100f, elapsedMs = 0L, timeoutMs = timeout, slopPx = slop))
+    }
+
+    @Test
+    fun `middle tap falls back to single when double is not configured`() {
+        assertEquals(
+            TapAction.TOGGLE_MENU,
+            resolveMiddleTap(TapAction.TOGGLE_MENU, TapAction.NONE, isDouble = true),
+        )
+        assertEquals(
+            TapAction.TOGGLE_ZOOM,
+            resolveMiddleTap(TapAction.TOGGLE_MENU, TapAction.TOGGLE_ZOOM, isDouble = true),
+        )
+        assertEquals(
+            TapAction.TOGGLE_MENU,
+            resolveMiddleTap(TapAction.TOGGLE_MENU, TapAction.TOGGLE_ZOOM, isDouble = false),
+        )
+    }
+
+    /**
+     * 不支持的动作必须整层不挂：中间点击层会让**单击**也等一个双击超时，
+     * 若文本阅读器为它不支持的「缩放」挂了层，页面翻页就会平白慢 300ms。
+     */
+    @Test
+    fun `zoom action is paged only and none never mounts a layer`() {
+        assertFalse(supportsTapAction(TapAction.NONE, paged = true))
+        assertFalse(supportsTapAction(TapAction.NONE, paged = false))
+        assertTrue(supportsTapAction(TapAction.TOGGLE_ZOOM, paged = true))
+        assertFalse(supportsTapAction(TapAction.TOGGLE_ZOOM, paged = false))
+        assertTrue(supportsTapAction(TapAction.TOGGLE_MENU, paged = false))
+        assertTrue(supportsTapAction(TapAction.TOGGLE_BOOKMARK, paged = false))
     }
 
     @Test

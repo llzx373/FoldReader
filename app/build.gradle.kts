@@ -95,6 +95,21 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    // 漫画容器读取：zip/tar/7z（commons-compress + xz 提供 LZMA）+ rar（junrar）
+    implementation(libs.commons.compress)
+    implementation(libs.xz)
+    implementation(libs.junrar)
+    // PDF：渲染走 androidx.pdf 的文档服务（沙箱进程 + 平台 PdfRenderer），
+    // 元数据/目录/文本走 PdfBox。
+    //
+    // 不要排掉 pdf-viewer：它不只是"成品 UI"，还是 pdf-document-service 的运行时依赖——
+    // 服务端 PdfDocumentRemoteImpl.getPageDimensions 引用了 pdf-viewer 里的
+    // androidx.pdf.models.Dimensions。一旦排出，沙箱进程会在该调用上
+    // NoClassDefFoundError 直接 FATAL（binder 死掉、整个文档作废）。
+    // 我们不实例化 PdfViewer 的界面，但必须让它留在依赖图里。
+    implementation(libs.androidx.pdf.core)
+    implementation(libs.androidx.pdf.document.service)
+    implementation(libs.pdfbox.android)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
     // JVM 单测用的 XmlPullParser 实现（生产用 android.util.Xml）

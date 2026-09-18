@@ -2,6 +2,8 @@ package com.llzx373.foldreader.feature.importer
 
 import android.content.Context
 import android.net.Uri
+import com.llzx373.foldreader.core.comic.ComicContainer
+import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookSource
@@ -34,6 +36,10 @@ class ImportBookUseCase(
     private val traditionalMap: () -> Map<Char, Char>,
     /** 非 TXT 格式（EPUB/FB2…）的解析器：导入时仅用于 parseMeta 取元数据。 */
     private val convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
+    /** 漫画登记器；null 时漫画会被当作 TXT 处理（JVM 单测可省）。 */
+    private val comicImport: ComicImportUseCase? = null,
+    /** PDF 登记器；null 时 PDF 报"尚未接入"。 */
+    private val pdfImport: PdfImportUseCase? = null,
     /** 封面落盘目录（filesDir/covers）；null 时跳过封面提取。 */
     private val coversDir: File? = null,
     /**
@@ -50,6 +56,8 @@ class ImportBookUseCase(
         convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
         coversDir: File? = null,
         enqueuePrewarm: (bookId: Long, uriKey: String, format: BookFormat) -> Unit = { _, _, _ -> },
+        comicImport: ComicImportUseCase? = null,
+        pdfImport: PdfImportUseCase? = null,
     ) : this(
         bookshelfRepository = bookshelfRepository,
         cleanedDir = File(context.filesDir, "cleaned"),
@@ -57,6 +65,8 @@ class ImportBookUseCase(
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
         traditionalMap = { TsCharMap.load(context) },
         convertedParsers = convertedParsers,
+        comicImport = comicImport,
+        pdfImport = pdfImport,
         coversDir = coversDir,
         enqueuePrewarm = enqueuePrewarm,
     )
@@ -97,14 +107,33 @@ class ImportBookUseCase(
         }
 
         openChannel(uriKey).use { channel ->
+            val displayName = displayNameOf(uriKey)
             val head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
-            val format = FormatDetector.detect(displayNameOf(uriKey), mimeType = null, head = head)
+            val format = FormatDetector.detect(displayName, mimeType = null, head = head)
+            if (format == BookFormat.PDF && pdfImport != null) {
+                // PDF 也走"只登记不复制"：页数/元数据/封面留给打开时回填与后台预热
+                return pdfImport.register(Uri.parse(uriKey), source).toImportResult()
+            }
+            if (format == BookFormat.COMIC && comicImport != null) {
+                // 漫画走独立登记路径（只记源位置 + 页数 + 封面，不复制内容、不做文本清洗）。
+                // 容器类型在这里重新判定一次：detect() 只回答「是不是漫画」。
+                val container = ComicContainers.detect(displayName, null, head) ?: ComicContainer.ZIP
+                val outcome = comicImport.register(Uri.parse(uriKey), container, source)
+                // rar/tar/7z 要解压过才知道页数：入队预热，等用户点开时缓存已就位
+                if (outcome is ComicImportUseCase.Outcome.Registered && outcome.needsPreparation) {
+                    runCatching { enqueuePrewarm(outcome.bookId, uriKey, BookFormat.COMIC) }
+                }
+                return outcome.toImportResult()
+            }
             if (format != null && format != BookFormat.TXT) {
                 // 非 TXT 忽略 CleanOptions：不复制原文件，转换发生在首开压平时
                 return importConverted(format, uriKey, channel, source, onProgress)
             }
             if (format == null && FormatDetector.isPdf(head)) {
                 return Result.Failure("暂不支持 PDF 格式")
+            }
+            if (format == BookFormat.PDF && pdfImport == null) {
+                return Result.Failure("PDF 尚未接入")
             }
             val detection = EncodingDetector.detect(head)
             val bom = EncodingDetector.bomLengthOf(head)
@@ -262,13 +291,8 @@ class ImportBookUseCase(
     )
 
     /** 封面落盘；同哈希旧封面（扩展名可能不同）先清掉再写。返回绝对路径。 */
-    internal fun writeCover(dir: File, contentHash: String, cover: CoverImage): String {
-        dir.mkdirs()
-        dir.listFiles { f -> f.name.startsWith("$contentHash.") }?.forEach { it.delete() }
-        val target = File(dir, "$contentHash.${cover.extension}")
-        target.writeBytes(cover.bytes)
-        return target.absolutePath
-    }
+    internal fun writeCover(dir: File, contentHash: String, cover: CoverImage): String =
+        writeCoverFile(dir, contentHash, cover)
 
     private suspend fun insert(
         uriKey: String,
@@ -299,4 +323,26 @@ class ImportBookUseCase(
         )
         return Result.Imported(bookId, title, detection.confidence)
     }
+}
+
+/** PDF 登记结果 → 统一的导入结果。 */
+internal fun PdfImportUseCase.Outcome.toImportResult(): ImportBookUseCase.Result = when (this) {
+    is PdfImportUseCase.Outcome.Registered ->
+        ImportBookUseCase.Result.Imported(bookId, title, encodingConfidence = 1f)
+    is PdfImportUseCase.Outcome.Duplicate ->
+        if (sameUri) ImportBookUseCase.Result.DuplicateSameUri(bookId, title)
+        else ImportBookUseCase.Result.DuplicateSameHash(bookId, title)
+    is PdfImportUseCase.Outcome.Failure ->
+        ImportBookUseCase.Result.Failure(message)
+}
+
+/** 漫画登记结果 → 统一的导入结果（两种「重复」要分开，提示文案不同）。 */
+internal fun ComicImportUseCase.Outcome.toImportResult(): ImportBookUseCase.Result = when (this) {
+    is ComicImportUseCase.Outcome.Registered ->
+        ImportBookUseCase.Result.Imported(bookId, title, encodingConfidence = 1f)
+    is ComicImportUseCase.Outcome.Duplicate ->
+        if (sameUri) ImportBookUseCase.Result.DuplicateSameUri(bookId, title)
+        else ImportBookUseCase.Result.DuplicateSameHash(bookId, title)
+    is ComicImportUseCase.Outcome.Failure ->
+        ImportBookUseCase.Result.Failure(message)
 }

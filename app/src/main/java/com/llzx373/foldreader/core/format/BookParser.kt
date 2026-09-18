@@ -42,6 +42,14 @@ data class Chapter(
      * TXT 启发式章节与无目录书的兜底都是 0。
      */
     val depth: Int = 0,
+    /**
+     * 页式格式（PDF）的跳转锚点：页序号。文本格式恒为 null。
+     *
+     * 与 [charStart]/[charEnd] 是**两套不可互换**的坐标：页序号换成字符偏移要重排版，
+     * 字符偏移换成页序号要分页算。谁有哪种锚点就用哪种，绝不互相顶替
+     * （页式目录的 charStart/charEnd 写 0，不参与任何计算）。
+     */
+    val pageIndex: Long? = null,
 )
 
 interface BookContent {
