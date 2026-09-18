@@ -74,12 +74,12 @@ object NovelCleaner {
     /**
      * 组装管线。
      *
-     * **注意读法**：这里是「每赋值一次就向外包一层」，所以 `sink` 的**赋值顺序与数据流方向相反**——
-     * 最后赋的那个最靠近读入端。数据流是：
+     * 各阶段在 [stages] 里**按数据流顺序排列**（读入端在前、写出端在后），再用 `foldRight`
+     * 从写出端往读入端折起来。这样这份列表的顺序**就是**真实处理顺序，
+     * 不必再把「赋值即向外包一层」在脑子里倒过来读。
      *
-     * ```
-     * Counting → Char → Line → Noise → ChapterSplit → Reflow → Punct → ChapterRepair → Quote → Indent → Writer
-     * ```
+     * 之所以要这么写：原先是一行一个 `sink = XxxSink(next = sink)`，赋值顺序与数据流方向
+     * **相反**；改顺序时只改注释、没动位置，看上去改了其实等于没改（踩过一次）。
      */
     private fun buildPipeline(
         profile: CleanProfile,
@@ -87,44 +87,57 @@ object NovelCleaner {
         report: CleanReportBuilder,
         writer: Writer,
     ): LineSink {
-        val toggles = profile.toggles
-        // ── 以下从「写出端」往上包，读的时候请从下往上看 ──
-        var sink: LineSink = WriterSink(writer, report)
-        sink = IndentSink(toggles.canonicalIndent, sink)
-        sink = QuoteSink(toggles.normalizeQuotes, report, sink)
-        sink = ChapterRepairSink(
-            repair = toggles.repairChapters,
-            dedupe = toggles.dedupeChapterTitles,
-            report = report,
-            next = sink,
+        val t = profile.toggles
+        val stages: List<(LineSink) -> LineSink> = listOf(
+            // 繁简最先：后面的规则（尤其章节标题）看到的就是统一字形
+            { down ->
+                CharSink(
+                    enabled = t.unifyChars,
+                    convert = t.traditionalToSimplified,
+                    tsMap = tsMap,
+                    report = report,
+                    next = down,
+                )
+            },
+            { down -> LineSinkImpl(t, down) },
+            { down -> NoiseSink(t, profile.adPatterns, report, down) },
+            // 行中标题必须在段落重组**之前**提出：否则「上一章末行 + 新章标题」会被重组粘成
+            // 一行，标题再也不是行尾，就永远切不出来了
+            { down -> ChapterSplitSink(t.repairChapters, report, down) },
+            { down ->
+                ReflowSink(
+                    merge = t.reflowParagraphs,
+                    collapseBlanks = t.collapseBlankLines,
+                    report = report,
+                    next = down,
+                )
+            },
+            // 标点必须在段落重组**之后**：被硬换行切断的 `…` + `…` 要先拼回 `……` 再规整，
+            // 否则每一半都会被各自补成 `……`，合起来多出一倍
+            { down ->
+                PunctuationSink(
+                    enabled = t.normalizePunctuation,
+                    collapseRepeated = t.normalizeRepeatedPunctuation,
+                    report = report,
+                    next = down,
+                )
+            },
+            { down ->
+                ChapterRepairSink(
+                    repair = t.repairChapters,
+                    dedupe = t.dedupeChapterTitles,
+                    report = report,
+                    next = down,
+                )
+            },
+            { down -> QuoteSink(t.normalizeQuotes, report, down) },
+            // 段首缩进统一必须**最后**：段落重组与章节修复都要靠「有没有缩进」判断段落边界
+            { down -> IndentSink(t.canonicalIndent, down) },
         )
-        // 标点在**段落重组之后**：一条被硬换行切断的省略号（`…` + `…`）要先拼回 `……`，
-        // 否则每一半都会被各自补成 `……`，合起来多出一倍。
-        sink = PunctuationSink(
-            enabled = toggles.normalizePunctuation,
-            collapseRepeated = toggles.normalizeRepeatedPunctuation,
-            report = report,
-            next = sink,
-        )
-        sink = ReflowSink(
-            merge = toggles.reflowParagraphs,
-            collapseBlanks = toggles.collapseBlankLines,
-            report = report,
-            next = sink,
-        )
-        // 行中标题必须**在段落重组之前**提出来：否则「上一章末行 + 新章标题」会被重组粘成一行，
-        // 标题再也不是行尾，就永远切不出来了。
-        sink = ChapterSplitSink(toggles.repairChapters, report, sink)
-        sink = NoiseSink(toggles, profile.adPatterns, report, sink)
-        sink = LineSinkImpl(toggles, sink)
-        sink = CharSink(
-            enabled = toggles.unifyChars,
-            convert = toggles.traditionalToSimplified,
-            tsMap = tsMap,
-            report = report,
-            next = sink,
-        )
-        return CountingSink(report, sink)
+        val tail: LineSink = stages.foldRight(WriterSink(writer, report) as LineSink) { stage, down ->
+            stage(down)
+        }
+        return CountingSink(report, tail)
     }
 }
 

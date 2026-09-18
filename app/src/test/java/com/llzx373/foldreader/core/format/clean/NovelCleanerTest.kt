@@ -117,4 +117,22 @@ class NovelCleanerTest {
         assertFalse(report.changed)
         assertEquals("没有需要整理的内容", report.summary())
     }
+
+    /**
+     * 顺序敏感的组合：全角缩进、行中标题提行、章节标题规范化、段首缩进统一，
+     * 四个阶段的先后关系同时生效。
+     *
+     * 这份用例是给「管线顺序」兜底的——`buildPipeline` 现在按数据流顺序列出各阶段，
+     * 谁要是不小心把顺序搞反（历史上就是这么错的），这里会立刻红。
+     */
+    @Test
+    fun `各阶段的先后关系同时生效`() {
+        val text = "　　他站在原地，久久没有动。第一章 风起\n他睁开眼睛。\n"
+
+        assertEquals(
+            // 正文侧保留原文的段首缩进（提行时带上），标题顶格且被规范化
+            "　　他站在原地，久久没有动。\n第一章 风起\n他睁开眼睛。\n",
+            NovelCleaner.clean(text, standard),
+        )
+    }
 }
