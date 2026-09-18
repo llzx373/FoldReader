@@ -115,9 +115,9 @@ import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.feature.bookshelf.BookCover
 import com.llzx373.foldreader.ui.EmptyState
+import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1894,8 +1894,9 @@ private fun rememberBatteryPercent(): androidx.compose.runtime.State<Int> {
 
 @Composable
 private fun rememberClock(): androidx.compose.runtime.State<String> {
-    return produceState(initialValue = "") {
-        val format = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val locale = rememberLocale()
+    return produceState(initialValue = "", locale) {
+        val format = SimpleDateFormat("HH:mm", locale)
         while (true) {
             value = format.format(Date())
             delay(30_000L)

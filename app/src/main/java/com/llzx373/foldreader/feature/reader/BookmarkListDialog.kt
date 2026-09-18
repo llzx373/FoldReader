@@ -26,9 +26,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /** 书签列表：按创建时间倒序（新 → 旧）；点击跳转，长按重命名/删除。 */
 @Composable
@@ -121,7 +121,7 @@ private fun BookmarkRow(
             )
         }
         Spacer(modifier = Modifier.height(2.dp))
-        val time = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(bookmark.createdAt))
+        val time = SimpleDateFormat("MM-dd HH:mm", rememberLocale()).format(Date(bookmark.createdAt))
         Text(
             text = listOfNotNull(chapterTitle?.takeIf { it.isNotEmpty() }, time).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,

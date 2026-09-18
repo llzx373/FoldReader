@@ -3,6 +3,7 @@ package com.llzx373.foldreader.feature.bookshelf
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.needsContentPreparation
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -57,8 +58,16 @@ class ReadingProgressFormatTest {
 
     @Test
     fun `最近阅读时间为空返回 null`() {
-        assertNull(formatLastRead(null))
-        assertEquals("format 非空", true, formatLastRead(1_700_000_000_000L)?.isNotBlank())
+        assertNull(formatLastRead(null, Locale.US))
+    }
+
+    @Test
+    fun `最近阅读时间按传入的 Locale 排版`() {
+        // Locale 由调用方传入（Composable 侧走 rememberLocale），函数内部不再读默认值——
+        // 这样切换系统语言时书架上的时间才会跟着变。这里固定 Locale.US 断言 ASCII 数字，
+        // 避免受运行环境默认 Locale 影响。
+        val text = formatLastRead(1_700_000_000_000L, Locale.US)
+        assertTrue("实际输出：$text", text!!.matches(Regex("\\d{2}-\\d{2} \\d{2}:\\d{2}")))
     }
 }
 

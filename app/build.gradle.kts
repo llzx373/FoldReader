@@ -1,9 +1,35 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
 }
+
+// ---------------------------------------------------------------------------
+// 发布签名
+// 密钥来源优先级：环境变量 > 仓库根目录 key.properties。
+// 两者都不完整时回退 debug 签名，保证本地没有正式密钥也能出 release 包；
+// 发布流水线会强制要求正式密钥（见 .github/workflows/release.yml）。
+// 这里只判断密钥四项是否齐全，不做文件存在性探测，避免与配置缓存产生文件系统耦合。
+// ---------------------------------------------------------------------------
+val signingProps = Properties().apply {
+    rootProject.file("key.properties")
+        .takeIf { it.isFile }
+        ?.inputStream()?.use { load(it) }
+}
+
+fun signingSecret(env: String, key: String): String? =
+    providers.environmentVariable(env).orNull?.takeIf { it.isNotBlank() }
+        ?: signingProps.getProperty(key)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingSecret("FOLDREADER_KEYSTORE_FILE", "storeFile")
+val releaseStorePassword = signingSecret("FOLDREADER_KEYSTORE_PASSWORD", "storePassword")
+val releaseKeyAlias = signingSecret("FOLDREADER_KEY_ALIAS", "keyAlias")
+val releaseKeyPassword = signingSecret("FOLDREADER_KEY_PASSWORD", "keyPassword")
+val hasReleaseSigning = releaseStoreFile != null && releaseStorePassword != null &&
+    releaseKeyAlias != null && releaseKeyPassword != null
 
 android {
     namespace = "com.llzx373.foldreader"
@@ -15,15 +41,31 @@ android {
         applicationId = "com.llzx373.foldreader"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // 版本号默认值来自 gradle.properties，发布流水线用 -PfoldReader.* 覆盖。
+        versionCode = providers.gradleProperty("foldReader.versionCode").getOrElse("1").toInt()
+        versionName = providers.gradleProperty("foldReader.versionName").getOrElse("1.0")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 有正式密钥就用正式签名，否则回退 debug 签名（本地开发路径）。
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             // R8 全量优化：去虚拟化 / 内联 / 裁剪 / 资源压缩。
             // 关掉时 release 包的方法数、冷启动与运行期性能都明显劣于 debug 之外的预期。
             optimization {

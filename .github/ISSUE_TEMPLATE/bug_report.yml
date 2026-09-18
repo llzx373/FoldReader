@@ -1,0 +1,129 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量把信息填完整——尤其是**屏幕形态**，同一个问题在不同折叠形态下的表现经常完全不同。
+        若涉及安全漏洞，请勿在此提交，改用 [私密漏洞报告](https://github.com/llzx373/FoldReader/security/advisories/new)。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已确认使用的是[最新 Release](https://github.com/llzx373/FoldReader/releases/latest)，且该问题仍然存在
+          required: true
+        - label: 我已搜索过现有 issue，没有重复
+          required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: 应用版本
+      description: 下载的 Release 版本号，或应用内「设置 → 关于」显示的版本
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备型号
+      placeholder: "华为 Mate X5 / 三星 Galaxy Z Fold6 / 小米 MIX Fold4 …"
+    validations:
+      required: true
+
+  - type: input
+    id: android-version
+    attributes:
+      label: Android 版本
+      placeholder: "Android 15"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: screen-form
+    attributes:
+      label: 屏幕形态
+      description: 出现问题时屏幕处于什么状态
+      options:
+        - 折叠屏 - 展开内屏（竖持）
+        - 折叠屏 - 展开内屏（横持）
+        - 折叠屏 - 半开桌面模式
+        - 折叠屏 - 折叠外屏
+        - 直板机
+        - 平板
+        - 模拟器
+    validations:
+      required: true
+
+  - type: dropdown
+    id: content-type
+    attributes:
+      label: 涉及的书籍格式
+      options:
+        - TXT
+        - EPUB
+        - FB2
+        - PDF（文本型）
+        - PDF（扫描件）
+        - 漫画（cbz/zip）
+        - 漫画（cbr/rar）
+        - 漫画（cbt/tar）
+        - 漫画（cb7/7z）
+        - 漫画（图片文件夹）
+        - 书架 / 导入 / 设置（不涉及具体书籍）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开应用开始，按顺序写清每一步操作
+      placeholder: |
+        1. 打开《…》
+        2. 点屏幕中间呼出菜单
+        3. 切换翻页方式为「滚动」
+        4. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 崩溃、错位、卡顿、方向反了……越具体越好。有截图或录屏请直接拖进来
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: 复现频率
+      options:
+        - 每次都能复现
+        - 偶尔出现
+        - 只出现过一次
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 诊断日志
+      description: |
+        应用内「设置 → 诊断 → 分享日志」导出的日志文件，直接拖到这里。
+        含崩溃的问题请务必附上。
+    validations:
+      required: false

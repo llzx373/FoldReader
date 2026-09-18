@@ -110,6 +110,8 @@ import com.llzx373.foldreader.feature.importer.BatchImportConfirmDialog
 import com.llzx373.foldreader.feature.importer.BatchImportProgressOverlay
 import com.llzx373.foldreader.feature.importer.BatchImportSummaryDialog
 import com.llzx373.foldreader.ui.EmptyState
+import com.llzx373.foldreader.ui.rememberLocale
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 @OptIn(
@@ -1035,7 +1037,7 @@ private fun BookGridItem(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = bookSubtitle(item),
+            text = bookSubtitle(item, rememberLocale()),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -1144,7 +1146,7 @@ private fun BookList(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            text = bookSubtitle(item),
+                            text = bookSubtitle(item, rememberLocale()),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1170,14 +1172,14 @@ private fun BookList(
  * 书架副标题：页式格式（漫画 / PDF）按页数算进度，文本按字符偏移算。
  * 两类位置语义完全不同，这里按格式分派而不是把页序号塞进 charOffset。
  */
-private fun bookSubtitle(item: BookWithProgress): String {
+private fun bookSubtitle(item: BookWithProgress, locale: Locale): String {
     val book = item.book
     val progress = if (isPagedFormat(book.format)) {
         formatComicProgress(item.comicPage, book.comicPageCount)
     } else {
         formatReadingProgress(item.charOffset, book.totalChars)
     }
-    val lastRead = formatLastRead(book.lastReadAt)
+    val lastRead = formatLastRead(book.lastReadAt, locale)
     return if (lastRead != null) "$progress · $lastRead" else progress
 }
 

@@ -32,9 +32,9 @@ import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.reader.averageCharsPerMinute
 import com.llzx373.foldreader.core.reader.formatDurationZh
 import com.llzx373.foldreader.ui.EncodingPickerDialog
+import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -70,7 +70,7 @@ fun BookDetailDialog(
             if (book == null) {
                 Text("加载中…")
             } else {
-                val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd", rememberLocale())
                 val isComic = isPagedFormat(book.format)
                 val percent = when {
                     isComic -> formatComicProgress(progress?.comicPage, book.comicPageCount)

@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  push:
+    # 用宽松的 v* 而不是精细的字符类：版本格式由下面的「解析版本号」步骤严格校验，
+    # 非法 tag 会在构建之前带明确信息失败，比让 workflow 静默不触发更好定位。
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（如 1.2.0），会在当前分支的最新提交上创建 v<版本号> tag
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 打包并发布
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # --generate-notes 需要完整历史才能算出与上一个 tag 的差异
+          fetch-depth: 0
+
+      - name: 准备构建环境
+        uses: ./.github/actions/setup-build
+
+      - name: 解析版本号
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION_NAME="$INPUT_VERSION"
+            TAG="v$VERSION_NAME"
+          else
+            VERSION_NAME="${REF_NAME#v}"
+            TAG="$REF_NAME"
+          fi
+
+          # 严格校验：既要挡住手误的 tag，也要防止 tag 名里的 shell 元字符被带进构建参数
+          if ! printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'; then
+            echo "::error::版本号格式非法：'$VERSION_NAME'。应为 x.y.z，可带 -rc1 之类后缀，例如 v1.0.0、v1.1.0-rc1。"
+            exit 1
+          fi
+
+          CORE="${VERSION_NAME%%[-+]*}"
+          MAJOR="${CORE%%.*}"
+          REST="${CORE#*.}"
+          MINOR="${REST%%.*}"
+          PATCH="${REST#*.}"
+
+          # versionCode 规则见 docs/发布流程.md：major*10000 + minor*100 + patch
+          if [ "$MINOR" -ge 100 ] || [ "$PATCH" -ge 100 ]; then
+            echo "::error::minor 与 patch 必须小于 100（当前 $MINOR.$PATCH），否则 versionCode 会与相邻版本碰撞。"
+            exit 1
+          fi
+          VERSION_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
+          {
+            echo "name=$VERSION_NAME"
+            echo "code=$VERSION_CODE"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$VERSION_NAME" != "$CORE" ]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "版本号 $VERSION_NAME（versionCode=$VERSION_CODE，tag=$TAG）"
+
+      - name: 确定签名方式
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] &&
+             [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+            echo "已配置正式签名密钥，使用正式签名。"
+            exit 0
+          fi
+
+          # 刻意不在这里直接失败：允许用 debug 签名先把发布链路跑通。
+          echo "mode=debug" >> "$GITHUB_OUTPUT"
+          echo "::warning::未配置完整的签名 Secrets，本次将使用 **debug 签名** 出包。"
+          echo "::warning::该 APK 只用于验证发布流程，不要分发给最终用户："
+          echo "::warning::debug 密钥由构建机即时生成，与本机 debug 包、与后续正式密钥签名的包都不一致，"
+          echo "::warning::用户从该版本升级时必须先卸载。"
+          echo "::warning::配置正式密钥的步骤见 docs/发布流程.md。"
+          {
+            echo "### ⚠️ 本次构建使用 debug 签名"
+            echo
+            echo "未检测到完整的签名 Secrets，产物为 debug 签名，**不可分发给最终用户**。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 写入签名配置
+        if: steps.signing.outputs.mode == 'release'
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          # app/build.gradle.kts 读取仓库根目录的 key.properties（环境变量优先级更高，
+          # 这里写文件是为了让配置来源和本地开发保持一致）
+          {
+            echo "storeFile=$RUNNER_TEMP/release.keystore"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > key.properties
+
+      - name: 构建 Release APK 与 AAB
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace \
+            -PfoldReader.versionName="$VERSION_NAME" \
+            -PfoldReader.versionCode="$VERSION_CODE"
+
+      - name: 校验签名证书
+        shell: bash
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          APK="app/build/outputs/apk/release/FoldReader-release.apk"
+          "$APKSIGNER" verify --print-certs "$APK"
+
+          if [ "$SIGNING_MODE" = "release" ]; then
+            # 配了正式密钥却打出 debug 证书，说明 key.properties 没生效，必须失败
+            if "$APKSIGNER" verify --print-certs "$APK" | grep -qi "CN=Android Debug"; then
+              echo "::error::已配置正式密钥，但 APK 仍是 debug 签名，请检查 Secrets 是否正确。"
+              exit 1
+            fi
+          else
+            echo "::warning::debug 签名模式，跳过后面的「非 debug 证书」断言。"
+          fi
+
+      - name: 整理产物
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/FoldReader-release.apk"
+          AAB="$(find app/build/outputs/bundle/release -name '*.aab' | head -n 1)"
+          MAPPING="app/build/outputs/mapping/release/mapping.txt"
+
+          cp "$APK" "FoldReader-$VERSION_NAME.apk"
+          cp "$AAB" "FoldReader-$VERSION_NAME.aab"
+          cp "$MAPPING" "FoldReader-$VERSION_NAME-mapping.txt"
+
+          ls -lh "FoldReader-$VERSION_NAME".*
+
+      - name: 生成 Release 说明
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NOTES="release-notes.md"
+          : > "$NOTES"
+
+          # 签名不一致时设备会拒绝覆盖安装，这件事必须写在用户一眼能看到的地方
+          if [ "$SIGNING_MODE" = "debug" ]; then
+            {
+              echo "> [!WARNING]"
+              echo "> **本版本使用 debug 签名，仅用于打通发布流程，请勿分发给最终用户。**"
+              echo ">"
+              echo "> debug 密钥由构建机即时生成，与本机 debug 包、与后续正式密钥签名的包互不兼容，"
+              echo "> 从本版本升级时需要先卸载旧版本。"
+              echo
+            } >> "$NOTES"
+          fi
+
+          # 本仓库是单人开发、全部提交直达 main，没有 PR 可供自动生成说明，
+          # 因此直接按提交列表生成，与仓库的 Conventional Commits 风格一致。
+          PREV_TAG="$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)"
+          echo "## 变更" >> "$NOTES"
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:'- %s（%h）' "$PREV_TAG..$TAG" >> "$NOTES"
+            echo >> "$NOTES"
+            echo >> "$NOTES"
+            echo "**完整对比**：https://github.com/$REPOSITORY/compare/$PREV_TAG...$TAG" >> "$NOTES"
+          else
+            # 首个版本：变更已经在 CHANGELOG 里逐项写清楚了，这里只把提交列表折叠收起
+            echo "首个版本，逐项说明见 [CHANGELOG.md](https://github.com/$REPOSITORY/blob/$TAG/CHANGELOG.md)。" >> "$NOTES"
+            echo >> "$NOTES"
+            echo "<details><summary>全部提交（$(git rev-list --count "$TAG") 条）</summary>" >> "$NOTES"
+            echo >> "$NOTES"
+            git log --pretty=format:'- %s（%h）' "$TAG" >> "$NOTES"
+            echo >> "$NOTES"
+            echo >> "$NOTES"
+            echo "</details>" >> "$NOTES"
+          fi
+
+          echo "--- 生成的 Release 说明 ---"
+          cat "$NOTES"
+
+      - name: 创建 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ARGS=(--title "FoldReader $VERSION_NAME" --notes-file release-notes.md)
+          if [ "$PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+
+          gh release create "$TAG" \
+            "FoldReader-$VERSION_NAME.apk" \
+            "FoldReader-$VERSION_NAME.aab" \
+            "FoldReader-$VERSION_NAME-mapping.txt" \
+            "${ARGS[@]}"
+
+          echo "已发布：https://github.com/$REPOSITORY/releases/tag/$TAG"

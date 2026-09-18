@@ -1,0 +1,30 @@
+name: Setup build environment
+description: 安装 JDK 25、配置 Gradle 缓存、安装构建所需的 Android SDK 组件
+
+runs:
+  using: composite
+  steps:
+    - name: Install JDK 25
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        # 与 gradle/gradle-daemon-jvm.properties 的 toolchainVersion 保持一致，
+        # 否则 Gradle 会走 foojay 现下载一个 JDK，白白拖长构建时间。
+        java-version: "25"
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v6
+
+    - name: Install Android SDK components
+      shell: bash
+      run: |
+        # compileSdk 是滚动版本（API 37），runner 镜像不保证预装，必须显式安装。
+        #
+        # 平台目录名带 minor 版本（本地是 platforms/android-37.0），所以包名是
+        # "platforms;android-37.0" 而不是 "platforms;android-37"。
+        # 如果这一步在某次 CI 运行中报「package not found」，先跑 `sdkmanager --list`
+        # 看当前仓库里的准确包名，改这一处即可——两个 workflow 共用本文件。
+        SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+        "$SDKMGR" --install "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+        "$SDKMGR" --list_installed

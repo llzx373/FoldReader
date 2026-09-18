@@ -93,8 +93,8 @@ fun comicContainerLabel(container: ComicContainer?): String = when (container) {
     null -> "漫画"
 }
 
-fun formatLastRead(timestamp: Long?): String? =
-    timestamp?.let { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(it)) }
+fun formatLastRead(timestamp: Long?, locale: Locale): String? =
+    timestamp?.let { SimpleDateFormat("MM-dd HH:mm", locale).format(Date(it)) }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable

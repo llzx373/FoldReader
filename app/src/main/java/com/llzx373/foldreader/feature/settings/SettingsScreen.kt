@@ -684,14 +684,6 @@ private fun SwitchSetting(label: String, checked: Boolean, onChange: (Boolean) -
     )
 }
 
-private val openSourceLicenses: List<Pair<String, String>> = listOf(
-    "Jetpack Compose（UI / Material3 / Material Icons）" to "Apache License 2.0",
-    "AndroidX（Activity / Lifecycle / Navigation / DataStore / Window / Adaptive）" to "Apache License 2.0",
-    "Room 持久化库" to "Apache License 2.0",
-    "kotlinx-coroutines" to "Apache License 2.0",
-    "OpenCC 繁简转换字表（BYVoid/OpenCC）" to "Apache License 2.0",
-)
-
 @Composable
 private fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
     AlertDialog(

@@ -701,6 +701,68 @@
 
 ---
 
+## M10 开源化与发布流水线（已完成）
+
+目标：把项目从「只有源码和 TODO」补成一个可对外发布的 GitHub 正式项目，并打通 tag 触发的自动打包发布。
+
+### M10.1 仓库元文件
+- [x] `LICENSE`：MIT
+- [x] `README.md`：中文完整版（徽章、功能、格式表、安装、构建、架构、技术栈、已知限制、许可署名）
+- [x] `README_EN.md`：英文精简版，与中文版互相加语言切换链接
+- [x] `CHANGELOG.md`：Keep a Changelog + SemVer，`1.0.0` 首版按 Added/Changed/Removed/Fixed 归纳 48 个提交
+- [x] `CONTRIBUTING.md` / `SECURITY.md` / `CODE_OF_CONDUCT.md`
+- [x] `.editorconfig`、`.gitattributes`（强制 LF，防 Windows 下 `gradlew` 变 CRLF 挂掉 Linux CI）
+- [x] `.gitignore` 补 `key.properties` / `*.jks` / `*.keystore` / `*.apk` / `*.aab`（原先完全没有覆盖密钥文件）
+- [x] `.github/ISSUE_TEMPLATE/`（bug 表单含**屏幕形态**必填、feature 表单）、`pull_request_template.md`、`dependabot.yml`
+
+### M10.2 构建改造
+- [x] 版本号可注入：`gradle.properties` 提供默认值，`-PfoldReader.versionCode/-PfoldReader.versionName` 覆盖；
+      用 `providers.gradleProperty` 而非 `System.getenv`，与已开启的配置缓存兼容
+- [x] Release 签名：环境变量 > 根目录 `key.properties` > 回退 debug；只按「密钥四项是否齐全」判断，
+      不做文件存在性探测，避免与配置缓存耦合
+- [x] **顺带修复**：应用内「开源许可」弹窗原先只列 5 项，漏了 junrar(UnRAR，有署名要求) / PDFBox /
+      androidx.pdf / commons-compress / xz；抽到 `OpenSourceLicenses.kt` 并补全
+- [x] **顺带修复**：`Locale.getDefault()` 在 Composable 里不可观察（lint `NonObservableLocale`）。
+      直接 `assembleRelease` 只跑 `lintVitalRelease`，子集不含这条，因此一直没暴露——CI 加上
+      `lintDebug` 后立刻变成红灯。新增 `ui/LocaleSupport.kt` 的 `rememberLocale()`（走 `LocalConfiguration`），
+      并把 6 处同款写法一次扫干净：书籍详情、书签列表、全书签总览、书架副标题、书架封面、阅读器时钟。
+      纯函数（`formatLastRead` / `formatTime`）改为由调用方传入 Locale，`bookSubtitle` 同步加参数
+- [x] 验证：`.github/actions/setup-build/action.yml` 把 JDK 25 + Gradle 缓存 + Android SDK 安装抽成 composite action，
+      两个 workflow 共用（`sdkmanager` 包名是整条流水线唯一有猜度的一处，集中在一个文件里便于修）
+
+### M10.3 流水线
+- [x] `.github/workflows/ci.yml`：push main / PR / 手动触发，单元测试 + Debug 构建 + 上传产物，Lint 单独成 job
+- [x] `.github/workflows/release.yml`：`v*` tag 触发（版本格式在 job 内严格校验，非法 tag 带明确信息失败）；
+      解析 versionName/versionCode、`apksigner` 验签、发布 APK + AAB + R8 mapping 到 GitHub Release
+- [x] 签名降级策略：Secrets 齐全走正式签名；缺任一项退化为 debug 签名，并打告警 + 写 Job Summary +
+      在 Release 说明顶部加 `[!WARNING]`。之所以不能只是静默回退：签名不一致会让设备拒绝覆盖安装，
+      用户从 debug 签名的版本升级前必须先卸载，这件事必须写在下载页
+- [x] Release 说明按 `git log` 自行生成而非用 `--generate-notes`：本仓库单人开发、无 PR，
+      自动生成只会得到提交列表；首个版本折叠收起全部提交并指向 CHANGELOG，后续版本给出与上一 tag 的对比链接
+- [x] 版本号规则 `major*10000 + minor*100 + patch`，带 `-` 后缀的 tag 自动标为 Pre-release
+- [x] 变量一律经 `env:` 传入而非直接插值进 `run:`，避免 tag 名里的元字符注入构建命令
+- [x] `docs/发布流程.md`：keystore 生成、Base64 转换、4 个 Secrets 配置、发布步骤、排错表
+- [x] `docs/images/README.md`：README 截图采集清单（README 暂不含截图区，避免破图）
+
+### M10.4 验证结果
+- [x] `:app:testDebugUnitTest` 全绿，606 项 / 80 个文件（含新增 `OpenSourceLicensesTest`、
+      以及 `ReadingProgressFormatTest` 中新增的 Locale 排版用例）
+- [x] `:app:lintDebug` 0 error（修掉上面那 2 处 `NonObservableLocale` 后）
+- [x] 无 `key.properties` 时 `assembleRelease` 成功且证书为 debug（与改动前行为一致）
+- [x] 放入 `key.properties` 后证书切换为正式证书；**删掉后能切回 debug**——
+      两个方向都验过，确认配置缓存不会把签名状态缓存住
+- [x] 版本注入：`-PfoldReader.versionCode=999 -PfoldReader.versionName=9.9.9` 生效
+- [x] `git add --renormalize .` 后无意外改动，`gradlew` 保持 LF、`gradlew.bat` 保持 CRLF
+
+### M10.5 待人工 / 待验证
+- [ ] 生成正式 keystore 并配置 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` 四个 Secrets
+- [ ] 首次 CI 运行确认 `sdkmanager --install "platforms;android-37.0"` 的包名与 runner 仓库一致
+- [ ] 首次 CI 运行确认 `:app:lintDebug` 无既有问题（本地已通过）
+- [ ] README 截图按 `docs/images/README.md` 清单补齐后接入截图区
+- [ ] 打 `v1.0.0` tag 走通首次发布，并在真机上验证覆盖安装与全新安装
+
+---
+
 ## 全局持续事项（每个里程碑都做）
 - [x] 新增代码编译通过 + 关键路径单元测试
 - [ ] 折叠/展开/旋转手动回归一遍（待真机）

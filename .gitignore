@@ -20,3 +20,12 @@ local.properties
 
 # 本机 Command Code 配置与偏好（settings.json 是机器级权限白名单，不入库）
 /.commandcode/
+
+# 发布签名：密钥与口令绝不允许入库，CI 通过 GitHub Secrets 注入
+key.properties
+*.jks
+*.keystore
+
+# 构建产物
+*.apk
+*.aab

@@ -1,0 +1,17 @@
+# 统一行尾：仓库内一律 LF。Windows 上尤其要防止 gradlew 被写成 CRLF，
+# 否则 Linux/macOS 上的 CI 会因为 shebang 带 \r 直接执行失败。
+* text=auto eol=lf
+
+# Windows 批处理必须保持 CRLF
+*.bat text eol=crlf
+
+# 二进制文件不做行尾转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.apk binary
+*.aab binary
+*.jks binary
+*.keystore binary

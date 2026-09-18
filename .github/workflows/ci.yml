@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 单元测试与构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 准备构建环境
+        uses: ./.github/actions/setup-build
+
+      # Robolectric 会把 android-all jar 下到 ~/.m2/repository，不在 Gradle 缓存范围内
+      - name: 缓存 Robolectric 依赖
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: 单元测试
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: 构建 Debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: 上传 Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: FoldReader-debug-apk
+          path: app/build/outputs/apk/debug/FoldReader-debug.apk
+          if-no-files-found: error
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 准备构建环境
+        uses: ./.github/actions/setup-build
+
+      - name: Lint Debug
+        run: ./gradlew :app:lintDebug --stacktrace
+
+      - name: 上传 Lint 报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore

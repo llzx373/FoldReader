@@ -34,6 +34,7 @@ import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
 import com.llzx373.foldreader.feature.reader.sortBookmarksByRecency
+import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -94,7 +95,7 @@ fun BookmarkOverviewDialog(
                             item(key = "bm-${bookmark.id}") {
                                 OverviewRow(
                                     primary = bookmark.label.ifEmpty { bookmark.snapshotText },
-                                    secondary = "书签 · ${formatTime(bookmark.createdAt)}",
+                                    secondary = "书签 · ${formatTime(bookmark.createdAt, rememberLocale())}",
                                     onClick = { onJump(group.bookId, bookmark.readerAnchor()) },
                                 )
                             }
@@ -195,5 +196,5 @@ fun BookmarkOverviewIcon(contentDescription: String) {
     }
 }
 
-private fun formatTime(timestamp: Long): String =
-    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
+private fun formatTime(timestamp: Long, locale: Locale): String =
+    SimpleDateFormat("MM-dd HH:mm", locale).format(Date(timestamp))
