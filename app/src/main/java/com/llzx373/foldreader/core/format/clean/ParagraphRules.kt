@@ -7,16 +7,19 @@ package com.llzx373.foldreader.core.format.clean
  * 任何「按采样算出来的全局开关」都会在清洗前后漂移，让 `clean(clean(x)) != clean(x)`，
  * 而「智能整理」要求幂等。局部判据只看相邻两行，第二次跑时相邻关系没变，结论自然一样。
  *
- * 合并条件（全部满足）：
- * 1. 两行都非空；
- * 2. 下一行**没有缩进**（有缩进 = 新段落）；
- * 3. 两行都不是章节标题；
- * 4. 上一行不以句末标点结尾；
- * 5. 下一行不以引号开头（对话换人）；
- * 6. 满足其一：上一行引号没闭合（问题 7）／上一行够长（被硬换行切断）／上一行以 `，、；：` 结尾。
+ * 分两条路：
  *
- * 条件 6 的「够长」是关键：中文网文的硬换行普遍 25–50 字，所以 `≥16 字且不以句末标点结尾`
- * 基本只可能是被切断的。反过来，诗行、短句列表都因行短而天然不合并（见 `negatives/05`）。
+ * 1. **这一段是用缩进起头的**（[paragraphIndented]）→ 这本书用缩进标记段落，
+ *    那么「下一行没有缩进、且中间没有空行」就是**权威**的续行信号，句末标点不作数。
+ *    真实反例：`『原来你早就知道了。』` 之后紧跟 `他沉默着没有回答`——
+ *    引号闭合了并不代表这段话结束，后面还有正文。
+ *    这里**空行必须结束一段**：作者只会在段间留空行，而顶格的分篇标题正是「空行 +
+ *    顶格」这种形态（合集类文件常见），并进去就再也出不来。这条同时是幂等的关键——
+ *    空行被折成一个之后，判定必须与折叠前一致。
+ * 2. 否则（没有缩进可依赖）→ 只用标点与行长判断：上一行不以句末标点结尾，
+ *    且（引号没闭合 / 是 16 字以上的长行 / 以 `，、；：` 结尾）才合并；
+ *    此时允许跨一个空行并（修「段落中间被插了空行」）。
+ *    这一段是为「一段一行」的书准备的——它们行尾都是 `。`，天然不会被误并。
  */
 internal object ParagraphRules {
 
@@ -35,11 +38,26 @@ internal object ParagraphRules {
     /** 见类注释：短于此的行不认定为「被硬换行切断」。 */
     private const val WRAP_MIN_CHARS = 16
 
-    /** [next] 是否应并入 [prev]。 */
-    fun shouldMerge(prev: String, next: String): Boolean {
+    /**
+     * [next] 是否应并入 [prev]。
+     *
+     * @param paragraphIndented 当前这一段是**用缩进起头的**——即这本书用缩进标记段落。
+     *   为真时「下一行没有缩进、中间没有空行」就是权威的续行信号，直接并；句末标点不作数。
+     * @param blankLinesBetween 两行之间夹着的空行数（已由上游折过，0 或 1 之后也可能更大）。
+     */
+    fun shouldMerge(
+        prev: String,
+        next: String,
+        paragraphIndented: Boolean,
+        blankLinesBetween: Int,
+    ): Boolean {
         if (prev.isBlank() || next.isBlank()) return false
-        if (next[0] == ' ') return false
-        if (ChapterRepairRules.isTitle(prev) || ChapterRepairRules.isTitle(next)) return false
+        if (WhitespaceRules.hasLeadingWhitespace(next)) return false // 有缩进 → 新段落
+        if (ChapterRepairRules.looksLikeTitle(prev) || ChapterRepairRules.looksLikeTitle(next)) return false
+        // 缩进分段的书：空行一定结束一段（顶格的分篇标题就是「空行 + 顶格」），
+        // 而且这条在空行折叠前后都成立 → 幂等。
+        if (paragraphIndented) return blankLinesBetween == 0
+        if (blankLinesBetween > 1) return false
         val last = lastVisible(prev)
         if (last == null || last in SENTENCE_END) return false
         if (hasUnclosedQuote(prev)) return true

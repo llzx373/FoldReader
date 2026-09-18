@@ -14,14 +14,16 @@ import java.io.Writer
  * 管线顺序（每一步都有理由，不要随手调换）：
  *
  * ```
- * 计数 → 繁简 → 字符归一 → 行内空白 → 噪音过滤 → 标点（省略号/破折号）
- *      → 段落重组 → 章节修复 → 引号规整 → 段首缩进 → 写出
+ * 计数 → 繁简 → 字符归一 → 行内空白 → 噪音过滤 → 行中标题提行
+ *      → 段落重组 → 标点（省略号/破折号/重复标点） → 章节修复 → 引号规整 → 段首缩进 → 写出
  * ```
  *
  * - 繁简最先，后面的规则（尤其是章节标题）看到的就是统一字形。
  * - 段首缩进**必须最后**：段落重组与章节修复都要靠「有没有缩进」判断行是不是新段落。
- * - 省略号/破折号在重组之前：`……` 结尾的行本来就该算句子结束，先归位才判得准。
- * - 引号规整在重组之后：被换行拆开的引号要等拼回一句话才有意义。
+ * - 行中标题提行在段落重组**之前**：否则「上一章末行 + 新章标题」会被重组粘成一行，
+ *   标题再也不是行尾，就永远切不出来了。
+ * - 标点与引号规整都在段落重组**之后**：被硬换行切断的 `…` + `…` 要先拼回 `……` 再规整，
+ *   否则每一半都会被各自补成 `……`（多出一倍）；引号内被拆开的空白同理。
  *
  * 全部规则都保证**幂等**（对已清理过的文本再跑一遍结果不变），「智能整理」可以放心重复执行。
  */
@@ -69,6 +71,16 @@ object NovelCleaner {
         return report.build()
     }
 
+    /**
+     * 组装管线。
+     *
+     * **注意读法**：这里是「每赋值一次就向外包一层」，所以 `sink` 的**赋值顺序与数据流方向相反**——
+     * 最后赋的那个最靠近读入端。数据流是：
+     *
+     * ```
+     * Counting → Char → Line → Noise → ChapterSplit → Reflow → Punct → ChapterRepair → Quote → Indent → Writer
+     * ```
+     */
     private fun buildPipeline(
         profile: CleanProfile,
         tsMap: Map<Char, Char>,
@@ -76,6 +88,7 @@ object NovelCleaner {
         writer: Writer,
     ): LineSink {
         val toggles = profile.toggles
+        // ── 以下从「写出端」往上包，读的时候请从下往上看 ──
         var sink: LineSink = WriterSink(writer, report)
         sink = IndentSink(toggles.canonicalIndent, sink)
         sink = QuoteSink(toggles.normalizeQuotes, report, sink)
@@ -85,15 +98,17 @@ object NovelCleaner {
             report = report,
             next = sink,
         )
-        sink = ReflowSink(
-            merge = toggles.reflowParagraphs,
-            collapseBlanks = toggles.collapseBlankLines,
-            report = report,
-            next = sink,
-        )
+        // 标点在**段落重组之后**：一条被硬换行切断的省略号（`…` + `…`）要先拼回 `……`，
+        // 否则每一半都会被各自补成 `……`，合起来多出一倍。
         sink = PunctuationSink(
             enabled = toggles.normalizePunctuation,
             collapseRepeated = toggles.normalizeRepeatedPunctuation,
+            report = report,
+            next = sink,
+        )
+        sink = ReflowSink(
+            merge = toggles.reflowParagraphs,
+            collapseBlanks = toggles.collapseBlankLines,
             report = report,
             next = sink,
         )
@@ -277,6 +292,9 @@ private class ReflowSink(
     private var pending: String? = null
     private var pendingBlanks = 0
 
+    /** 当前这一段是不是**用缩进起头**的（决定「无缩进的下一行」算不算续行）。 */
+    private var pendingIndented = false
+
     override fun accept(line: String) {
         if (line.isBlank()) {
             pendingBlanks++
@@ -284,11 +302,13 @@ private class ReflowSink(
         }
         val prev = pending
         if (prev == null) {
-            flushBlanks(atStart = true)
+            flushBlanks(prevLine = null, nextLine = line) // 全文开头的空行
             pending = line
+            pendingIndented = WhitespaceRules.hasLeadingWhitespace(line)
             return
         }
-        if (merge && pendingBlanks <= 1 && ParagraphRules.shouldMerge(prev, line)) {
+        val canMerge = ParagraphRules.shouldMerge(prev, line, pendingIndented, pendingBlanks)
+        if (merge && canMerge) {
             val merged = ParagraphRules.join(prev, line)
             report.mergedParagraphs++
             if (pendingBlanks > 0) report.blankLinesRemoved += pendingBlanks
@@ -298,8 +318,9 @@ private class ReflowSink(
             return
         }
         next.accept(prev)
-        flushBlanks(atStart = false, prevLine = prev, nextLine = line)
+        flushBlanks(prevLine = prev, nextLine = line)
         pending = line
+        pendingIndented = WhitespaceRules.hasLeadingWhitespace(line)
         pendingBlanks = 0
     }
 
@@ -307,35 +328,22 @@ private class ReflowSink(
         val last = pending
         pending = null
         last?.let { next.accept(it) }
-        // 结尾的空行一律丢弃
-        flushBlanks(atStart = false, atEnd = true)
+        // 结尾的空行一律丢弃（nextLine 为 null）
+        flushBlanks(prevLine = last, nextLine = null)
         next.flush()
     }
 
-    private fun flushBlanks(
-        atStart: Boolean,
-        atEnd: Boolean = false,
-        prevLine: String? = null,
-        nextLine: String? = null,
-    ) {
+    private fun flushBlanks(prevLine: String? = null, nextLine: String? = null) {
         if (pendingBlanks == 0) return
         val keep = if (!collapseBlanks) {
             pendingBlanks
         } else {
-            BlankLineRules.resolve(
-                blankCount = pendingBlanks,
-                indentedContext = hasIndent(prevLine) || hasIndent(nextLine),
-                atStart = atStart,
-                atEnd = atEnd,
-            )
+            BlankLineRules.resolve(pendingBlanks, prevLine, nextLine)
         }
         report.blankLinesRemoved += pendingBlanks - keep
         repeat(keep) { next.accept("") }
         pendingBlanks = 0
     }
-
-    /** 段首缩进已被 [WhitespaceRules] 统一成半角空格，所以这里只看 `' '`。 */
-    private fun hasIndent(line: String?): Boolean = line != null && line.startsWith(" ")
 }
 
 /**
@@ -359,7 +367,10 @@ private class ChapterSplitSink(
         }
         report.chapterTitlesRepaired++
         report.sample(CleanReport.Sample.Kind.CHAPTER, line, "${split.first} ⏎ ${split.second}")
-        next.accept(split.first)
+        // 正文侧要带上原文的段首缩进：它是这一段的段首，丢了缩进就等于把段落起点也丢了
+        // （下游的段首缩进统一只认「有缩进」这个信号）。
+        val lead = line.takeWhile { it.isWhitespace() }
+        next.accept(lead + split.first)
         next.accept(split.second)
     }
 

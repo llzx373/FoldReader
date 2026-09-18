@@ -17,6 +17,15 @@ internal object WhitespaceRules {
 
     private fun isSpace(c: Char): Boolean = c == ' ' || c == '\u3000' || c == '\t'
 
+    /**
+     * 行首有没有空白（段首缩进的信号）。
+     *
+     * 用 [Char::isWhitespace] 而不是只认半角空格：`unifyChars` 关闭、而
+     * `reflowParagraphs` 打开时，缩进还是全角空格 `\u3000`，只认 `' '` 会把段落起点
+     * 误当成续行，把整段粘成一坨。
+     */
+    fun hasLeadingWhitespace(line: String): Boolean = line.isNotEmpty() && line[0].isWhitespace()
+
     /** 去掉行尾空白。 */
     fun trimTrailing(line: String): String {
         var end = line.length

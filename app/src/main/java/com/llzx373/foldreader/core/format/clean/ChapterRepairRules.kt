@@ -43,6 +43,15 @@ internal object ChapterRepairRules {
         return ChapterRules.DEFAULT.any { it.matches(trimmed) }
     }
 
+    /**
+     * 行是不是章节标题，**含需要先规范化才认得出的写法**（`第 2 章 风起云涌`——内置规则
+     * 不允许 `第` 与数字之间有空格）。
+     *
+     * 段落重组要用这个：只用 [isTitle] 的话，`第 2 章 …` 会被当成正文并进上一段，
+     * 标题就再也提不出来了。
+     */
+    fun looksLikeTitle(line: String): Boolean = isTitle(canonicalizeTitle(line))
+
     fun isTocHeader(line: String): Boolean = TOC_HEADER.matches(line)
 
     /**
