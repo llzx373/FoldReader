@@ -215,18 +215,27 @@ private fun hotspotRatioClamped(hotspotRatio: Float): Float = hotspotRatio.coerc
  * 中间区矩形（相对阅读器根容器的 px）。
  *
  * 它就是「点击后判定为 [TapZone.MIDDLE] 的那块区域」——中间点击层照它铺，才能保证：
- * 左右翻页区与底边翻页条都不被点击层覆盖（那两处一旦被覆盖，单击就要等一个双击超时）。
+ * 左右翻页区（以及启用时的底边翻页条）不被点击层覆盖（那两处一旦被覆盖，单击就要等一个双击超时）。
  * 因此这里的几何必须与 [tapZoneOf] 完全一致，改一个就得改另一个。
+ *
+ * [bottomStripEnabled] 必须与调用方传给 [tapZoneOf] 的口径一致：有底边翻页条时那一条判的是
+ * NEXT，中间区就不到屏幕底；漫画阅读器不用底边条（底边随左右热区分区），中间区就是整高。
  */
-fun middleZoneRect(widthPx: Float, heightPx: Float, hotspotRatio: Float): ContentRect {
+fun middleZoneRect(
+    widthPx: Float,
+    heightPx: Float,
+    hotspotRatio: Float,
+    bottomStripEnabled: Boolean = true,
+): ContentRect {
     val ratio = hotspotRatioClamped(hotspotRatio)
     val left = widthPx * ratio
     val right = widthPx * (1f - ratio)
+    val bottom = if (bottomStripEnabled) heightPx * (1f - ratio) else heightPx
     return ContentRect(
         left = left,
         top = 0f,
         width = (right - left).coerceAtLeast(0f),
-        height = (heightPx * (1f - ratio)).coerceAtLeast(0f),
+        height = bottom.coerceAtLeast(0f),
     )
 }
 

@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.feature.comic
 
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.feature.reader.TapZone
 import kotlin.math.roundToInt
 
 /**
@@ -15,6 +16,44 @@ const val COMIC_WIDE_ASPECT = 1.15f
 
 fun isWidePage(width: Int, height: Int): Boolean =
     width > 0 && height > 0 && width.toFloat() / height >= COMIC_WIDE_ASPECT
+
+/*
+ * 阅读方向（日漫 RTL）对四类输入的翻译：**热区 → 逻辑前后**、**横滑 → 逻辑前后**、
+ * **滚轮 → 逻辑前后**、**逻辑前后 → 动画滑入侧**。
+ *
+ * 它们必须同一口径。这块逻辑翻过两次车（先几处全镜像，再改成横滑与动画一律不镜像），
+ * 两次都是某一处被单独留下，结果同一个「下一页」在不同输入上给出互相矛盾的方向。
+ * 所以全部收成纯函数钉单测——这类错在真机上只会表现为「手感不对」，很难定位到具体哪一处。
+ *
+ * 只有**带方向的输入**镜像。音量键 / 媒体键 / PageUp-Down / 空格本身就写着「上一页 / 下一页」，
+ * 保持语义不镜像——镜像会让「下一首」「PageDown」变成上一页。
+ *
+ * 口诀（物理翻书，LTR 为准）：
+ * - 下一页时那张纸向左翻、新页从右边露出 → **点右侧=下一页，左滑=下一页，动画从右滑入**；
+ * - 横滑与点击方向天然相反：点击是「往前进方向点」，横滑是「把内容往哪边拖」；
+ * - 动画永远跟横滑同向：下一页从拖动方向的反侧进来；
+ * - 日漫（RTL）整体镜像（滚轮随之上下镜像）：点左=下一页、右滑=下一页、上滚=下一页、下一页从左滑入。
+ */
+
+/** 左右热区的逻辑方向：true = 下一页。日漫（rtl）下左右镜像。中间区不翻页，返回 null。 */
+fun comicTapForward(zone: TapZone, rtl: Boolean): Boolean? = when (zone) {
+    TapZone.PREVIOUS -> rtl
+    TapZone.NEXT -> !rtl
+    TapZone.MIDDLE -> null
+}
+
+/** 横滑的逻辑方向：true = 下一页，null = 位移不到阈值、不翻页。日漫下左右镜像。 */
+fun comicSwipeForward(draggedPx: Float, thresholdPx: Float, rtl: Boolean): Boolean? = when {
+    draggedPx < -thresholdPx -> !rtl
+    draggedPx > thresholdPx -> rtl
+    else -> null
+}
+
+/** 滚轮的逻辑方向：true = 下一页。日漫下上下镜像（上滚=下一页）。零滚动量由调用方先过滤。 */
+fun comicWheelForward(deltaY: Float, rtl: Boolean): Boolean = (deltaY > 0f) != rtl
+
+/** 覆盖动画的滑入侧：true = 新跨页从右侧外滑入。与 [comicSwipeForward] 同口径。 */
+fun comicSlideFromRight(forward: Boolean, rtl: Boolean): Boolean = forward != rtl
 
 /**
  * 跨页配对索引。

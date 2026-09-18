@@ -100,6 +100,31 @@ class ReaderLogicTest {
     }
 
     /**
+     * 漫画阅读器没有底边翻页条（底边随左右热区分区），热区判定因此不带 y，
+     * 中间区就是整高——点击层要照这个口径铺，否则底边中间那块会漏接双击。
+     */
+    @Test
+    fun `无底边条时中间区是整高且与不带 y 的热区判定一致`() {
+        val width = 1000f
+        val height = 2000f
+        val ratio = 0.3f
+        val rect = middleZoneRect(width, height, ratio, bottomStripEnabled = false)
+
+        assertEquals(300f, rect.left, 0.001f)
+        assertEquals(400f, rect.width, 0.001f)
+        assertEquals(2000f, rect.height, 0.001f)
+
+        // 判定不带 y，所以整高每一行都按 x 分区
+        assertEquals(TapZone.MIDDLE, tapZoneOf(rect.left, width, ratio))
+        assertEquals(TapZone.MIDDLE, tapZoneOf(rect.left + rect.width - 1f, width, ratio))
+        assertEquals(TapZone.PREVIOUS, tapZoneOf(rect.left - 1f, width, ratio))
+        assertEquals(TapZone.NEXT, tapZoneOf(rect.left + rect.width + 1f, width, ratio))
+
+        // 有底边条的老口径不受影响：仍然是不到屏幕底
+        assertEquals(1400f, middleZoneRect(width, height, ratio).height, 0.001f)
+    }
+
+    /**
      * 底边翻页条恒为「下一页」，且与 x 无关。调用方靠 [isBottomPagingStrip] 在 RTL 下把它
      * 单独摘出来，否则会走左右热区的 rtl 映射，被翻成上一页。
      */

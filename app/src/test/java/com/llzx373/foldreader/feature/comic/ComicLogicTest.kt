@@ -1,8 +1,10 @@
 package com.llzx373.foldreader.feature.comic
 
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.feature.reader.TapZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,6 +122,105 @@ class ComicLogicTest {
         assertTrue(isWidePage(1160, 1000))
         assertFalse(isWidePage(1000, 1400))
         assertFalse(isWidePage(0, 0))
+    }
+
+    // ---- 阅读方向（RTL）对三个出口的翻译：热区 / 横滑 / 动画滑入侧 ----
+
+    @Test
+    fun `日漫下点击热区左右镜像`() {
+        // LTR：点左=上一页，点右=下一页
+        assertEquals(false, comicTapForward(TapZone.PREVIOUS, rtl = false))
+        assertEquals(true, comicTapForward(TapZone.NEXT, rtl = false))
+        assertNull(comicTapForward(TapZone.MIDDLE, rtl = false))
+
+        // 日漫：整体镜像——点左才是下一页
+        assertEquals(true, comicTapForward(TapZone.PREVIOUS, rtl = true))
+        assertEquals(false, comicTapForward(TapZone.NEXT, rtl = true))
+        assertNull(comicTapForward(TapZone.MIDDLE, rtl = true))
+    }
+
+    @Test
+    fun `横滑方向与点击镜像一致`() {
+        val threshold = 100f
+        // 不到阈值不翻页（两个方向、两种阅读方向都一样）
+        assertNull(comicSwipeForward(99f, threshold, rtl = false))
+        assertNull(comicSwipeForward(-99f, threshold, rtl = false))
+        assertNull(comicSwipeForward(99f, threshold, rtl = true))
+        assertNull(comicSwipeForward(-99f, threshold, rtl = true))
+
+        // LTR：左滑=下一页，右滑=上一页
+        assertEquals(true, comicSwipeForward(-120f, threshold, rtl = false))
+        assertEquals(false, comicSwipeForward(120f, threshold, rtl = false))
+
+        // 日漫：镜像——右滑才是下一页
+        assertEquals(true, comicSwipeForward(120f, threshold, rtl = true))
+        assertEquals(false, comicSwipeForward(-120f, threshold, rtl = true))
+    }
+
+    @Test
+    fun `滚轮随阅读方向上下镜像`() {
+        // LTR：下滚（deltaY > 0）= 下一页
+        assertTrue(comicWheelForward(deltaY = 1f, rtl = false))
+        assertFalse(comicWheelForward(deltaY = -1f, rtl = false))
+
+        // 日漫：上下镜像——上滚才是下一页
+        assertTrue(comicWheelForward(deltaY = -1f, rtl = true))
+        assertFalse(comicWheelForward(deltaY = 1f, rtl = true))
+    }
+
+    @Test
+    fun `动画滑入侧跟阅读方向镜像`() {
+        // LTR：下一页从右滑入、上一页从左滑入
+        assertTrue(comicSlideFromRight(forward = true, rtl = false))
+        assertFalse(comicSlideFromRight(forward = false, rtl = false))
+
+        // 日漫：下一页从左滑入
+        assertFalse(comicSlideFromRight(forward = true, rtl = true))
+        assertTrue(comicSlideFromRight(forward = false, rtl = true))
+    }
+
+    /**
+     * 横滑与动画必须永远同向：下一页从**手指拖动方向的反侧**进来。
+     * 这条不变量一破，手势就会出现「往右拖、页从右边来」的倒错感——正是这次的回归。
+     */
+    @Test
+    fun `下一页总从拖动方向的反侧滑入`() {
+        val threshold = 100f
+        for (rtl in listOf(false, true)) {
+            for (drag in listOf(-200f, 200f)) {
+                val forward = comicSwipeForward(drag, threshold, rtl) ?: continue
+                assertEquals(
+                    "rtl=$rtl drag=$drag",
+                    drag < 0f,
+                    comicSlideFromRight(forward, rtl),
+                )
+            }
+        }
+    }
+
+    /** 同一次方向的切换必须同时改到带方向的全部输入（热区、横滑、滚轮）与动画，不能只翻其中一两处。 */
+    @Test
+    fun `切到日漫时各处方向一起镜像`() {
+        // 点左：LTR 上一页 → 日漫 下一页
+        assertNotEquals(
+            comicTapForward(TapZone.PREVIOUS, rtl = false),
+            comicTapForward(TapZone.PREVIOUS, rtl = true),
+        )
+        // 左滑：LTR 下一页 → 日漫 上一页
+        assertNotEquals(
+            comicSwipeForward(-200f, 100f, rtl = false),
+            comicSwipeForward(-200f, 100f, rtl = true),
+        )
+        // 下滚：LTR 下一页 → 日漫 上一页
+        assertNotEquals(
+            comicWheelForward(deltaY = 1f, rtl = false),
+            comicWheelForward(deltaY = 1f, rtl = true),
+        )
+        // 下一页的滑入侧：LTR 从右 → 日漫 从左
+        assertNotEquals(
+            comicSlideFromRight(forward = true, rtl = false),
+            comicSlideFromRight(forward = true, rtl = true),
+        )
     }
 
     @Test

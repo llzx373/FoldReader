@@ -100,12 +100,10 @@ import com.llzx373.foldreader.feature.reader.PageLayoutMode
 import com.llzx373.foldreader.feature.reader.SelectionActionBar
 import com.llzx373.foldreader.feature.reader.SpineOverlay
 import com.llzx373.foldreader.feature.reader.SystemBarEffects
-import com.llzx373.foldreader.feature.reader.TapZone
 import com.llzx373.foldreader.feature.reader.VolumeKeyDispatch
 import com.llzx373.foldreader.feature.reader.annotationColorPalette
 import com.llzx373.foldreader.feature.reader.contentRectFor
 import com.llzx373.foldreader.feature.reader.dualSplit
-import com.llzx373.foldreader.feature.reader.isBottomPagingStrip
 import com.llzx373.foldreader.feature.reader.pageLabelOf
 import com.llzx373.foldreader.feature.reader.readerColors
 import com.llzx373.foldreader.feature.reader.rememberReaderExit
@@ -163,9 +161,9 @@ fun ComicReaderScreen(
     val series by viewModel.series.collectAsState()
     val searchState by viewModel.search.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
-    // 日漫从右往左：点左侧是「下一页」，同一对页里低序号页放右边。
-    // 翻页动画与横滑方向**不**随它翻转——「下一页」一律从右滑入、横滑一律左滑前进（跟手），
-    // 否则同一动作在点击与横滑下的动画方向会相反。
+    // 日漫从右往左：点左侧是「下一页」，同一对页里低序号页放右边，
+    // 横滑与翻页动画一并左右镜像（下一页从左滑入）——三处方向翻译见 ComicLogic 的纯函数，
+    // 任何一处单独「不翻」都会让同一个动作在不同输入下方向相反。
     // PDF 没有这个语义，features.rtl 为 false 时整片关闭。
     val rtl = features.rtl && prefs.comicDirection == ComicDirection.RTL
     val scope = rememberCoroutineScope()
@@ -350,13 +348,12 @@ fun ComicReaderScreen(
     var animPages by remember { mutableStateOf<List<Int>?>(null) }
 
     /**
-     * 翻页。[slideFromRight] 只决定覆盖动画的滑入方向（true = 新跨页从右侧外滑入、画面左移），
-     * 默认跟随逻辑页序——「下一页」一律从右滑入，与阅读方向无关。
+     * 翻页。[slideFromRight] 只决定覆盖动画的滑入侧（true = 新跨页从右侧外滑入、画面左移）。
      *
-     * 阅读方向（RTL）只改「点哪边是下一页」与滑动方向，不改动画方向：热区/滑动已经把物理输入
-     * 翻译成了逻辑 forward，这里若再翻一次会互相抵消，表现为「点左朝右、点右朝左」。
+     * 滑入侧跟阅读方向镜像：LTR 的「下一页」从右滑入，日漫（RTL）从左滑入。这不是可有可无的
+     * 观感——横滑翻页与动画必须同向，否则滑动手势会把下一页从手指的反方向推进来。
      */
-    fun turn(forward: Boolean, slideFromRight: Boolean = forward) {
+    fun turn(forward: Boolean, slideFromRight: Boolean = comicSlideFromRight(forward, rtl)) {
         scope.launch {
             if (animPages != null) return@launch
             val state = uiState
@@ -472,26 +469,19 @@ fun ComicReaderScreen(
         } else if (scrollMode) {
             // 连续滚动里左右热区没有意义（页面是竖向连成一条的），点哪都呼出菜单
             menuVisible = true
-        } else if (isBottomPagingStrip(offset.y, size.height.toFloat(), prefs.pageTurnHotspotRatio)) {
-            // 底边翻页条恒为「下一页」：它与左右分区、阅读方向都无关，
-            // 不能走下面的 rtl 映射（否则日漫下会翻成上一页）
-            latestTurn(true)
         } else {
-            when (
-                tapZoneOf(
-                    offset.x,
-                    size.width.toFloat(),
-                    prefs.pageTurnHotspotRatio,
-                    y = offset.y,
-                    heightPx = size.height.toFloat(),
-                )
-            ) {
-                // 热区是屏幕左右，与阅读方向无关：日漫点左侧才是下一页
-                TapZone.PREVIOUS -> latestTurn(rtl)
-                TapZone.NEXT -> latestTurn(!rtl)
-                TapZone.MIDDLE -> runTapAction(
+            // 中间区是可配置动作，左右热区才翻页；方向翻译（日漫点左=下一页）见 comicTapForward。
+            // 底边不再特殊：它就相当于把左右热区一直延伸到屏幕底，日漫下右下角=上一页。
+            val forward = comicTapForward(
+                tapZoneOf(offset.x, size.width.toFloat(), prefs.pageTurnHotspotRatio),
+                rtl,
+            )
+            if (forward == null) {
+                runTapAction(
                     resolveMiddleTap(prefs.middleTapAction, prefs.middleDoubleTapAction, isDouble),
                 )
+            } else {
+                latestTurn(forward)
             }
         }
     }
@@ -563,8 +553,9 @@ fun ComicReaderScreen(
                 }
             }
             // 鼠标滚轮：桌面模式与外接鼠标上最顺手的翻页方式。
-            // 向下滚 = 前进，与音量键/媒体键同口径，不随阅读方向翻转
-            .pointerInput(scrollMode) {
+            // 纵向连续滚动里滚轮就是滚动本身；分页模式下它也是带方向的输入，随阅读方向上下镜像
+            // （日漫上滚=下一页），与热区/横滑同一口径
+            .pointerInput(scrollMode, rtl) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
@@ -575,17 +566,17 @@ fun ComicReaderScreen(
                         if (scrollMode) {
                             scrollByScreen(if (dy > 0f) 1 else -1)
                         } else {
-                            latestTurn(dy > 0f)
+                            latestTurn(comicWheelForward(dy, rtl))
                         }
                     }
                 }
             }
-            // rtl 是普通 val（非快照状态），必须列进 key：否则切方向后旧的点击处理器还在跑，
-            // 左右热区会继续按旧方向判定
+            // rtl 是普通 val（非快照状态），必须列进 key：否则切方向后旧的处理器还在跑，
+            // 点击与横滑都会继续按旧方向判定
             .pointerInput(uiState.pageCount, prefs.pageTurnHotspotRatio, scrollMode, rtl) {
                 detectTapGestures { offset -> handleTap(offset, false) }
             }
-            .pointerInput(prefs.swipeGestureEnabled, scrollMode) {
+            .pointerInput(prefs.swipeGestureEnabled, rtl, scrollMode) {
                 if (!prefs.swipeGestureEnabled || scrollMode) return@pointerInput
                 var dragged = 0f
                 detectHorizontalDragGestures(
@@ -596,10 +587,9 @@ fun ComicReaderScreen(
                     },
                     onDragEnd = {
                         val threshold = size.width * 0.15f
-                        // 左滑前进，与阅读方向无关：日漫只改「点哪边是下一页」与同对页左右归属，
-                        // 动画与手势方向都不翻——否则同一动作在点击与横滑下的动画方向会相反。
-                        if (dragged < -threshold) latestTurn(true)
-                        else if (dragged > threshold) latestTurn(false)
+                        // 跟手：横滑是「把内容往哪边拖」，与「下一页」相反——LTR 左滑前进、
+                        // 日漫镜像成右滑前进。方向翻译收在 comicSwipeForward，与动画滑入侧同一口径。
+                        comicSwipeForward(dragged, threshold, rtl)?.let { latestTurn(it) }
                     },
                 )
             }
@@ -688,7 +678,8 @@ fun ComicReaderScreen(
         }
 
         // 中间点击层：只有配了本阅读器能执行的双击动作时才铺。
-        // 它只盖住「判定为中间区」的那块矩形，左右翻页与底边翻页条都保持抬手即响应；
+        // 它只盖住「判定为中间区」的那块矩形，左右翻页保持抬手即响应；
+        // 漫画没有底边翻页条（底边随左右热区分区），所以中间区是整高。
         // 连续滚动模式下没有左右热区的概念（上面已提前 return），所以这里也不用铺。
         if (uiState.error == null) {
             val doubleAction = prefs.middleDoubleTapAction
@@ -697,6 +688,7 @@ fun ComicReaderScreen(
                     hotspotRatio = prefs.pageTurnHotspotRatio,
                     doubleTapAction = doubleAction,
                     onTap = { offset, isDouble -> handleTap(offset, isDouble) },
+                    bottomStripEnabled = false,
                 )
             }
         }

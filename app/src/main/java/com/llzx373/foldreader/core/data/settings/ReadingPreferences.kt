@@ -8,7 +8,7 @@ enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
 
 enum class DualPageMode { AUTO, FORCE_DUAL, FORCE_SINGLE }
 
-/** 漫画阅读方向：日漫从右往左（右页在左、点左侧翻到下一页）。 */
+/** 漫画阅读方向：日漫从右往左（同一对页里低序号页放右边、点左侧翻到下一页）。 */
 enum class ComicDirection { LTR, RTL }
 
 /**

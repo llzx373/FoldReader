@@ -29,12 +29,16 @@ import kotlin.math.roundToInt
  * 这一层铺的是 [middleZoneRect]，也就是「点击后判定为中间区」的那块矩形，
  * 所以它不会盖住任何翻页热区。不配双击动作（[doubleTapAction] 为 [TapAction.NONE]，
  * 或该阅读器执行不了）时整层不挂，连中间区也没有额外延迟。
+ *
+ * [bottomStripEnabled] 必须与该阅读器给 [tapZoneOf] 的口径一致，否则点击层会漏盖/多盖一块：
+ * 有底边翻页条时中间区不到屏幕底，漫画阅读器没有底边条，中间区就是整高。
  */
 @Composable
 fun MiddleTapLayer(
     hotspotRatio: Float,
     doubleTapAction: TapAction,
     onTap: (offset: Offset, isDouble: Boolean) -> Unit,
+    bottomStripEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -42,6 +46,7 @@ fun MiddleTapLayer(
             widthPx = constraints.maxWidth.toFloat(),
             heightPx = constraints.maxHeight.toFloat(),
             hotspotRatio = hotspotRatio,
+            bottomStripEnabled = bottomStripEnabled,
         )
         if (rect.width <= 0f || rect.height <= 0f) return@BoxWithConstraints
         // pointerInput 的 key 不变时不会重启（捕获值会是旧的）：把回调与左边界用
@@ -53,7 +58,7 @@ fun MiddleTapLayer(
                 .offset { IntOffset(rect.left.roundToInt(), 0) }
                 .width(with(LocalDensity.current) { rect.width.toDp() })
                 .height(with(LocalDensity.current) { rect.height.toDp() })
-                .pointerInput(hotspotRatio, doubleTapAction) {
+                .pointerInput(hotspotRatio, doubleTapAction, bottomStripEnabled) {
                     detectTapGestures(
                         // 本层内的坐标是相对中间区的，交回去之前换成根容器坐标，
                         // 让上层照旧用 tapZoneOf 判分区（底边规则等都在那里）
