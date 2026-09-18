@@ -8,13 +8,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +29,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -29,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
+import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.reader.averageCharsPerMinute
 import com.llzx373.foldreader.core.reader.formatDurationZh
 import com.llzx373.foldreader.ui.EncodingPickerDialog
@@ -185,6 +194,37 @@ fun BookDetailDialog(
                         ) {
                             Text("重建目录")
                         }
+                        if (book.format == BookFormat.TXT) {
+                            val cleanDefaults by viewModel.cleanDefaults.collectAsState()
+                            val cleanPreview by viewModel.cleanPreview.collectAsState()
+                            var showReclean by remember { mutableStateOf(false) }
+                            TextButton(onClick = { showReclean = true }) {
+                                Text("智能整理")
+                            }
+                            if (showReclean) {
+                                RecleanConfirmDialog(
+                                    alreadyCleaned = book.cleanedFilePath != null,
+                                    defaultLevel = cleanDefaults.level,
+                                    defaultConvertTraditional = cleanDefaults.convertTraditional,
+                                    preview = cleanPreview,
+                                    onPreview = { level, convert ->
+                                        viewModel.previewReclean(bookId, level, convert)
+                                    },
+                                    onConfirm = { level, convert ->
+                                        showReclean = false
+                                        viewModel.consumeCleanPreview()
+                                        viewModel.recleanBook(bookId, level, convert) { message ->
+                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                            refreshTick++
+                                        }
+                                    },
+                                    onDismiss = {
+                                        showReclean = false
+                                        viewModel.consumeCleanPreview()
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -204,6 +244,106 @@ fun BookDetailDialog(
             onDismiss = { showEncodingPicker = false },
         )
     }
+}
+
+/**
+ * 「智能整理」确认框。
+ *
+ * 档位在这里**当场可选**（不必先去设置页改全局），且每次改动都会重新采样预览——
+ * 重洗每次都是从原始源文件跑，所以反复换档位是安全的，结果只取决于「原文 + 本次配方」。
+ * 「不清理」这一项就是**撤销清理**：删掉副本、恢复原始编码，回到直接读原文件。
+ */
+@Composable
+private fun RecleanConfirmDialog(
+    alreadyCleaned: Boolean,
+    defaultLevel: CleanLevel,
+    defaultConvertTraditional: Boolean,
+    preview: BookshelfViewModel.CleanPreview?,
+    onPreview: (CleanLevel?, Boolean) -> Unit,
+    onConfirm: (level: CleanLevel?, convertTraditional: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var level by remember { mutableStateOf<CleanLevel?>(defaultLevel) }
+    var convertTraditional by remember { mutableStateOf(defaultConvertTraditional) }
+    LaunchedEffect(level, convertTraditional) { onPreview(level, convertTraditional) }
+    val report = preview?.report
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("智能整理") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = if (alreadyCleaned) {
+                        "当前读的是清洗副本。可以在这里换一套规则重洗——每次都从原始源文件重跑，" +
+                            "结果只取决于「原文 + 本次规则」，不会在上一版上叠加。"
+                    } else {
+                        "当前直接读原文件。选一套规则后会在库内生成清洗副本，原文件不受影响。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "注意：正文内容会变，进度、书签与标注的字符位置可能随之偏移。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                ImportLevelOption("不清理（撤销清理）", "删掉副本、恢复原始编码，回到直接读原文件", level == null) {
+                    level = null
+                }
+                CleanLevel.entries.forEach { candidate ->
+                    if (candidate == CleanLevel.CUSTOM) return@forEach
+                    ImportLevelOption(
+                        label = importLevelLabel(candidate),
+                        hint = importLevelHint(candidate),
+                        selected = level == candidate,
+                        onSelect = { level = candidate },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = convertTraditional, onCheckedChange = { convertTraditional = it })
+                    Text("繁体转简体")
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                when {
+                    preview == null || preview.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在采样预览…", style = MaterialTheme.typography.labelSmall)
+                    }
+
+                    report == null -> Text("预览不可用，仍可继续。", style = MaterialTheme.typography.labelSmall)
+
+                    level == null -> Text("将撤销清理。", style = MaterialTheme.typography.labelSmall)
+
+                    !report.changed -> Text(
+                        text = "与当前内容一致，无需改动。",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+
+                    else -> Column {
+                        Text("预计改动：${report.summary()}", style = MaterialTheme.typography.labelSmall)
+                        report.samples.take(3).forEach { sample ->
+                            Text(
+                                text = "${sample.before} → ${sample.after}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(level, convertTraditional) }, enabled = preview?.loading != true) {
+                Text(if (level == null) "撤销清理" else "开始整理")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 @Composable

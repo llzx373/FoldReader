@@ -10,7 +10,9 @@ import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.ContentHasher
-import com.llzx373.foldreader.core.format.TextCleaner
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanProfile
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.Files
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -62,7 +65,7 @@ class ImportBookCleanTest {
         }
         val useCase = newUseCase(repo, File(dir, "cleaned"), sources)
 
-        val result = useCase.import(uriKey, TextCleaner.CleanOptions())
+        val result = useCase.import(uriKey, CleanProfile.NONE)
 
         assertTrue(result is ImportBookUseCase.Result.Imported)
         val book = repo.books.single()
@@ -83,24 +86,26 @@ class ImportBookCleanTest {
             "第一章 開篇\n\n廣告：本章完\n身體第二行\n",
         ).also { sources[it] = File(it) }
         val useCase = newUseCase(repo, File(dir, "cleaned"), sources)
-        val options = TextCleaner.CleanOptions(
-            removeBlankLines = true,
+        val profile = CleanProfile(
+            level = CleanLevel.STANDARD,
+            toggles = CleanToggles.preset(CleanLevel.STANDARD).copy(traditionalToSimplified = true),
             adPatterns = listOf(Regex("广告")),
-            traditionalToSimplified = true,
         )
         val progresses = mutableListOf<Float>()
 
-        val result = useCase.import(uriKey, options) { progresses += it }
+        val result = useCase.import(uriKey, profile) { progresses += it }
 
         assertTrue(result is ImportBookUseCase.Result.Imported)
         val book = repo.books.single()
         assertEquals("UTF-8", book.encoding)
         val cleaned = File(book.cleanedFilePath!!)
         assertTrue(cleaned.exists())
-        assertEquals("第一章 开篇\n身体第二行\n", cleaned.readText(Charsets.UTF_8))
+        assertEquals("第一章 开篇\n\n身体第二行\n", cleaned.readText(Charsets.UTF_8))
         assertEquals(hashOf(cleaned), book.contentHash)
         assertNotEquals(hashOf(File(uriKey)), book.contentHash)
         assertEquals(1f, progresses.last())
+        val report = (result as ImportBookUseCase.Result.Imported).cleanReport
+        assertTrue(report != null && report.removedNoiseLines == 1)
     }
 
     @Test
@@ -112,12 +117,15 @@ class ImportBookCleanTest {
             sources[it] = File(it)
         }
         val useCase = newUseCase(repo, File(dir, "cleaned"), sources)
-        val clean = TextCleaner.CleanOptions(traditionalToSimplified = true)
+        val clean = CleanProfile(
+            level = CleanLevel.CUSTOM,
+            toggles = CleanToggles.NONE.copy(traditionalToSimplified = true),
+        )
 
-        val raw = useCase.import(uriKey, TextCleaner.CleanOptions())
+        val raw = useCase.import(uriKey, CleanProfile.NONE)
         val cleaned = useCase.import(uriKey, clean)
         val cleanedAgain = useCase.import(uriKey, clean)
-        val rawAgain = useCase.import(uriKey, TextCleaner.CleanOptions())
+        val rawAgain = useCase.import(uriKey, CleanProfile.NONE)
 
         assertTrue(raw is ImportBookUseCase.Result.Imported)
         assertTrue(cleaned is ImportBookUseCase.Result.Imported)
@@ -128,6 +136,42 @@ class ImportBookCleanTest {
         )
         assertTrue(cleanedAgain is ImportBookUseCase.Result.DuplicateSameHash)
         assertTrue(rawAgain is ImportBookUseCase.Result.DuplicateSameUri)
+    }
+
+    @Test
+    fun `预览只回报告且不落盘不写库`() = runBlocking {
+        val dir = Files.createTempDirectory("foldreader-import").toFile()
+        val repo = FakeBookshelfRepository()
+        val sources = mutableMapOf<String, File>()
+        val uriKey = newSource(
+            dir,
+            "书.txt",
+            "请记住本站域名 www.example-novel.com\n他停下脚步，　看着远方。\n",
+        ).also { sources[it] = File(it) }
+        val useCase = newUseCase(repo, File(dir, "cleaned"), sources)
+
+        val report = useCase.preview(uriKey, CleanProfile(level = CleanLevel.STANDARD))
+
+        assertTrue(report.removedNoiseLines == 1)
+        assertTrue(report.changed)
+        assertTrue(report.samples.isNotEmpty())
+        assertTrue(repo.books.isEmpty())
+        assertTrue(File(dir, "cleaned").listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `不清理时预览不做任何事`() = runBlocking {
+        val dir = Files.createTempDirectory("foldreader-import").toFile()
+        val repo = FakeBookshelfRepository()
+        val sources = mutableMapOf<String, File>()
+        val uriKey = newSource(dir, "书.txt", "请记住本站域名 www.example-novel.com\n").also {
+            sources[it] = File(it)
+        }
+        val useCase = newUseCase(repo, File(dir, "cleaned"), sources)
+
+        val report = useCase.preview(uriKey, CleanProfile.NONE)
+
+        assertFalse(report.changed)
     }
 
     private class FakeBookshelfRepository : BookshelfRepository {

@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.data.settings
 
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
 
 interface SettingsRepository {
@@ -41,6 +43,20 @@ interface SettingsRepository {
     suspend fun setBookshelfSort(sort: BookshelfSort)
     suspend fun setCustomChapterRules(rules: List<String>)
     suspend fun setAdCleanRules(rules: List<String>)
+
+    /**
+     * 切换清理档位：细项同时重置为该档预设（切到 [CleanLevel.CUSTOM] 时保留现有细项）。
+     */
+    suspend fun setCleanLevel(level: CleanLevel)
+
+    /** 逐项开关某个清理细项；档位随之落到 [CleanLevel.CUSTOM]。 */
+    suspend fun setCleanToggle(key: String, enabled: Boolean)
+
+    /**
+     * 一次性写入档位与细项。备份恢复走这条——如果恢复时逐项写，
+     * 每次写入都会把档位打成「自定义」，恢复完就与备份里的档位对不上了。
+     */
+    suspend fun setCleanProfile(level: CleanLevel, toggles: CleanToggles)
     suspend fun setComicDirection(direction: ComicDirection)
     suspend fun setComicDualPageCoverAlone(enabled: Boolean)
     suspend fun setComicSpreadAutoDetect(enabled: Boolean)

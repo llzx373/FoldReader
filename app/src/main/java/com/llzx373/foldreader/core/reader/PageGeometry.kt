@@ -7,6 +7,8 @@ import androidx.compose.runtime.Immutable
  * 保证划线渲染与长按/手柄命中测试完全一致（两端对齐附加字距也包含在内）。
  *
  * [charWidths] 虽为数组，但只在构造时填一次、之后只读，故可声明为不可变。
+ * [collapsedMask] 为空白归一化的折叠掩码（null = 未开启）；被折叠字符不占宽、也不累计字距，
+ * 但**仍留在 [line] 里**，故字符偏移与选区/划线/书签锚点完全不受影响。
  */
 @Immutable
 class LineBox(
@@ -16,6 +18,7 @@ class LineBox(
     val lineHeightPx: Float,
     val charWidths: FloatArray,
     val gapPx: Float,
+    val collapsedMask: BooleanArray? = null,
 ) {
     val textLength: Int get() = line.text.length
 
@@ -23,7 +26,11 @@ class LineBox(
     fun boundaryX(index: Int): Float {
         var x = x0
         val n = index.coerceIn(0, charWidths.size)
-        for (i in 0 until n) x += charWidths[i] + gapPx
+        val mask = collapsedMask
+        for (i in 0 until n) {
+            if (mask != null && !mask[i]) continue
+            x += charWidths[i] + gapPx
+        }
         return x
     }
 
@@ -44,6 +51,8 @@ data class RangeSegment(
  * [measure] 为字符串宽度测量（px）。
  * [fillCharWidths] 为批量逐字宽度填充（一次调用填满整行，如 `Paint.getTextWidths`）；
  * 为 null 时退回逐字 [measure]（单测与无 Paint 场景）。
+ * [collapseWhitespace] 开启空白归一化：段首空白折叠为零宽并改由 [indentPx] 对齐，
+ * 行内/行尾多余空白与不可见字符同样折叠。关闭时逐像素维持原行为。
  */
 fun buildLineBoxes(
     page: Page,
@@ -56,6 +65,7 @@ fun buildLineBoxes(
     justify: Boolean,
     measure: (String) -> Float,
     fillCharWidths: ((CharSequence, FloatArray) -> Unit)? = null,
+    collapseWhitespace: Boolean = false,
 ): List<LineBox> {
     val boxes = ArrayList<LineBox>(page.lines.size)
     var yTop = topPadPx
@@ -63,22 +73,42 @@ fun buildLineBoxes(
         if (line.isParagraphStart && index > 0) yTop += paragraphSpacingPx
         // 图片行用缩放后实际行高；文本行恒为 lineHeightPx（纯文本路径逐像素不变）
         val effectiveLineHeightPx = line.heightPx ?: lineHeightPx
-        val x0 = leftPadPx + if (line.isParagraphStart && !hasLeadingIndent(line.text)) indentPx else 0f
+        val mask = if (collapseWhitespace) normalizedWidthMask(line.text) else null
+        val x0 = leftPadPx + if (line.isParagraphStart &&
+            (!hasLeadingIndent(line.text) || collapseWhitespace)
+        ) {
+            indentPx
+        } else {
+            0f
+        }
         val widths = FloatArray(line.text.length)
         if (fillCharWidths != null) {
             fillCharWidths(line.text, widths)
         } else {
             for (i in line.text.indices) widths[i] = measure(line.text[i].toString())
         }
-        val gap = if (justify && !line.isParagraphEnd && line.text.length > 1) {
-            val natural = measure(line.text)
+        val visibleCount = if (mask == null) line.text.length else mask.count { it }
+        if (mask != null) {
+            for (i in line.text.indices) {
+                if (!mask[i]) widths[i] = 0f
+            }
+        }
+        val gap = if (justify && !line.isParagraphEnd && visibleCount > 1) {
+            // 折叠字符不参与占宽，自然宽与字距除数都只按可见字符算
+            val natural = if (mask == null) {
+                measure(line.text)
+            } else {
+                var sum = 0f
+                for (i in line.text.indices) sum += widths[i]
+                sum
+            }
             // 上限防御：绘制宽度与分页宽度错配（版式切换窗口期）时字距不会爆炸
-            ((textWidthPx - (x0 - leftPadPx) - natural) / (line.text.length - 1))
+            ((textWidthPx - (x0 - leftPadPx) - natural) / (visibleCount - 1))
                 .coerceIn(0f, lineHeightPx * 0.5f)
         } else {
             0f
         }
-        boxes += LineBox(line, x0, yTop, effectiveLineHeightPx, widths, gap)
+        boxes += LineBox(line, x0, yTop, effectiveLineHeightPx, widths, gap, mask)
         yTop += effectiveLineHeightPx
     }
     return boxes

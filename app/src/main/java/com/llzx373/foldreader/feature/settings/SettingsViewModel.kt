@@ -18,6 +18,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
+import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.reader.FontManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -167,6 +168,11 @@ class SettingsViewModel(
             )
         }
     }
+
+    fun updateCleanLevel(level: CleanLevel) = launch { settingsRepository.setCleanLevel(level) }
+
+    fun updateCleanToggle(key: String, enabled: Boolean) =
+        launch { settingsRepository.setCleanToggle(key, enabled) }
 
     fun importFont(uri: Uri, displayName: String?, onResult: (Boolean) -> Unit) {
         launch {

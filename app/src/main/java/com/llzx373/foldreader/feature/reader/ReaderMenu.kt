@@ -5,6 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -203,7 +206,7 @@ private fun BookmarkListIcon(tint: Color, contentDescription: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReaderMenuPanel(
     prefs: ReadingPreferences,
@@ -235,6 +238,7 @@ fun ReaderMenuPanel(
     autoPageStatus: AutoPageStatus,
     onToggleAutoPage: (Boolean) -> Unit,
     onToggleAutoIndent: (Boolean) -> Unit = {},
+    onToggleNormalizeWhitespace: (Boolean) -> Unit = {},
     onCycleAutoPageMode: () -> Unit,
     onCycleAutoPageSpeed: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -473,31 +477,36 @@ fun ReaderMenuPanel(
                 clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
                 clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
             }
-            Row(
+            // 开关都是中文长标签，窄屏下横排会容不下被逐字竖排：改用 FlowRow 自动换行，
+            // 每个标签本身强制单行，换不下就整块挪到下一行。
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
             ) {
                 EncodingMenuEntry()
-                TextButton(onClick = { onToggleAutoIndent(!prefs.autoIndentEnabled) }) {
-                    Text("自动缩进：${if (prefs.autoIndentEnabled) "开" else "关"}")
+                MenuToggle("自动缩进：${if (prefs.autoIndentEnabled) "开" else "关"}") {
+                    onToggleAutoIndent(!prefs.autoIndentEnabled)
                 }
-                TextButton(onClick = { onToggleAutoPage(!prefs.autoPageEnabled) }) {
-                    Text("自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}")
+                MenuToggle("空白归一化：${if (prefs.normalizeWhitespaceEnabled) "开" else "关"}") {
+                    onToggleNormalizeWhitespace(!prefs.normalizeWhitespaceEnabled)
+                }
+                MenuToggle("自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}") {
+                    onToggleAutoPage(!prefs.autoPageEnabled)
                 }
                 if (prefs.autoPageEnabled) {
-                    TextButton(onClick = onCycleAutoPageMode) {
-                        Text(autoPageModeLabel(prefs.autoPageMode))
-                    }
-                    TextButton(onClick = onCycleAutoPageSpeed) {
-                        Text(autoPageSpeedLabel(prefs))
-                    }
+                    MenuToggle(autoPageModeLabel(prefs.autoPageMode), onCycleAutoPageMode)
+                    MenuToggle(autoPageSpeedLabel(prefs), onCycleAutoPageSpeed)
                 }
                 if (autoPageStatus.enabled && autoPageStatus.paused) {
                     Text(
                         text = "已暂停",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.accent,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
             }
@@ -654,6 +663,20 @@ fun nextDualPageMode(mode: DualPageMode): DualPageMode = when (mode) {
 }
 
 /**
+ * 菜单里的一行开关/循环按钮：标签强制单行、内边距收紧。
+ * 放在 [FlowRow] 里时，宁可整块换到下一行，也不要把中文标签压成逐字竖排。
+ */
+@Composable
+private fun MenuToggle(label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(text = label, maxLines = 1, softWrap = false)
+    }
+}
+
+/**
  * 编码切换入口：写 BookEntity.encoding（空串=自动检测），
  * ReaderViewModel 监听该字段变化后按当前锚点重开书籍。
  */
@@ -675,8 +698,15 @@ private fun EncodingMenuEntry() {
     if (currentBook.format != BookFormat.TXT) return
     val encoding = currentBook.encoding
     var showPicker by remember { mutableStateOf(false) }
-    TextButton(onClick = { showPicker = true }) {
-        Text("编码：${encoding.takeIf { it.isNotBlank() } ?: "自动检测"}")
+    TextButton(
+        onClick = { showPicker = true },
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = "编码：${encoding.takeIf { it.isNotBlank() } ?: "自动检测"}",
+            maxLines = 1,
+            softWrap = false,
+        )
     }
     if (showPicker) {
         EncodingPickerDialog(

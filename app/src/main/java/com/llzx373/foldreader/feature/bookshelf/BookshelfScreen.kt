@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,12 +53,14 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -106,9 +109,11 @@ import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.foldable.WidthCategory
+import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.feature.importer.BatchImportConfirmDialog
 import com.llzx373.foldreader.feature.importer.BatchImportProgressOverlay
 import com.llzx373.foldreader.feature.importer.BatchImportSummaryDialog
+import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import com.llzx373.foldreader.ui.EmptyState
 import com.llzx373.foldreader.ui.rememberLocale
 import java.util.Locale
@@ -136,6 +141,8 @@ fun BookshelfScreen(
     val sortOrder by viewModel.sortOrder.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
+    val cleanPreview by viewModel.cleanPreview.collectAsState()
+    val cleanDefaults by viewModel.cleanDefaults.collectAsState()
     val batchImportState by viewModel.batchImportState.collectAsState()
     val groups by viewModel.groups.collectAsState()
     val allBookmarks by viewModel.allBookmarks.collectAsState()
@@ -222,6 +229,7 @@ fun BookshelfScreen(
                     if (state.lowEncodingConfidence) {
                         snackbarHostState.showSnackbar("编码识别置信度低，如乱码可在书籍详情切换编码")
                     }
+                    state.cleanSummary?.let { snackbarHostState.showSnackbar("智能清理：$it") }
                 }
                 viewModel.consumeImportState()
             }
@@ -547,14 +555,18 @@ fun BookshelfScreen(
 
     importRequest?.let { (uri, openAfter) ->
         ImportOptionsDialog(
-            onConfirm = { removeBlankLines, removeAdLines, traditionalToSimplified ->
+            defaultLevel = cleanDefaults.level,
+            defaultConvertTraditional = cleanDefaults.convertTraditional,
+            preview = cleanPreview,
+            onPreview = { level, convert -> viewModel.previewClean(uri, level, convert) },
+            onConsumePreview = viewModel::consumeCleanPreview,
+            onConfirm = { level, convert ->
                 importRequest = null
                 viewModel.import(
                     uri = uri,
                     openAfterImport = openAfter,
-                    removeBlankLines = removeBlankLines,
-                    removeAdLines = removeAdLines,
-                    traditionalToSimplified = traditionalToSimplified,
+                    cleanLevel = level,
+                    convertTraditional = convert,
                 )
             },
             onDismiss = { importRequest = null },
@@ -637,50 +649,120 @@ fun BookshelfScreen(
 
 @Composable
 private fun ImportOptionsDialog(
-    onConfirm: (removeBlankLines: Boolean, removeAdLines: Boolean, traditionalToSimplified: Boolean) -> Unit,
+    defaultLevel: CleanLevel,
+    defaultConvertTraditional: Boolean,
+    preview: BookshelfViewModel.CleanPreview?,
+    onPreview: (CleanLevel?, Boolean) -> Unit,
+    onConsumePreview: () -> Unit,
+    onConfirm: (level: CleanLevel?, convertTraditional: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var removeBlankLines by remember { mutableStateOf(false) }
-    var removeAdLines by remember { mutableStateOf(false) }
-    var traditionalToSimplified by remember { mutableStateOf(false) }
+    // null = 不清理。默认取设置页的全局档位。
+    var level by remember { mutableStateOf<CleanLevel?>(defaultLevel) }
+    var convertTraditional by remember { mutableStateOf(defaultConvertTraditional) }
+    var showPreview by remember { mutableStateOf(false) }
+
+    if (showPreview) {
+        CleanPreviewDialog(
+            preview = preview,
+            onDismiss = {
+                showPreview = false
+                onConsumePreview()
+            },
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("导入选项") },
         text = {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = removeBlankLines, onCheckedChange = { removeBlankLines = it })
-                    Text("去空行")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = removeAdLines, onCheckedChange = { removeAdLines = it })
-                    Text("去广告行")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = traditionalToSimplified,
-                        onCheckedChange = { traditionalToSimplified = it },
+                ImportLevelOption("不清理（原样导入）", "不生成副本，直接读取原文件", level == null) { level = null }
+                CleanLevel.entries.forEach { candidate ->
+                    if (candidate == CleanLevel.CUSTOM) return@forEach
+                    ImportLevelOption(
+                        label = importLevelLabel(candidate),
+                        hint = importLevelHint(candidate),
+                        selected = level == candidate,
+                        onSelect = { level = candidate },
                     )
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = convertTraditional, onCheckedChange = { convertTraditional = it })
                     Text("繁体转简体")
                 }
                 Text(
-                    text = "勾选后清理结果保存为副本，原文件不受影响；去广告行使用「设置 → 智能清理」中的正则规则，繁简转换为单字级映射。",
+                    text = "清理结果保存为副本，原文件不受影响；全程离线执行。" +
+                        "自定义广告行规则在「设置 → 智能清理」里配置。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(removeBlankLines, removeAdLines, traditionalToSimplified) },
-            ) {
+            TextButton(onClick = { onConfirm(level, convertTraditional) }) {
                 Text("导入")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
+            Row {
+                TextButton(
+                    onClick = {
+                        showPreview = true
+                        onPreview(level, convertTraditional)
+                    },
+                ) {
+                    Text("预览")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            }
+        },
+    )
+}
+
+/** 预览报告：计数摘要 + 改动样例；用户据此判断这个档位会不会误伤。 */
+@Composable
+private fun CleanPreviewDialog(
+    preview: BookshelfViewModel.CleanPreview?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("清洗预览") },
+        text = {
+            val report = preview?.report
+            when {
+                preview == null || preview.loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在采样…")
+                    }
+                }
+
+                report == null || !report.changed -> Text("按当前设置，这本书没有需要改动的内容。")
+
+                else -> Column {
+                    Text(report.summary(), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "（采样前 ${ImportBookUseCase.PREVIEW_BYTES / 1024} KB）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    report.samples.forEach { sample ->
+                        Text(
+                            text = "${sample.kind.name}：${sample.before} → ${sample.after}",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                }
             }
         },
     )

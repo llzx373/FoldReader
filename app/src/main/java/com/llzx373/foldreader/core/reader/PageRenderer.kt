@@ -92,6 +92,7 @@ fun drawPageInto(
             justify = config.alignment == PageTextAlignment.JUSTIFY,
             measure = { paint.measureText(it) },
             fillCharWidths = { text, out -> paint.getTextWidths(text, 0, text.length, out) },
+            collapseWhitespace = config.normalizeWhitespaceEnabled,
         )
     }
 
@@ -138,12 +139,18 @@ fun drawPageInto(
         val baseline = box.yTop + (lineHeightPx - fm.descent - fm.ascent) / 2f
         if (line.spans.isEmpty()) {
             // 无样式快路径（与 span 引入前逐像素一致）
-            if (box.gapPx > 0f) {
-                for (i in line.text.indices) {
-                    canvas.drawText(line.text[i].toString(), box.boundaryX(i), baseline, paint)
+            when {
+                box.gapPx > 0f -> {
+                    for (i in line.text.indices) {
+                        if (box.collapsedMask?.get(i) == false) continue
+                        canvas.drawText(line.text[i].toString(), box.boundaryX(i), baseline, paint)
+                    }
                 }
-            } else {
-                canvas.drawText(line.text, box.x0, baseline, paint)
+                // 折叠行不能用整串绘制：字体按真实字宽推进，折叠会失效
+                box.collapsedMask != null ->
+                    drawVisibleRange(canvas, box, 0, line.text.length, baseline, paint)
+
+                else -> canvas.drawText(line.text, box.x0, baseline, paint)
             }
         } else {
             // 样式 span 仅渲染期生效：粗体/斜体用 Paint 效果，上下标平移基线（字号不变），
@@ -159,7 +166,7 @@ fun drawPageInto(
                     else -> 0f
                 }
                 val x = box.boundaryX(run.start)
-                canvas.drawText(line.text.substring(run.start, run.end), x, baseline + shift, paint)
+                drawVisibleRange(canvas, box, run.start, run.end, baseline + shift, paint)
                 if (isLink) {
                     paint.strokeWidth = density
                     canvas.drawLine(
@@ -175,6 +182,36 @@ fun drawPageInto(
         }
     }
     return boxes
+}
+
+/**
+ * 绘制 [from, to) 区间：把连续的未折叠字符切成片段，每段用 [LineBox.boundaryX] 定位。
+ * 折叠字符既不占宽也不绘制（它们仍留在行文本里，偏移不变）。
+ */
+private fun drawVisibleRange(
+    canvas: android.graphics.Canvas,
+    box: LineBox,
+    from: Int,
+    to: Int,
+    baseline: Float,
+    paint: Paint,
+) {
+    val mask = box.collapsedMask
+    if (mask == null) {
+        canvas.drawText(box.line.text.substring(from, to), box.boundaryX(from), baseline, paint)
+        return
+    }
+    var i = from
+    while (i < to) {
+        if (!mask[i]) {
+            i++
+            continue
+        }
+        var j = i + 1
+        while (j < to && mask[j]) j++
+        canvas.drawText(box.line.text.substring(i, j), box.boundaryX(i), baseline, paint)
+        i = j
+    }
 }
 
 /** 图片行：行框内居中按等比缩放画位图；位图未就绪画占位灰框 + alt 文本。 */

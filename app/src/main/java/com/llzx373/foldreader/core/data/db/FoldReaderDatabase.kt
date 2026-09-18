@@ -4,11 +4,12 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 /**
- * 应用尚在预发布阶段：**只保证新安装，不保留任何 schema 历史与迁移**。
+ * 从 v1.0.0 起已有公开发布，数据库**必须向前兼容**：老库要能原地升级，不丢数据。
  *
- * 因此没有 `autoMigrations`，也没有手写 `Migration`——schema 变更时直接重置基线
- * （清库/重装即可，不需要在代码里留兼容路径）。`version` 恒为 1，每次变更重新导出
- * 同名 schema 快照。
+ * 因此：
+ * - 改 schema 必须同时升 [version] 并在 [DATABASE_MIGRATIONS] 里补一条迁移（登记处见
+ *   `DatabaseMigrations.kt`）；`app/schemas/` 下每个已发布版本的快照都保留，绝不改写；
+ * - 不启用 `fallbackToDestructiveMigration`——版本对不上时宁可报错，也不能静默清库。
  */
 @Database(
     entities = [
@@ -22,7 +23,7 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {

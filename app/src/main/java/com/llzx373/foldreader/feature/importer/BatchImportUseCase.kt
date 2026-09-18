@@ -6,7 +6,6 @@ import android.provider.DocumentsContract
 import com.llzx373.foldreader.core.comic.ComicPageOrdering
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
-import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.core.format.isSupportedBookName
 import com.llzx373.foldreader.core.format.saf.SafTree
 import kotlinx.coroutines.CancellationException
@@ -36,7 +35,6 @@ class BatchImportUseCase private constructor(
         importOne = { entry ->
             importBook.import(
                 uri = Uri.parse(entry.uri),
-                options = TextCleaner.CleanOptions(),
                 source = BookSource.EXTERNAL,
             )
         },

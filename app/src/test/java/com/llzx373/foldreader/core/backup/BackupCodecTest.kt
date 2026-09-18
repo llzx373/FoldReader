@@ -22,6 +22,8 @@ import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -66,6 +68,12 @@ class BackupCodecTest {
         bookshelfGridView = false,
         customChapterRules = listOf("^第.+章$", "^卷 \\d+ .+"),
         adCleanRules = listOf("公众号", "^【广告】.*$"),
+        cleanLevel = CleanLevel.CUSTOM,
+        cleanToggles = CleanToggles.NONE.copy(
+            unifyChars = true,
+            reflowParagraphs = true,
+            traditionalToSimplified = true,
+        ),
     )
 
     @Test
@@ -481,6 +489,20 @@ class BackupCodecTest {
             update { copy(customChapterRules = rules) }
         override suspend fun setAdCleanRules(rules: List<String>) =
             update { copy(adCleanRules = rules) }
+
+        override suspend fun setCleanLevel(level: CleanLevel) = update {
+            copy(cleanLevel = level, cleanToggles = CleanToggles.preset(level))
+        }
+
+        override suspend fun setCleanToggle(key: String, enabled: Boolean) {
+            val entry = CleanToggles.ENTRIES.first { it.key == key }
+            update {
+                copy(cleanToggles = entry.set(cleanToggles, enabled), cleanLevel = CleanLevel.CUSTOM)
+            }
+        }
+
+        override suspend fun setCleanProfile(level: CleanLevel, toggles: CleanToggles) =
+            update { copy(cleanLevel = level, cleanToggles = toggles) }
 
         override suspend fun setComicDirection(direction: ComicDirection) =
             update { copy(comicDirection = direction) }

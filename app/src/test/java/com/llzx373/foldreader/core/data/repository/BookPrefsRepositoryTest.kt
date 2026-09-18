@@ -14,6 +14,8 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -56,6 +58,7 @@ class BookPrefsRepositoryTest {
         autoPageIntervalSec = 20,
         autoPageSpeedPx = 120f,
         panelScreenOff = true,
+        normalizeWhitespaceEnabled = true,
         bookshelfGridView = false,
         customChapterRules = listOf("^第.+章$"),
         adCleanRules = listOf("公众号"),
@@ -153,6 +156,7 @@ class BookPrefsRepositoryTest {
         assertEquals(global.autoPageIntervalSec, roundTripped.autoPageIntervalSec)
         assertEquals(global.autoPageSpeedPx, roundTripped.autoPageSpeedPx, 0.0001f)
         assertEquals(global.panelScreenOff, roundTripped.panelScreenOff)
+        assertEquals(global.normalizeWhitespaceEnabled, roundTripped.normalizeWhitespaceEnabled)
         assertEquals(global.comicDirection, roundTripped.comicDirection)
         assertEquals(global.comicFitMode, roundTripped.comicFitMode)
         assertEquals(global.pdfReadingMode, roundTripped.pdfReadingMode)
@@ -295,6 +299,9 @@ class BookPrefsRepositoryTest {
         override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) = Unit
         override suspend fun setCustomChapterRules(rules: List<String>) = Unit
         override suspend fun setAdCleanRules(rules: List<String>) = Unit
+        override suspend fun setCleanLevel(level: CleanLevel) = Unit
+        override suspend fun setCleanToggle(key: String, enabled: Boolean) = Unit
+        override suspend fun setCleanProfile(level: CleanLevel, toggles: CleanToggles) = Unit
         override suspend fun setComicDirection(direction: ComicDirection) = Unit
         override suspend fun setComicDualPageCoverAlone(enabled: Boolean) = Unit
         override suspend fun setComicSpreadAutoDetect(enabled: Boolean) = Unit

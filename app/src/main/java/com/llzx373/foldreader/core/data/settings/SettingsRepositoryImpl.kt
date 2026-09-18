@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -58,6 +60,8 @@ class SettingsRepositoryImpl(
         val BOOKSHELF_SORT = stringPreferencesKey("bookshelf_sort")
         val CUSTOM_CHAPTER_RULES = stringPreferencesKey("custom_chapter_rules")
         val AD_CLEAN_RULES = stringPreferencesKey("ad_clean_rules")
+        val CLEAN_LEVEL = stringPreferencesKey("clean_level")
+        val CLEAN_TOGGLES = stringPreferencesKey("clean_toggles")
         val COMIC_DIRECTION = stringPreferencesKey("comic_direction")
         val COMIC_DUAL_PAGE_COVER_ALONE = booleanPreferencesKey("comic_dual_page_cover_alone")
         val COMIC_SPREAD_AUTO_DETECT = booleanPreferencesKey("comic_spread_auto_detect")
@@ -117,6 +121,9 @@ class SettingsRepositoryImpl(
                 bookshelfSort = enumOrDefault(prefs[Keys.BOOKSHELF_SORT], defaults.bookshelfSort),
                 customChapterRules = decodeCustomChapterRules(prefs[Keys.CUSTOM_CHAPTER_RULES]),
                 adCleanRules = decodeRuleList(prefs[Keys.AD_CLEAN_RULES]),
+                cleanLevel = enumOrDefault(prefs[Keys.CLEAN_LEVEL], defaults.cleanLevel),
+                cleanToggles = CleanToggles.decode(prefs[Keys.CLEAN_TOGGLES])
+                    ?: defaults.cleanToggles,
                 comicDirection = enumOrDefault(prefs[Keys.COMIC_DIRECTION], defaults.comicDirection),
                 comicDualPageCoverAlone = prefs[Keys.COMIC_DUAL_PAGE_COVER_ALONE]
                     ?: defaults.comicDualPageCoverAlone,
@@ -291,6 +298,32 @@ class SettingsRepositoryImpl(
         val cleaned = rules.map { it.trim() }.filter { it.isNotEmpty() }
         context.readingPreferencesStore.edit {
             it[Keys.AD_CLEAN_RULES] = encodeRuleList(cleaned)
+        }
+    }
+
+    override suspend fun setCleanLevel(level: CleanLevel) {
+        context.readingPreferencesStore.edit { prefs ->
+            prefs[Keys.CLEAN_LEVEL] = level.name
+            if (level != CleanLevel.CUSTOM) {
+                prefs[Keys.CLEAN_TOGGLES] = CleanToggles.encode(CleanToggles.preset(level))
+            }
+        }
+    }
+
+    override suspend fun setCleanToggle(key: String, enabled: Boolean) {
+        val entry = CleanToggles.ENTRIES.firstOrNull { it.key == key } ?: return
+        context.readingPreferencesStore.edit { prefs ->
+            val current = CleanToggles.decode(prefs[Keys.CLEAN_TOGGLES])
+                ?: CleanToggles.preset(ReadingPreferences().cleanLevel)
+            prefs[Keys.CLEAN_TOGGLES] = CleanToggles.encode(entry.set(current, enabled))
+            prefs[Keys.CLEAN_LEVEL] = CleanLevel.CUSTOM.name
+        }
+    }
+
+    override suspend fun setCleanProfile(level: CleanLevel, toggles: CleanToggles) {
+        context.readingPreferencesStore.edit { prefs ->
+            prefs[Keys.CLEAN_LEVEL] = level.name
+            prefs[Keys.CLEAN_TOGGLES] = CleanToggles.encode(toggles)
         }
     }
 

@@ -337,6 +337,7 @@ class PaginatorTest {
 
     private class IndentRecorder(private val delegate: FixedWidthMeasurer = FixedWidthMeasurer()) : TextMeasurer {
         val seen = mutableListOf<Int>()
+        val seenTexts = mutableListOf<CharSequence>()
 
         override fun measureLineBreaks(
             text: CharSequence,
@@ -347,6 +348,7 @@ class PaginatorTest {
             typeface: Typeface?,
         ): IntArray {
             seen += indentPx
+            seenTexts += text
             return delegate.measureLineBreaks(text, widthPx, indentPx, fontSizePx, letterSpacingEm, typeface)
         }
     }
@@ -355,6 +357,7 @@ class PaginatorTest {
         text: String,
         autoIndentEnabled: Boolean,
         measurer: TextMeasurer,
+        normalizeWhitespace: Boolean = false,
     ) = Paginator(
         content = StringBookContent(text),
         config = LayoutConfig(
@@ -367,6 +370,7 @@ class PaginatorTest {
             marginBottomDp = 0f,
             firstLineIndentChars = 2,
             autoIndentEnabled = autoIndentEnabled,
+            normalizeWhitespaceEnabled = normalizeWhitespace,
             maxLineChars = 40,
         ),
         measurer = measurer,
@@ -386,11 +390,46 @@ class PaginatorTest {
     }
 
     @Test
+    fun `auto indent skips paragraphs starting with unicode spaces`() = runBlocking {
+        val recorder = IndentRecorder()
+        // NBSP / EN SPACE / EM SPACE / NNBSP / 全角空格 → 均视为已有缩进 → indent=0
+        val text = "正文一段\n\u00A0甲\n\u2002乙\n\u2003丙\n\u202F丁\n\u3000戊"
+        indentPaginator(text, autoIndentEnabled = true, measurer = recorder).pageAt(0)
+        assertEquals(listOf(20, 0, 0, 0, 0, 0), recorder.seen)
+    }
+
+    @Test
     fun `auto indent disabled passes zero indent for all paragraphs`() = runBlocking {
         val recorder = IndentRecorder()
         val text = "正文一段\n另一段"
         indentPaginator(text, autoIndentEnabled = false, measurer = recorder).pageAt(0)
         assertEquals(listOf(0, 0), recorder.seen)
+    }
+
+    @Test
+    fun `whitespace normalization indents paragraphs already starting with blanks`() = runBlocking {
+        val recorder = IndentRecorder()
+        val first = "正文一段"
+        // 7 半角空格 + 2 全角空格
+        val second = "       \u3000\u3000带缩进的一段"
+        val page = indentPaginator(
+            "$first\n$second",
+            autoIndentEnabled = true,
+            measurer = recorder,
+            normalizeWhitespace = true,
+        ).pageAt(0)
+        // 行首空白不再算「已有缩进」：两段都拿到标准缩进
+        assertEquals(listOf(20, 20), recorder.seen)
+        // 测量文本等长，段首空白换成零宽占位符（断行下标仍是原文下标）
+        val measured = recorder.seenTexts[1]
+        assertEquals(second.length, measured.length)
+        assertEquals('\u200B', measured[0])
+        assertEquals('\u200B', measured[8])
+        assertEquals('带', measured[9])
+        // 行文本仍是原文子串：偏移、区间连续性、选区/书签锚点全不受影响
+        assertEquals(first, page.lines[0].text)
+        assertEquals(second, page.lines[1].text)
+        assertEquals(page.lines[0].charEnd, page.lines[1].charStart)
     }
 
     private fun livePaginator(content: BookContent) = Paginator(

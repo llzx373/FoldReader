@@ -793,7 +793,8 @@ class ReaderViewModel(
                         a.paragraphSpacingEm == b.paragraphSpacingEm &&
                         a.letterSpacingEm == b.letterSpacingEm &&
                         a.fontKey == b.fontKey &&
-                        a.autoIndentEnabled == b.autoIndentEnabled
+                        a.autoIndentEnabled == b.autoIndentEnabled &&
+                        a.normalizeWhitespaceEnabled == b.normalizeWhitespaceEnabled
                 },
             contentRevision,
         ) { v, _, p, _ -> v to p }.collectLatest { (v, p) ->
@@ -867,6 +868,7 @@ class ReaderViewModel(
             paragraphSpacingEm = p.paragraphSpacingEm,
             maxLineChars = p.maxLineChars,
             autoIndentEnabled = p.autoIndentEnabled,
+            normalizeWhitespaceEnabled = p.normalizeWhitespaceEnabled,
             marginLeftDp = marginH,
             marginRightDp = marginH,
             marginTopDp = marginV,
@@ -1264,6 +1266,12 @@ class ReaderViewModel(
     fun setAutoIndentEnabled(enabled: Boolean) {
         viewModelScope.launch {
             bookPrefsRepository.update(bookId) { it.copy(autoIndentEnabled = enabled) }
+        }
+    }
+
+    fun setNormalizeWhitespaceEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            bookPrefsRepository.update(bookId) { it.copy(normalizeWhitespaceEnabled = enabled) }
         }
     }
 

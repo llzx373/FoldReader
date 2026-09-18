@@ -46,7 +46,7 @@ interface PageDiskCache {
 internal fun LayoutConfig.diskKeyString(): String = listOf(
     fontSizeSp, lineSpacingMultiplier, letterSpacingEm, paragraphSpacingEm,
     marginLeftDp, marginTopDp, marginRightDp, marginBottomDp,
-    firstLineIndentChars, autoIndentEnabled, maxLineChars, alignment, fontKey,
+    firstLineIndentChars, autoIndentEnabled, normalizeWhitespaceEnabled, maxLineChars, alignment, fontKey,
 ).joinToString("|")
 
 /**

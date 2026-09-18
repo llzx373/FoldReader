@@ -1,5 +1,8 @@
 package com.llzx373.foldreader.core.data.settings
 
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
+
 enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, AMOLED, CUSTOM }
 
 enum class PageTurnMode { COVER, NONE, SCROLL }
@@ -82,10 +85,17 @@ data class ReadingPreferences(
     val autoPageSpeedPx: Float = 60f,
     val panelScreenOff: Boolean = false,
     val autoIndentEnabled: Boolean = true,
+    val normalizeWhitespaceEnabled: Boolean = false,
     val bookshelfGridView: Boolean = true,
     val bookshelfSort: BookshelfSort = BookshelfSort.IMPORT_TIME,
     val customChapterRules: List<String> = emptyList(),
     val adCleanRules: List<String> = emptyList(),
+    /**
+     * 智能清理档位与细项。**全局偏好，不是每书偏好**——清洗发生在导入期，是「对之后导入的书生效」
+     * 的应用级选择，没有理由随书各自演化（见 `CleanToggles.ENTRIES`）。
+     */
+    val cleanLevel: CleanLevel = CleanLevel.STANDARD,
+    val cleanToggles: CleanToggles = CleanToggles.preset(CleanLevel.STANDARD),
     /** 以下为漫画（[com.llzx373.foldreader.core.data.db.BookFormat.COMIC]）专用。 */
     val comicDirection: ComicDirection = ComicDirection.LTR,
     /** 首页（封面）单独成页，双页配对从第 2 页开始。 */

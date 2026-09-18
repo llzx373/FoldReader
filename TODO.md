@@ -422,6 +422,9 @@
 
 > 应用处于预发布阶段，只保证新安装 → 不再保留任何 schema 历史与迁移，
 > 也不需要"升版本 + 不写迁移"这种半吊子状态；因仿真翻页才存在的判据字段一并清掉。
+>
+> **v1.0.0 发布后已改回**：见 M11「恢复向前兼容」——DB 重新启用迁移，
+> 已发布版本的 schema 快照不再删除。
 
 #### 数据库基线重置
 
@@ -463,6 +466,52 @@
 - [x] "强制双页"不受方向限制（想要竖持双页的用户仍有显式出口）
 - [x] 测试：`WindowPortraitTest`（窗口方向只看真实宽高、宽高相等不判竖向）+
       `ReaderLogicTest` 新增「竖持退回单页」（两条误判路径 + 强制双页出口），既有横持用例逐一补 `windowPortrait = false`
+
+---
+
+## M12 网络小说智能清理（已完成）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v2.3 网络小说智能清理」。
+> 形态决策：确定性规则引擎（离线、零权限、可回归测试），不引入端侧模型 / 云端 LLM。
+
+### M12.1 清洗引擎（`core/format/clean/`）
+- [x] `CleanProfile` / `CleanToggles` / `CleanLevel`：三档预设 + 14 项细粒度开关；`ENTRIES`
+      作为序列化 / 设置页 / 备份的**唯一有序来源**
+- [x] `NovelCleaner`：流式管线（计数 → 繁简 → 字符归一 → 行内空白 → 噪音过滤 → 行中标题提行
+      → 标点 → 段落重组 → 章节修复 → 引号规整 → 段首缩进 → 写出），只保留一行 pushback
+- [x] `CharRules`（不可见字符/全角空格/HTML 实体与标签/UBB）、`WhitespaceRules`、`NoiseRules`
+      （整行规则库 + 行内切除 + 遮罩规整）、`PunctuationRules`、`ParagraphRules`、
+      `BlankLineRules`、`ChapterRepairRules`、`TsCharMap`
+- [x] 判据全部**局部化**：不按全文比例判定硬换行/空行去留——那会让采样开关在清洗前后漂移，
+      破坏幂等（测试集抓到过）
+- [x] 删除旧 `TextCleaner`，能力全部并入 `clean/`（一处真相）
+
+### M12.2 测试集（`app/src/test/resources/novel-corpus/`）
+- [x] 18 条正向用例（input/expected + 人读说明 + 可选 `profile.txt`），覆盖用户提出的 10 类问题
+      与补充调研出的字符/编码、行/段落、章节结构、内容噪音四层
+- [x] 5 条反向用例（`negatives/`）：诗行、拉丁词句、正文里的「收藏」、隔着正文的重复标题、
+      已排好的书——必须**逐字节不变**
+- [x] `NovelCorpusTest` 横向断言：全语料**幂等**（清洗两遍第二遍无变化）+ 反向用例零改动
+- [x] 各规则单测 + `CleanTogglesTest`（档位逐级包含、序列化往返、条目唯一）
+
+### M12.3 接入与偏好
+- [x] 导入链路改用 `CleanProfile`；`ImportBookUseCase` 返回 `CleanReport`
+- [x] 全局偏好 `cleanLevel` / `cleanToggles`（DataStore，**不升 DB**——清洗是应用级选择）；
+      `setCleanLevel` / `setCleanToggle` / `setCleanProfile`（备份恢复用后者，避免逐项写把档位打成自定义）
+- [x] 备份导出/导入往返；旧备份缺字段时保持现有设置
+- [x] 设置页「智能清理」：档位选择 + 规则明细（逐项开关）+ 去广告行规则
+- [x] 导入对话框：不清理/保守/标准/激进 + 繁简开关 + **清洗预览**（采样 256KB，给计数与 before/after 样例）
+- [x] `RecleanBookUseCase`：读**原始源文件**重洗（所以可反复换档位，结果只取决于「原文 + 本次配方」）、
+      写新副本、`changed` 按当前副本实际哈希判定、显式作废偏移索引与页边界、重建目录、
+      清理孤儿副本；`contentHash` 刻意不改
+- [x] 「不清理」= **撤销清理**：删副本、恢复**原始文件的编码**（副本恒为 UTF-8，直接沿用会乱码）、作废缓存
+- [x] 书籍详情「智能整理」入口：档位**当场可选**（改一次重新预览一次）→ 预览 → 确认
+      （明说进度/书签偏移可能变化）→ 执行
+
+### M12.4 已知取舍（记录在案）
+- [x] 只支持 TXT：EPUB/FB2/PDF-文本 有真实结构，不产生「硬换行 + 广告行」问题
+- [x] 缺章/乱序/空章只报告不自动改
+- [x] 导出清洗后的 TXT 到用户目录：未做（副本已在库内，属锦上添花）
 
 ---
 
@@ -630,6 +679,7 @@
 - [x] `BookmarkEntity` 加 `pageIndex` + `anchorX/Y/W/H`；`AnnotationEntity` 加 `pageIndex` + `regionX/Y/W/H`
       —— **一律归一化 0..1**：渲染尺寸随适配模式/缩放/窗口变化，存像素必错位
 - [x] 索引 `(bookId, pageIndex)`；DB 基线仍为 v1（预发布政策：只保证新安装，不写迁移）
+      —— **该政策已于 v1.0.0 后废止**（见 M11）
 - [x] 备份 v4 → v5：导出/导入新字段；**去重键改为位置感知**（原先只按 `charOffset`，
       页式书签全是 0 会互相吞掉）
 - [x] 文本/页式锚点互相隔离：文本阅读器只取 `pageIndex == null`，页式只取 `!= null`；
@@ -697,7 +747,7 @@
 - [ ] 文字型 PDF：拖框选字是否跟手、复制是否拿到文字；扫描件是否退化为框选
 - [ ] 同系列：同目录/分组能否认出前后卷；未导入的卷按需导入后能否直接打开
 - [ ] 自动翻页：间隔到点是否顺畅翻页、手动点按后是否暂停
-- [ ] 有旧安装的设备需清数据重装（DB 基线已变）
+- [x] ~~有旧安装的设备需清数据重装（DB 基线已变）~~ 已不需要：v1 → v2 走 `MIGRATION_1_2` 原地升级（见 M11）
 
 ---
 
@@ -771,6 +821,31 @@
 - [ ] README 截图按 `docs/images/README.md` 清单补齐后接入截图区
 - [ ] 真机验证：装了 v1.0.0（debug 签名）的设备，之后换正式签名的版本需要先卸载再装
 - [ ] dependabot 已按配置开出若干 PR（部分 PR 的 CI 是在 gradlew 修好之前跑的，会失败，重跑即可），逐个评估合并
+
+---
+
+## M11 空白归一化与恢复向前兼容（已完成）
+
+目标：加一个可开关的排版归一化能力；同时撤掉 v1.0.0 之后失效的"只保证新安装、不写迁移"策略，让已发布的库能原地升级。
+
+### M11.1 空白归一化开关
+- [x] 规则：段首空白整段折叠（改由标准首行缩进对齐）、行尾空白折叠、行内连续空白折叠为一个、BOM/零宽空格/连接符/软连字符等不可见字符折叠
+- [x] **只折叠绘制宽度、不改动任何字符**：测量侧喂等长的 `U+200B` 掩码文本（断行下标因此仍是原文下标），绘制侧按同一掩码把字宽与两端对齐字距归零 → 选区/划线/书签/搜索偏移零影响；开关关闭时逐像素维持原行为
+- [x] 每书开关（阅读器菜单，默认关）：`normalizeWhitespaceEnabled` 贯通 ReadingPreferences / BookPrefs / 备份 / 分页磁盘缓存键
+- [x] 验证：`WhitespaceNormalizerTest`（8 条规则）、`WhitespaceNormalizationLayoutTest`（3 条，真实 `StaticLayout` + `Paint`，确认零宽占位符不占宽、归一化后首行铺满且可见文字从缩进处开始）、PageGeometry / Paginator 新增用例
+
+### M11.2 恢复数据库向前兼容
+- [x] 废止"重置基线、只保证新安装"：`FoldReaderDatabase.version = 2`，新增 `core/data/db/DatabaseMigrations.kt` 登记 `MIGRATION_1_2`（`book_prefs` 加列），`FoldReaderApplication` 接 `addMigrations`
+- [x] `app/schemas/…/1.json` 保持 v1.0.0 原样（已发布快照不可改写），构建自动导出 `2.json`
+- [x] 不启用 `fallbackToDestructiveMigration`：缺迁移宁可报错，也不静默清库
+- [x] 备份导入去掉版本上限硬限制：只拒绝认不出的版本，比本机新的备份按已知字段尽力导入
+- [x] 验证：`DatabaseMigrationTest` 用 v1 建表语句建库 → 跑迁移 → 老数据保留 + `PRAGMA table_info` 与 Room 期望逐项一致
+
+### M11.3 菜单展示
+- [x] 底部开关区 `Row(SpaceEvenly)` → `FlowRow`，标签强制单行：中文不再被挤成逐字竖排，窄屏整块换行
+
+### M11.4 待人工
+- [ ] 真机：装 v1.0.0 → 覆盖安装本次包，确认书架/进度/书签/标注都在（迁移实跑），且不再需要清数据重装
 
 ---
 

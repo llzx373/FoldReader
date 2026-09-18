@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -54,10 +56,13 @@ import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.format.ChapterRules
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.feature.reader.ThemePicker
@@ -76,6 +81,8 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     val readingStats by viewModel.readingStats.collectAsState()
     var showChapterRulesDialog by remember { mutableStateOf(false) }
     var showAdRulesDialog by remember { mutableStateOf(false) }
+    var showCleanLevelDialog by remember { mutableStateOf(false) }
+    var showCleanTogglesDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
@@ -395,13 +402,28 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("智能清理")
             ListItem(
+                headlineContent = { Text("清理档位") },
+                supportingContent = { Text(cleanLevelSummary(prefs)) },
+                modifier = Modifier.clickable { showCleanLevelDialog = true },
+            )
+            ListItem(
+                headlineContent = { Text("清理规则明细") },
+                supportingContent = {
+                    Text(
+                        "已启用 ${enabledCleanToggleCount(prefs)} / ${CleanToggles.ENTRIES.size} 项" +
+                            "（逐项调整后档位变为「自定义」）",
+                    )
+                },
+                modifier = Modifier.clickable { showCleanTogglesDialog = true },
+            )
+            ListItem(
                 headlineContent = { Text("去广告行规则") },
                 supportingContent = {
                     Text(
                         if (prefs.adCleanRules.isEmpty()) {
-                            "未配置规则，导入时勾选「去广告行」不生效"
+                            "未配置规则；行内切除见「清理规则明细」"
                         } else {
-                            "已配置 ${prefs.adCleanRules.size} 条正则"
+                            "已配置 ${prefs.adCleanRules.size} 条正则，整行匹配即删除"
                         },
                     )
                 },
@@ -410,7 +432,11 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             ListItem(
                 headlineContent = { Text("关于智能清理") },
                 supportingContent = {
-                    Text("导入书籍时可选去空行 / 去广告行 / 繁简转换，清理结果保存为副本，原文件不受影响；繁简转换为单字级映射，不做词组级转换")
+                    Text(
+                        "导入书籍时按档位清洗，结果保存为副本、原文件不受影响；" +
+                            "已导入的书可在书籍详情里「智能整理」重新清洗。" +
+                            "清理只在本地离线执行，不上传任何内容。",
+                    )
                 },
             )
 
@@ -532,6 +558,23 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             onAdd = viewModel::addAdCleanRule,
             onRemove = viewModel::removeAdCleanRule,
             onDismiss = { showAdRulesDialog = false },
+        )
+    }
+    if (showCleanLevelDialog) {
+        CleanLevelDialog(
+            current = prefs.cleanLevel,
+            onSelect = {
+                viewModel.updateCleanLevel(it)
+                showCleanLevelDialog = false
+            },
+            onDismiss = { showCleanLevelDialog = false },
+        )
+    }
+    if (showCleanTogglesDialog) {
+        CleanTogglesDialog(
+            toggles = prefs.cleanToggles,
+            onToggle = viewModel::updateCleanToggle,
+            onDismiss = { showCleanTogglesDialog = false },
         )
     }
 
@@ -713,6 +756,115 @@ private fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
         },
     )
 }
+
+@Composable
+private fun CleanLevelDialog(
+    current: CleanLevel,
+    onSelect: (CleanLevel) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("清理档位") },
+        text = {
+            Column {
+                Text(
+                    text = "档位决定启用哪些规则；也可以到「清理规则明细」里逐项调整。" +
+                        "清洗只影响之后导入或「智能整理」的书。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CleanLevel.entries.forEach { level ->
+                    if (level == CleanLevel.CUSTOM && current != CleanLevel.CUSTOM) return@forEach
+                    RadioSetting(
+                        label = cleanLevelLabel(level),
+                        hint = cleanLevelHint(level),
+                        selected = level == current,
+                        onSelect = { onSelect(level) },
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun CleanTogglesDialog(
+    toggles: CleanToggles,
+    onToggle: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("清理规则明细") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "逐项调整后档位会变成「自定义」。全部关闭且没有广告规则时不生成副本。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CleanToggles.ENTRIES.forEach { entry ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(entry.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = entry.hint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = entry.get(toggles),
+                            onCheckedChange = { onToggle(entry.key, it) },
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun RadioSetting(
+    label: String,
+    hint: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(label) },
+        supportingContent = { Text(hint) },
+        trailingContent = {
+            RadioButton(selected = selected, onClick = onSelect)
+        },
+        modifier = Modifier.clickable(onClick = onSelect),
+    )
+}
+
+private fun cleanLevelLabel(level: CleanLevel): String = when (level) {
+    CleanLevel.CONSERVATIVE -> "保守"
+    CleanLevel.STANDARD -> "标准（默认）"
+    CleanLevel.AGGRESSIVE -> "激进"
+    CleanLevel.CUSTOM -> "自定义"
+}
+
+private fun cleanLevelHint(level: CleanLevel): String = when (level) {
+    CleanLevel.CONSERVATIVE -> "只做无争议的字符/空白归一与广告行过滤，不改动段落结构"
+    CleanLevel.STANDARD -> "在保守之上加段落重组、空行规整、章节标题修复与标点规整"
+    CleanLevel.AGGRESSIVE -> "在标准之上加繁简转换，以及重复标点折叠、引号字形统一等"
+    CleanLevel.CUSTOM -> "由「清理规则明细」里的开关决定"
+}
+
+private fun cleanLevelSummary(prefs: ReadingPreferences): String =
+    "${cleanLevelLabel(prefs.cleanLevel)}：${cleanLevelHint(prefs.cleanLevel)}"
+
+private fun enabledCleanToggleCount(prefs: ReadingPreferences): Int =
+    CleanToggles.ENTRIES.count { it.get(prefs.cleanToggles) }
 
 @Composable
 private fun AdCleanRulesDialog(

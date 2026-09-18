@@ -13,7 +13,6 @@ import com.llzx373.foldreader.core.comic.ComicContainer
 import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
-import com.llzx373.foldreader.core.format.TextCleaner
 import com.llzx373.foldreader.core.format.isSupportedBookName
 import com.llzx373.foldreader.core.format.saf.SafTree
 import com.llzx373.foldreader.feature.importer.ComicImportUseCase
@@ -154,7 +153,6 @@ class FileBrowserViewModel(
             }
             val result = importBook.import(
                 uri = entry.uri,
-                options = TextCleaner.CleanOptions(),
                 source = BookSource.EXTERNAL,
             )
             _openingFile.value = false

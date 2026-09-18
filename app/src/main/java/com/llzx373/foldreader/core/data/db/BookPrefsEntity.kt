@@ -53,6 +53,7 @@ data class BookPrefsEntity(
     val autoPageSpeedPx: Float = 60f,
     val panelScreenOff: Boolean = false,
     @ColumnInfo(defaultValue = "1") val autoIndentEnabled: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val normalizeWhitespaceEnabled: Boolean = false,
     /** 以下为漫画专用。 */
     val comicDirection: String = "LTR",
     val comicFitMode: String = "FIT_PAGE",

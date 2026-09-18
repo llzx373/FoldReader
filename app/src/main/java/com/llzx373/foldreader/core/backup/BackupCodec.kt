@@ -16,6 +16,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
@@ -148,7 +149,9 @@ class BackupCodec(
     suspend fun importJson(text: String): ImportResult {
         val root = JSONObject(text)
         val version = root.optInt("version", 0)
-        check(version in 1..BackupManager.BACKUP_VERSION) { "备份版本不支持" }
+        // 向前兼容：只拒绝认不出的版本（缺 version / 非法值），比本机新的备份照样尽力导入——
+        // 认不出的字段按各自默认值落库（见下方各 optXxx 的兜底），不因为版本号更大就整份拒绝。
+        check(version >= 1) { "备份版本不支持" }
 
         root.optJSONObject("preferences")?.let { applyPreferences(it) }
 
@@ -348,6 +351,8 @@ class BackupCodec(
         .put("bookshelfGridView", p.bookshelfGridView)
         .put("customChapterRules", JSONArray().apply { p.customChapterRules.forEach { put(it) } })
         .put("adCleanRules", JSONArray().apply { p.adCleanRules.forEach { put(it) } })
+        .put("cleanLevel", p.cleanLevel.name)
+        .put("cleanToggles", CleanToggles.encode(p.cleanToggles))
         .put("comicDirection", p.comicDirection.name)
         .put("comicDualPageCoverAlone", p.comicDualPageCoverAlone)
         .put("comicSpreadAutoDetect", p.comicSpreadAutoDetect)
@@ -469,6 +474,15 @@ class BackupCodec(
         if (json.has("adCleanRules")) {
             settingsRepository.setAdCleanRules(json.stringList("adCleanRules"))
         }
+        // 旧备份没有这两项（或细项串长度对不上）时保持现有设置，不做覆盖
+        if (json.has("cleanToggles")) {
+            CleanToggles.decode(json.optString("cleanToggles"))?.let { toggles ->
+                settingsRepository.setCleanProfile(
+                    level = enumOrDefault(json.optString("cleanLevel"), ReadingPreferences().cleanLevel),
+                    toggles = toggles,
+                )
+            }
+        }
         if (json.has("comicDirection")) {
             settingsRepository.setComicDirection(
                 enumOrDefault(json.optString("comicDirection"), ComicDirection.LTR),
@@ -541,6 +555,7 @@ class BackupCodec(
         .put("autoPageSpeedPx", p.autoPageSpeedPx.toDouble())
         .put("panelScreenOff", p.panelScreenOff)
         .put("autoIndentEnabled", p.autoIndentEnabled)
+        .put("normalizeWhitespaceEnabled", p.normalizeWhitespaceEnabled)
         .put("comicDirection", p.comicDirection)
         .put("comicFitMode", p.comicFitMode)
         .put("pdfReadingMode", p.pdfReadingMode ?: JSONObject.NULL)
@@ -590,6 +605,10 @@ class BackupCodec(
             ).toFloat(),
             panelScreenOff = json.optBoolean("panelScreenOff", defaults.panelScreenOff),
             autoIndentEnabled = json.optBoolean("autoIndentEnabled", defaults.autoIndentEnabled),
+            normalizeWhitespaceEnabled = json.optBoolean(
+                "normalizeWhitespaceEnabled",
+                defaults.normalizeWhitespaceEnabled,
+            ),
             comicDirection = json.optString("comicDirection", defaults.comicDirection),
             comicFitMode = json.optString("comicFitMode", defaults.comicFitMode),
             pdfReadingMode = if (!json.has("pdfReadingMode") || json.isNull("pdfReadingMode")) {

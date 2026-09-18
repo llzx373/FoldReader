@@ -15,8 +15,10 @@ import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.BookMeta
 import com.llzx373.foldreader.core.format.BookParser
 import com.llzx373.foldreader.core.format.FormatDetector
-import com.llzx373.foldreader.core.format.TextCleaner
-import com.llzx373.foldreader.core.format.TsCharMap
+import com.llzx373.foldreader.core.format.clean.CleanProfile
+import com.llzx373.foldreader.core.format.clean.CleanReport
+import com.llzx373.foldreader.core.format.clean.NovelCleaner
+import com.llzx373.foldreader.core.format.clean.TsCharMap
 import com.llzx373.foldreader.core.format.epub.DrmProtectedException
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import java.io.File
@@ -72,7 +74,14 @@ class ImportBookUseCase(
     )
 
     sealed interface Result {
-        data class Imported(val bookId: Long, val title: String, val encodingConfidence: Float) : Result
+        data class Imported(
+            val bookId: Long,
+            val title: String,
+            val encodingConfidence: Float,
+            /** 本次清洗的改动报告；未清洗（noop）时为 null。 */
+            val cleanReport: CleanReport? = null,
+        ) : Result
+
         data class DuplicateSameUri(val bookId: Long, val title: String) : Result
         data class DuplicateSameHash(val bookId: Long, val title: String) : Result
         data class Failure(val message: String?) : Result
@@ -80,27 +89,60 @@ class ImportBookUseCase(
 
     suspend fun import(
         uri: Uri,
-        options: TextCleaner.CleanOptions = TextCleaner.CleanOptions(),
+        profile: CleanProfile = CleanProfile.NONE,
         source: BookSource = BookSource.IMPORT,
         onProgress: (Float) -> Unit = {},
-    ): Result = import(uri.toString(), options, source, onProgress)
+    ): Result = import(uri.toString(), profile, source, onProgress)
 
     suspend fun import(
         uriKey: String,
-        options: TextCleaner.CleanOptions = TextCleaner.CleanOptions(),
+        profile: CleanProfile = CleanProfile.NONE,
         source: BookSource = BookSource.IMPORT,
         onProgress: (Float) -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
-        runCatching { doImport(uriKey, options, source, onProgress) }.getOrElse { Result.Failure(it.message) }
+        runCatching { doImport(uriKey, profile, source, onProgress) }.getOrElse { Result.Failure(it.message) }
     }
+
+    /**
+     * 只跑清洗、不落盘也不写库，回一份改动报告（导入对话框的「预览」用）。
+     *
+     * 采样前 [PREVIEW_BYTES] 字节即可：报告的用途是判断「这个档位会不会误伤」，
+     * 前几十万字足够暴露问题，也不必为了预览把整本读一遍。
+     */
+    suspend fun preview(
+        uriKey: String,
+        profile: CleanProfile,
+        maxBytes: Int = PREVIEW_BYTES,
+    ): CleanReport = withContext(Dispatchers.IO) {
+        if (profile.isNoop) return@withContext CleanReport()
+        runCatching {
+            openChannel(uriKey).use { channel ->
+                val head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
+                val detection = EncodingDetector.detect(head)
+                val bom = EncodingDetector.bomLengthOf(head)
+                val bytes = UriChannels.readAt(channel, bom.toLong(), maxBytes)
+                NovelCleaner.preview(
+                    sample = String(bytes, detection.charset),
+                    profile = profile,
+                    tsMap = if (profile.toggles.traditionalToSimplified) traditionalMap() else emptyMap(),
+                )
+            }
+        }.getOrDefault(CleanReport())
+    }
+
+    suspend fun preview(
+        uri: Uri,
+        profile: CleanProfile,
+        maxBytes: Int = PREVIEW_BYTES,
+    ): CleanReport = preview(uri.toString(), profile, maxBytes)
 
     private suspend fun doImport(
         uriKey: String,
-        options: TextCleaner.CleanOptions,
+        profile: CleanProfile,
         source: BookSource,
         onProgress: (Float) -> Unit,
     ): Result {
-        if (options.isNoop) {
+        if (profile.isNoop) {
             bookshelfRepository.findByFileUri(uriKey)
                 ?.takeIf { it.cleanedFilePath == null }
                 ?.let { return Result.DuplicateSameUri(it.id, it.title) }
@@ -126,7 +168,7 @@ class ImportBookUseCase(
                 return outcome.toImportResult()
             }
             if (format != null && format != BookFormat.TXT) {
-                // 非 TXT 忽略 CleanOptions：不复制原文件，转换发生在首开压平时
+                // 非 TXT 不做文本清洗：不复制原文件，转换发生在首开压平时
                 return importConverted(format, uriKey, channel, source, onProgress)
             }
             if (format == null && FormatDetector.isPdf(head)) {
@@ -144,7 +186,7 @@ class ImportBookUseCase(
                 charset = detection.charset,
             )
 
-            if (options.isNoop) {
+            if (profile.isNoop) {
                 val contentHash = hashOf(channel)
                 bookshelfRepository.findByContentHash(contentHash)
                     ?.let { return Result.DuplicateSameHash(it.id, it.title) }
@@ -153,7 +195,7 @@ class ImportBookUseCase(
 
             val tmp = File(cleanedDir, ".tmp-${UUID.randomUUID()}.txt")
             try {
-                writeCleanedCopy(channel, bom, detection, options, tmp, onProgress)
+                val cleanReport = writeCleanedCopy(channel, bom, detection, profile, tmp, onProgress)
                 val cleanedHash = hashOf(tmp)
                 bookshelfRepository.findByContentHash(cleanedHash)
                     ?.let { return Result.DuplicateSameHash(it.id, it.title) }
@@ -161,7 +203,15 @@ class ImportBookUseCase(
                 if (!target.exists() && !tmp.renameTo(target)) {
                     throw java.io.IOException("清洗副本写入失败: ${target.absolutePath}")
                 }
-                return insert(uriKey, headText, cleanedHash, detection, target.absolutePath, source)
+                return insert(
+                    uriKey = uriKey,
+                    headText = headText,
+                    contentHash = cleanedHash,
+                    detection = detection,
+                    cleanedFilePath = target.absolutePath,
+                    source = source,
+                    cleanReport = cleanReport,
+                )
             } finally {
                 tmp.delete()
             }
@@ -172,14 +222,14 @@ class ImportBookUseCase(
         channel: SeekableByteChannel,
         bomLength: Int,
         detection: EncodingDetection,
-        options: TextCleaner.CleanOptions,
+        profile: CleanProfile,
         target: File,
         onProgress: (Float) -> Unit,
-    ) {
+    ): CleanReport {
         cleanedDir.mkdirs()
         val total = channel.size()
         channel.position(bomLength.toLong())
-        target.outputStream().buffered().writer(Charsets.UTF_8).buffered().use { writer ->
+        val report = target.outputStream().buffered().writer(Charsets.UTF_8).buffered().use { writer ->
             val counting = object : FilterInputStream(Channels.newInputStream(channel)) {
                 private var bytes = 0L
 
@@ -193,14 +243,15 @@ class ImportBookUseCase(
                     onProgress(if (total > 0) (read.toFloat() / total).coerceIn(0f, 1f) else 1f)
                 }
             }
-            TextCleaner.cleanStream(
+            NovelCleaner.cleanStream(
                 reader = counting.reader(detection.charset).buffered(),
                 writer = writer,
-                options = options,
-                tsMap = if (options.traditionalToSimplified) traditionalMap() else emptyMap(),
+                profile = profile,
+                tsMap = if (profile.toggles.traditionalToSimplified) traditionalMap() else emptyMap(),
             )
         }
         onProgress(1f)
+        return report
     }
 
     private fun hashOf(channel: SeekableByteChannel): String =
@@ -212,9 +263,9 @@ class ImportBookUseCase(
         RandomAccessFile(file, "r").use { hashOf(it.channel) }
 
     /**
-     * 非 TXT（EPUB/FB2…）导入：跳过编码检测/TextCleaner/标题启发；
+     * 非 TXT（EPUB/FB2…）导入：跳过编码检测/文本清洗/标题启发；
      * 元数据由对应格式 parser 的 parseMeta 提供（失败回退文件名）。
-     * 无论 CleanOptions 如何都不复制原文件（压平转换发生在首开）。
+     * 不复制原文件——压平转换发生在首开或后台预热。
      */
     private suspend fun importConverted(
         format: BookFormat,
@@ -301,6 +352,7 @@ class ImportBookUseCase(
         detection: EncodingDetection,
         cleanedFilePath: String?,
         source: BookSource,
+        cleanReport: CleanReport? = null,
     ): Result {
         val baseName = displayNameOf(uriKey)
             ?.substringBeforeLast('.')
@@ -321,7 +373,12 @@ class ImportBookUseCase(
                 source = source,
             ),
         )
-        return Result.Imported(bookId, title, detection.confidence)
+        return Result.Imported(bookId, title, detection.confidence, cleanReport)
+    }
+
+    companion object {
+        /** 「预览」采样的字节数：够暴露问题，又不必为了预览把整本读一遍。 */
+        const val PREVIEW_BYTES = 256 * 1024
     }
 }
 

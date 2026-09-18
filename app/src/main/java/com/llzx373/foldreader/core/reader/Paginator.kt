@@ -354,10 +354,18 @@ class Paginator(
             paragraphStart: Boolean,
             paragraphEnd: Boolean,
         ) {
-            val paraIndentPx =
-                if (!config.autoIndentEnabled || hasLeadingIndent(body)) 0 else indentPx
+            // 归一化开启时段首空白不再算「已有缩进」：改为折叠掉、走标准首行缩进
+            val paraIndentPx = when {
+                !config.autoIndentEnabled -> 0
+                config.normalizeWhitespaceEnabled -> indentPx
+                hasLeadingIndent(body) -> 0
+                else -> indentPx
+            }
+            // 掩码文本与正文等长，断行下标仍是正文下标；宽度按折叠后计算
+            val measured =
+                if (config.normalizeWhitespaceEnabled) maskedForMeasure(body) else body
             val raw = measurer.measureLineBreaks(
-                body, textWidthPx.toInt(), paraIndentPx, fontSizePx,
+                measured, textWidthPx.toInt(), paraIndentPx, fontSizePx,
                 config.letterSpacingEm, config.typeface,
             )
             val breaks = Kinsoku.adjust(body, raw)

@@ -175,6 +175,124 @@ class PageGeometryTest {
         assertEquals(4f, noIndent[0].x0, 0.001f)
     }
 
+    @Test
+    fun `paragraph starting with unicode space is not indented again`() {
+        // NBSP / EN SPACE / EM SPACE / NNBSP / MMSP 等非 ASCII 空格同样算「已有缩进」，不叠加
+        val leading = listOf('\u00A0', '\u2002', '\u2003', '\u202F', '\u205F', '\u3000', ' ', '\t')
+        for (c in leading) {
+            val p = Page(
+                charStart = 0,
+                charEnd = 5,
+                lines = listOf(
+                    PageLine(0, 5, "${c}甲乙丙丁", isParagraphStart = true, isParagraphEnd = true),
+                ),
+                paddingLeft = 0f,
+                paddingRight = 0f,
+            )
+            val bs = buildLineBoxes(
+                page = p,
+                lineHeightPx = 20f,
+                paragraphSpacingPx = 0f,
+                indentPx = 20f,
+                topPadPx = 0f,
+                leftPadPx = 4f,
+                textWidthPx = 100f,
+                justify = false,
+                measure = measure,
+            )
+            assertEquals("U+%04X".format(c.code), 4f, bs[0].x0, 0.001f)
+        }
+    }
+
+    @Test
+    fun `collapse whitespace folds the paragraph prefix and keeps the standard indent`() {
+        // 7 半角空格 + 2 全角空格（《战败被俘的勇者小姐还会幸福吗》96% 正文行的形态）
+        val p = Page(
+            charStart = 0,
+            charEnd = 12,
+            lines = listOf(
+                PageLine(0, 12, "       \u3000\u3000甲乙丙", isParagraphStart = true, isParagraphEnd = true),
+            ),
+            paddingLeft = 0f,
+            paddingRight = 0f,
+        )
+        val bs = buildLineBoxes(
+            page = p,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 20f,
+            topPadPx = 0f,
+            leftPadPx = 4f,
+            textWidthPx = 100f,
+            justify = false,
+            measure = measure,
+            collapseWhitespace = true,
+        )
+        // 前缀零宽、不占位；可见文字从标准缩进处开始，两侧口径一致
+        assertEquals(24f, bs[0].x0, 0.001f)
+        for (i in 0 until 9) assertEquals("index $i", 0f, bs[0].charWidths[i], 0.001f)
+        assertEquals(10f, bs[0].charWidths[9], 0.001f)
+        assertEquals(24f, bs[0].boundaryX(9), 0.001f)
+        assertEquals(54f, bs[0].boundaryX(12), 0.001f)
+        assertEquals(12, bs[0].textLength)
+    }
+
+    @Test
+    fun `collapse whitespace keeps pixel behaviour when disabled`() {
+        val p = Page(
+            charStart = 0,
+            charEnd = 12,
+            lines = listOf(
+                PageLine(0, 12, "       \u3000\u3000甲乙丙", isParagraphStart = true, isParagraphEnd = true),
+            ),
+            paddingLeft = 0f,
+            paddingRight = 0f,
+        )
+        val bs = buildLineBoxes(
+            page = p,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 20f,
+            topPadPx = 0f,
+            leftPadPx = 4f,
+            textWidthPx = 100f,
+            justify = false,
+            measure = measure,
+        )
+        assertNull(bs[0].collapsedMask)
+        assertEquals(4f, bs[0].x0, 0.001f)
+        assertEquals(10f, bs[0].charWidths[0], 0.001f)
+    }
+
+    @Test
+    fun `collapse whitespace spreads justify gap over visible chars only`() {
+        val p = Page(
+            charStart = 0,
+            charEnd = 19,
+            lines = listOf(
+                PageLine(0, 19, "       \u3000\u3000甲乙丙丁戊己庚辛壬癸", isParagraphStart = true, isParagraphEnd = false),
+            ),
+            paddingLeft = 0f,
+            paddingRight = 0f,
+        )
+        fun gap(collapse: Boolean) = buildLineBoxes(
+            page = p,
+            lineHeightPx = 20f,
+            paragraphSpacingPx = 0f,
+            indentPx = 20f,
+            topPadPx = 0f,
+            leftPadPx = 0f,
+            textWidthPx = 200f,
+            justify = true,
+            measure = measure,
+            collapseWhitespace = collapse,
+        )[0].gapPx
+        // 归一化：自然宽 10 字×10px，余量 80 摊在 9 个字距上
+        assertEquals(80f / 9f, gap(true), 0.001f)
+        // 不归一化：前缀照样占宽，余量 200-190=10 摊在 18 个字距上
+        assertEquals(10f / 18f, gap(false), 0.001f)
+    }
+
     /**
      * 渲染端走 [buildLineBoxes] 的 fillCharWidths 批量路径（Paint.getTextWidths），
      * 单测走逐字 measure 路径；两条路径必须产出完全相同的几何，否则划线/光标会错位。

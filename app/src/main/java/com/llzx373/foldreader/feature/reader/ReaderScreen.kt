@@ -1243,6 +1243,7 @@ fun ReaderScreen(
                 },
                 autoPageStatus = autoPageStatus,
                 onToggleAutoIndent = viewModel::setAutoIndentEnabled,
+                onToggleNormalizeWhitespace = viewModel::setNormalizeWhitespaceEnabled,
                 onToggleAutoPage = viewModel::setAutoPageEnabled,
                 onCycleAutoPageMode = {
                     viewModel.setAutoPageMode(nextAutoPageMode(prefs.autoPageMode))

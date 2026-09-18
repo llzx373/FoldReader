@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.net.Uri
 import androidx.room.Room
+import com.llzx373.foldreader.core.data.db.DATABASE_MIGRATIONS
 import com.llzx373.foldreader.core.data.db.FoldReaderDatabase
 import com.llzx373.foldreader.core.data.db.RoomOffsetIndexStore
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
@@ -20,6 +21,7 @@ import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.ChapterRules
+import com.llzx373.foldreader.core.format.clean.TsCharMap
 import com.llzx373.foldreader.core.format.epub.EpubBookParser
 import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
 import com.llzx373.foldreader.core.format.txt.TxtBookParser
@@ -46,8 +48,11 @@ class AppContainer(context: Context) {
         context = context,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    // 迁移必须显式登记：没有 fallbackToDestructiveMigration，缺迁移会直接抛错而不是清库
     val database: FoldReaderDatabase =
-        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db").build()
+        Room.databaseBuilder(context, FoldReaderDatabase::class.java, "foldreader.db")
+            .addMigrations(*DATABASE_MIGRATIONS)
+            .build()
     /** 非 TXT 格式的压平缓存目录（<contentHash>.txt + .toc sidecar）。 */
     val convertedDir = File(context.filesDir, "converted").apply { mkdirs() }
     /** 封面图片目录（<contentHash>.<ext>），与 converted/ 同生命周期。 */
@@ -434,6 +439,15 @@ class AppContainer(context: Context) {
         enqueuePrewarm = bookPrewarmQueue::enqueue,
         comicImport = comicImportUseCase,
         pdfImport = pdfImportUseCase,
+    )
+    /** 对已导入的书重新跑一遍智能清理（读原始源文件，重写副本并作废派生缓存）。 */
+    val recleanBookUseCase = com.llzx373.foldreader.feature.importer.RecleanBookUseCase(
+        bookshelfRepository = bookshelfRepository,
+        cleanedDir = File(context.filesDir, "cleaned"),
+        openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
+        offsetIndexStore = offsetIndexStore,
+        pageDiskCache = pageDiskCache,
+        traditionalMap = { TsCharMap.load(appContext) },
     )
     val batchImportUseCase = com.llzx373.foldreader.feature.importer.BatchImportUseCase(
         context = context,
