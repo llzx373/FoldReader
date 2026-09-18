@@ -105,6 +105,7 @@ import com.llzx373.foldreader.feature.reader.VolumeKeyDispatch
 import com.llzx373.foldreader.feature.reader.annotationColorPalette
 import com.llzx373.foldreader.feature.reader.contentRectFor
 import com.llzx373.foldreader.feature.reader.dualSplit
+import com.llzx373.foldreader.feature.reader.isBottomPagingStrip
 import com.llzx373.foldreader.feature.reader.pageLabelOf
 import com.llzx373.foldreader.feature.reader.readerColors
 import com.llzx373.foldreader.feature.reader.rememberReaderExit
@@ -118,7 +119,6 @@ import com.llzx373.foldreader.ui.EmptyState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -163,7 +163,9 @@ fun ComicReaderScreen(
     val series by viewModel.series.collectAsState()
     val searchState by viewModel.search.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
-    // 日漫从右往左：点左侧是「下一页」，滑动方向与双页左右归属一并翻转。
+    // 日漫从右往左：点左侧是「下一页」，同一对页里低序号页放右边。
+    // 翻页动画与横滑方向**不**随它翻转——「下一页」一律从右滑入、横滑一律左滑前进（跟手），
+    // 否则同一动作在点击与横滑下的动画方向会相反。
     // PDF 没有这个语义，features.rtl 为 false 时整片关闭。
     val rtl = features.rtl && prefs.comicDirection == ComicDirection.RTL
     val scope = rememberCoroutineScope()
@@ -297,7 +299,7 @@ fun ComicReaderScreen(
         )
     }
 
-    // 内存吃紧时丢掉已解码的页；回到前台由可见页重新解码
+    // 内存吃紧时丢掉已解码的页；可见页随即重新解码（否则当前页会一直停在占位上）
     DisposableEffect(viewModel, context) {
         val callback = object : ComponentCallbacks2 {
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
@@ -347,7 +349,14 @@ fun ComicReaderScreen(
     val animX = remember { Animatable(0f) }
     var animPages by remember { mutableStateOf<List<Int>?>(null) }
 
-    fun turn(forward: Boolean) {
+    /**
+     * 翻页。[slideFromRight] 只决定覆盖动画的滑入方向（true = 新跨页从右侧外滑入、画面左移），
+     * 默认跟随逻辑页序——「下一页」一律从右滑入，与阅读方向无关。
+     *
+     * 阅读方向（RTL）只改「点哪边是下一页」与滑动方向，不改动画方向：热区/滑动已经把物理输入
+     * 翻译成了逻辑 forward，这里若再翻一次会互相抵消，表现为「点左朝右、点右朝左」。
+     */
+    fun turn(forward: Boolean, slideFromRight: Boolean = forward) {
         scope.launch {
             if (animPages != null) return@launch
             val state = uiState
@@ -359,9 +368,7 @@ fun ComicReaderScreen(
                 return@launch
             }
             animPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
-            // 覆盖滑入：新跨页从它"身后"那一侧滑进来，日漫方向相反
-            val fromRight = forward != rtl
-            animX.snapTo(if (fromRight) size.width.toFloat() else -size.width.toFloat())
+            animX.snapTo(if (slideFromRight) size.width.toFloat() else -size.width.toFloat())
             animX.animateTo(0f, tween(ANIM_MS))
             viewModel.goToPage(target, countRead = true)
             animPages = null
@@ -465,6 +472,10 @@ fun ComicReaderScreen(
         } else if (scrollMode) {
             // 连续滚动里左右热区没有意义（页面是竖向连成一条的），点哪都呼出菜单
             menuVisible = true
+        } else if (isBottomPagingStrip(offset.y, size.height.toFloat(), prefs.pageTurnHotspotRatio)) {
+            // 底边翻页条恒为「下一页」：它与左右分区、阅读方向都无关，
+            // 不能走下面的 rtl 映射（否则日漫下会翻成上一页）
+            latestTurn(true)
         } else {
             when (
                 tapZoneOf(
@@ -502,17 +513,27 @@ fun ComicReaderScreen(
                 if (native.action != KeyEvent.ACTION_DOWN) return@onKeyEvent false
                 // 外接键盘 / 桌面模式的常规翻页键（音量键那档是可选项，见下）
                 when (native.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_PAGE_DOWN,
-                    KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_NEXT,
-                    -> {
+                    // 方向键是「物理左右」：日漫下镜像，与左右热区同一口径
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         if (scrollMode) scrollByScreen(1) else latestTurn(!rtl)
                         return@onKeyEvent true
                     }
 
-                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_PAGE_UP,
-                    KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-                    -> {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
                         if (scrollMode) scrollByScreen(-1) else latestTurn(rtl)
+                        return@onKeyEvent true
+                    }
+
+                    // 翻页 / 媒体键是「逻辑前进后退」：与音量键同口径，不随阅读方向翻转
+                    KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_SPACE,
+                    KeyEvent.KEYCODE_MEDIA_NEXT,
+                    -> {
+                        if (scrollMode) scrollByScreen(1) else latestTurn(true)
+                        return@onKeyEvent true
+                    }
+
+                    KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        if (scrollMode) scrollByScreen(-1) else latestTurn(false)
                         return@onKeyEvent true
                     }
 
@@ -541,8 +562,9 @@ fun ComicReaderScreen(
                     else -> false
                 }
             }
-            // 鼠标滚轮：桌面模式与外接鼠标上最顺手的翻页方式
-            .pointerInput(scrollMode, rtl) {
+            // 鼠标滚轮：桌面模式与外接鼠标上最顺手的翻页方式。
+            // 向下滚 = 前进，与音量键/媒体键同口径，不随阅读方向翻转
+            .pointerInput(scrollMode) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
@@ -553,15 +575,17 @@ fun ComicReaderScreen(
                         if (scrollMode) {
                             scrollByScreen(if (dy > 0f) 1 else -1)
                         } else {
-                            latestTurn(if (dy > 0f) !rtl else rtl)
+                            latestTurn(dy > 0f)
                         }
                     }
                 }
             }
-            .pointerInput(uiState.pageCount, prefs.pageTurnHotspotRatio, scrollMode) {
+            // rtl 是普通 val（非快照状态），必须列进 key：否则切方向后旧的点击处理器还在跑，
+            // 左右热区会继续按旧方向判定
+            .pointerInput(uiState.pageCount, prefs.pageTurnHotspotRatio, scrollMode, rtl) {
                 detectTapGestures { offset -> handleTap(offset, false) }
             }
-            .pointerInput(prefs.swipeGestureEnabled, rtl, scrollMode) {
+            .pointerInput(prefs.swipeGestureEnabled, scrollMode) {
                 if (!prefs.swipeGestureEnabled || scrollMode) return@pointerInput
                 var dragged = 0f
                 detectHorizontalDragGestures(
@@ -572,9 +596,10 @@ fun ComicReaderScreen(
                     },
                     onDragEnd = {
                         val threshold = size.width * 0.15f
-                        // 左滑前进（从左往右读）；日漫反过来
-                        val forward = if (rtl) dragged > threshold else dragged < -threshold
-                        if (abs(dragged) > threshold) latestTurn(forward)
+                        // 左滑前进，与阅读方向无关：日漫只改「点哪边是下一页」与同对页左右归属，
+                        // 动画与手势方向都不翻——否则同一动作在点击与横滑下的动画方向会相反。
+                        if (dragged < -threshold) latestTurn(true)
+                        else if (dragged > threshold) latestTurn(false)
                     },
                 )
             }

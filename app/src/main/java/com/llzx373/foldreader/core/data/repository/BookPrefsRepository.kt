@@ -4,6 +4,8 @@ import com.llzx373.foldreader.core.data.db.BookPrefsDao
 import com.llzx373.foldreader.core.data.db.BookPrefsEntity
 import com.llzx373.foldreader.core.data.db.toBookPrefsEntity
 import com.llzx373.foldreader.core.data.db.toReadingPreferences
+import com.llzx373.foldreader.core.data.settings.ComicDirection
+import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
@@ -42,5 +44,15 @@ class BookPrefsRepository(
     /** 全局翻页模式变更同步到所有已落库的书：覆盖每书模式。 */
     suspend fun applyGlobalPageTurnMode(mode: PageTurnMode) {
         bookPrefsDao.applyGlobalPageTurnMode(mode.name)
+    }
+
+    /** 全局漫画适应模式变更同步到所有已落库的书：覆盖每书模式。 */
+    suspend fun applyGlobalComicFitMode(mode: ComicFitMode) {
+        bookPrefsDao.applyGlobalComicFitMode(mode.name)
+    }
+
+    /** 全局漫画阅读方向变更同步到所有已落库的书：覆盖每书方向。 */
+    suspend fun applyGlobalComicDirection(direction: ComicDirection) {
+        bookPrefsDao.applyGlobalComicDirection(direction.name)
     }
 }

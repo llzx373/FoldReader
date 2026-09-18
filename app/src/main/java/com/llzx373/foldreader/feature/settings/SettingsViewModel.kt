@@ -117,10 +117,14 @@ class SettingsViewModel(
     fun updateShowTime(enabled: Boolean) = launch { settingsRepository.setShowTime(enabled) }
     fun updateBookshelfGridView(gridView: Boolean) =
         launch { settingsRepository.setBookshelfGridView(gridView) }
-    fun updateComicDirection(direction: ComicDirection) =
-        launch { settingsRepository.setComicDirection(direction) }
-    fun updateComicFitMode(mode: ComicFitMode) =
-        launch { settingsRepository.setComicFitMode(mode) }
+    fun updateComicDirection(direction: ComicDirection) = launch {
+        settingsRepository.setComicDirection(direction)
+        bookPrefsRepository.applyGlobalComicDirection(direction)
+    }
+    fun updateComicFitMode(mode: ComicFitMode) = launch {
+        settingsRepository.setComicFitMode(mode)
+        bookPrefsRepository.applyGlobalComicFitMode(mode)
+    }
     fun updateComicCoverAlone(enabled: Boolean) =
         launch { settingsRepository.setComicDualPageCoverAlone(enabled) }
     fun updateComicSpreadAutoDetect(enabled: Boolean) =

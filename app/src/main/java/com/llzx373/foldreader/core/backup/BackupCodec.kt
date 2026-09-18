@@ -519,6 +519,9 @@ class BackupCodec(
     private fun JSONObject.optFloatOrNull(key: String): Float? =
         if (!has(key) || isNull(key)) null else optDouble(key).toFloat()
 
+    /**
+     * 每书偏好只导出会随书独立演化的字段；交互开关与显示项是全局的，在全局偏好段里导出一次。
+     */
     private fun bookPrefsJson(p: BookPrefsEntity) = JSONObject()
         .put("fontSizeSp", p.fontSizeSp.toDouble())
         .put("lineSpacingMultiplier", p.lineSpacingMultiplier.toDouble())
@@ -529,20 +532,8 @@ class BackupCodec(
         .put("themeId", p.themeId)
         .put("customBackgroundArgb", p.customBackgroundArgb ?: JSONObject.NULL)
         .put("customTextArgb", p.customTextArgb ?: JSONObject.NULL)
-        .put("darkThemeOption", p.darkThemeOption)
         .put("fontKey", p.fontKey)
-        .put("dualPageMode", p.dualPageMode)
         .put("pageTurnMode", p.pageTurnMode)
-        .put("pageTurnHotspotRatio", p.pageTurnHotspotRatio.toDouble())
-        .put("middleTapAction", p.middleTapAction)
-        .put("middleDoubleTapAction", p.middleDoubleTapAction)
-        .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
-        .put("keepScreenOn", p.keepScreenOn)
-        .put("showChapterTitle", p.showChapterTitle)
-        .put("showPageProgress", p.showPageProgress)
-        .put("showPageNumber", p.showPageNumber)
-        .put("showBattery", p.showBattery)
-        .put("showTime", p.showTime)
         .put("readerBrightness", p.readerBrightness.toDouble())
         .put("autoPageEnabled", p.autoPageEnabled)
         .put("autoPageMode", p.autoPageMode)
@@ -550,6 +541,9 @@ class BackupCodec(
         .put("autoPageSpeedPx", p.autoPageSpeedPx.toDouble())
         .put("panelScreenOff", p.panelScreenOff)
         .put("autoIndentEnabled", p.autoIndentEnabled)
+        .put("comicDirection", p.comicDirection)
+        .put("comicFitMode", p.comicFitMode)
+        .put("pdfReadingMode", p.pdfReadingMode ?: JSONObject.NULL)
 
     private fun bookPrefsFromJson(bookId: Long, json: JSONObject): BookPrefsEntity {
         val defaults = BookPrefsEntity(bookId = bookId)
@@ -581,26 +575,8 @@ class BackupCodec(
             } else {
                 json.optInt("customTextArgb")
             },
-            darkThemeOption = json.optString("darkThemeOption", defaults.darkThemeOption),
             fontKey = json.optString("fontKey", defaults.fontKey),
-            dualPageMode = json.optString("dualPageMode", defaults.dualPageMode),
             pageTurnMode = json.optString("pageTurnMode", defaults.pageTurnMode),
-            pageTurnHotspotRatio = json.optDouble(
-                "pageTurnHotspotRatio",
-                defaults.pageTurnHotspotRatio.toDouble(),
-            ).toFloat(),
-            middleTapAction = json.optString("middleTapAction", defaults.middleTapAction),
-            middleDoubleTapAction = json.optString("middleDoubleTapAction", defaults.middleDoubleTapAction),
-            volumeKeyPagingEnabled = json.optBoolean(
-                "volumeKeyPagingEnabled",
-                defaults.volumeKeyPagingEnabled,
-            ),
-            keepScreenOn = json.optBoolean("keepScreenOn", defaults.keepScreenOn),
-            showChapterTitle = json.optBoolean("showChapterTitle", defaults.showChapterTitle),
-            showPageProgress = json.optBoolean("showPageProgress", defaults.showPageProgress),
-            showPageNumber = json.optBoolean("showPageNumber", defaults.showPageNumber),
-            showBattery = json.optBoolean("showBattery", defaults.showBattery),
-            showTime = json.optBoolean("showTime", defaults.showTime),
             readerBrightness = json.optDouble(
                 "readerBrightness",
                 defaults.readerBrightness.toDouble(),
@@ -614,6 +590,13 @@ class BackupCodec(
             ).toFloat(),
             panelScreenOff = json.optBoolean("panelScreenOff", defaults.panelScreenOff),
             autoIndentEnabled = json.optBoolean("autoIndentEnabled", defaults.autoIndentEnabled),
+            comicDirection = json.optString("comicDirection", defaults.comicDirection),
+            comicFitMode = json.optString("comicFitMode", defaults.comicFitMode),
+            pdfReadingMode = if (!json.has("pdfReadingMode") || json.isNull("pdfReadingMode")) {
+                defaults.pdfReadingMode
+            } else {
+                json.optString("pdfReadingMode")
+            },
         )
     }
 }

@@ -230,6 +230,12 @@ fun middleZoneRect(widthPx: Float, heightPx: Float, hotspotRatio: Float): Conten
     )
 }
 
+/** 是否落在底边翻页条内：那一条恒为「下一页」，与左右分区无关，也与阅读方向无关。 */
+fun isBottomPagingStrip(y: Float, heightPx: Float, hotspotRatio: Float): Boolean {
+    if (heightPx <= 0f) return false
+    return y > heightPx * (1f - hotspotRatioClamped(hotspotRatio))
+}
+
 fun tapZoneOf(
     x: Float,
     widthPx: Float,
@@ -240,7 +246,7 @@ fun tapZoneOf(
     if (widthPx <= 0f) return TapZone.MIDDLE
     val ratio = hotspotRatioClamped(hotspotRatio)
     // 底边整条都是「下一页」：单手拇指够得着，与左右分区无关
-    if (heightPx > 0f && y > heightPx * (1f - ratio)) return TapZone.NEXT
+    if (isBottomPagingStrip(y, heightPx, hotspotRatio)) return TapZone.NEXT
     return when {
         x < widthPx * ratio -> TapZone.PREVIOUS
         x > widthPx * (1f - ratio) -> TapZone.NEXT

@@ -19,6 +19,7 @@ import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
+import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.BookParser
@@ -133,6 +134,8 @@ class ReaderViewModel(
     private val bookId: Long,
     private val bookshelfRepository: BookshelfRepository,
     private val bookPrefsRepository: BookPrefsRepository,
+    /** 应用级偏好（双页模式等）直写全局：这些项不随书独立演化。 */
+    private val settingsRepository: SettingsRepository,
     private val parsers: BookParsers,
     private val fontManager: FontManager,
     private val pageDiskCache: PageDiskCache,
@@ -162,22 +165,25 @@ class ReaderViewModel(
         .onEach { _preferencesLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingPreferences())
 
-    private var content: BookContent? = null
-    private var chapters: List<Chapter> = emptyList()
-    private var paperPageLabels: List<PageLabel>? = null
+    // 下面这些是「主线程发布、之后被 Default/IO 线程读取」的字段：分页（Default）与位图预取（IO）
+    // 都要读它们。不标 @Volatile 时另一个线程可能长读旧引用（改字号/换书之后尤其明显），所以全部标上。
+    @Volatile private var content: BookContent? = null
+    @Volatile private var chapters: List<Chapter> = emptyList()
+    @Volatile private var paperPageLabels: List<PageLabel>? = null
     /** 打开书时加载一次的样式/结构 span（EPUB）；TXT/FB2 为 null。 */
-    private var textSpans: List<TextSpan>? = null
+    @Volatile private var textSpans: List<TextSpan>? = null
     /** 图片占位段落表（占位符偏移 → IMAGE span），buildPaginator 时注入分页器。 */
-    private var imageLineSpans: Map<Long, TextSpan> = emptyMap()
-    private var bookUri: Uri? = null
-    private var bookParser: BookParser? = null
+    @Volatile private var imageLineSpans: Map<Long, TextSpan> = emptyMap()
+    @Volatile private var bookUri: Uri? = null
+    @Volatile private var bookParser: BookParser? = null
     /** 图片位图 LRU（按字节数）；渲染同步路径只查缓存，解码在 spread 构建期预取。 */
     private val imageBitmapCache = object : android.util.LruCache<String, Bitmap>(IMAGE_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     /** 图片行位图查询（渲染期同步调用；未命中 = 占位灰框，不阻塞）。 */
     val imageProvider: (String) -> Bitmap? = { imageBitmapCache.get(it) }
-    private var lastPageWidthPx = 0
+    /** 每页宽高（Default 线程写、IO 线程预取位图时读）。 */
+    @Volatile private var lastPageWidthPx = 0
     private var appliedEncoding: String? = null
     private var pendingReopenAnchor = -1L
     private var baseReadingMillis = 0L
@@ -948,8 +954,12 @@ class ReaderViewModel(
             dualActive
         }
         val spread = withContext(Dispatchers.Default) { spreadFrom(exact, dual, anchorOffset.value) }
-        showSpread(spread, countCharsRead = false)
-        if (scrollPages.isNotEmpty()) enterScrollMode()
+        // 本函数在 scheduleBoundsBuild 的 Default 线程上下文里被调用，而 showSpread / enterScrollMode
+        // 要写快照列表（scrollPages）与阅读统计（charsReadTracker），二者都只在主线程碰：回主线程再落
+        withContext(Dispatchers.Main) {
+            showSpread(spread, countCharsRead = false)
+            if (scrollPages.isNotEmpty()) enterScrollMode()
+        }
     }
 
     /** 目标越过临时起点（向前翻回起点之前）时，立即切回精确分页器同步补排前缀。 */
@@ -1232,10 +1242,9 @@ class ReaderViewModel(
         }
     }
 
+    /** 双页模式是应用级偏好（设置页也有）：写全局，否则设置页改了这里不生效。 */
     fun setDualPageMode(mode: DualPageMode) {
-        viewModelScope.launch {
-            bookPrefsRepository.update(bookId) { it.copy(dualPageMode = mode.name) }
-        }
+        viewModelScope.launch { settingsRepository.setDualPageMode(mode) }
     }
 
     fun setReaderBrightness(brightness: Float) {
@@ -1432,6 +1441,7 @@ class ReaderViewModel(
                     bookId = bookId,
                     bookshelfRepository = container.bookshelfRepository,
                     bookPrefsRepository = container.bookPrefsRepository,
+                    settingsRepository = container.settingsRepository,
                     parsers = container.bookParsers,
                     fontManager = container.fontManager,
                     pageDiskCache = container.pageDiskCache,

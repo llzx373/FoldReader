@@ -48,6 +48,15 @@ object DiagnosticLog {
     private const val MAX_CRASH_FILES = 3
 
     private val lock = Any()
+
+    /**
+     * 写文件这一侧单独一把锁。
+     *
+     * [flush] 会从三处并发进入：调度线程（[flusher]）、快照/打标记/清空/开关的调用方线程、
+     * 崩溃处理线程（[flushPendingSync]）。不串行的话会出现两个 [BufferedWriter] 同时写同一文件、
+     * 或 [rotate] 重命名文件与写入交错。锁序恒为 ioLock → lock，不存在反向持有。
+     */
+    private val ioLock = Any()
     private val pending = ArrayDeque<String>()
     private val recent = ArrayDeque<String>()
 
@@ -57,6 +66,8 @@ object DiagnosticLog {
 
     private var appContext: Context? = null
     private var prefs: SharedPreferences? = null
+
+    /** 日志文件句柄。所有读写都在 [ioLock] 内。 */
     private var writer: BufferedWriter? = null
     private var started = false
 
@@ -121,10 +132,10 @@ object DiagnosticLog {
      * 整份日志（设备信息 + 上一段日志尾部 + 当前日志 + 最新崩溃转储）。
      * [displayContext] 传 Activity（Compose 里就是 LocalContext.current）时能读到分辨旋转方向。
      */
-    fun snapshot(displayContext: Context? = null): String {
-        val context = appContext ?: return "诊断日志未初始化\n"
+    fun snapshot(displayContext: Context? = null): String = synchronized(ioLock) {
+        val context = appContext ?: return@synchronized "诊断日志未初始化\n"
         runCatching { flush() }
-        return buildString {
+        buildString {
             append(header(context, displayContext ?: context))
             crashFiles(context).firstOrNull()?.let { crash ->
                 appendLine("==== 最新崩溃转储：${crash.name} ====")
@@ -177,6 +188,7 @@ object DiagnosticLog {
             ?.sortedByDescending { it.lastModified() }
             .orEmpty()
 
+    /** 调用方须持有 [ioLock]。 */
     private fun ensureWriter(context: Context): BufferedWriter? {
         writer?.let { return it }
         val file = File(logDir(context), FILE_NAME)
@@ -185,25 +197,30 @@ object DiagnosticLog {
         return opened
     }
 
-    private fun closeWriter() {
+    private fun closeWriter() = synchronized(ioLock) {
         runCatching { writer?.flush() }
         runCatching { writer?.close() }
         writer = null
     }
 
     private fun flush() {
-        val context = appContext ?: return
-        val lines: List<String>
-        synchronized(lock) {
-            if (pending.isEmpty()) return
-            lines = pending.toList()
-            pending.clear()
+        synchronized(ioLock) {
+            val context = appContext ?: return
+            val lines = drainPending() ?: return
+            val file = File(logDir(context), FILE_NAME)
+            if (file.length() > MAX_BYTES) rotate(context, file)
+            val out = ensureWriter(context) ?: return
+            lines.forEach { out.appendLine(it) }
+            out.flush()
         }
-        val file = File(logDir(context), FILE_NAME)
-        if (file.length() > MAX_BYTES) rotate(context, file)
-        val out = ensureWriter(context) ?: return
-        lines.forEach { out.appendLine(it) }
-        out.flush()
+    }
+
+    /** 取出并清空待落盘队列；空则返回 null。 */
+    private fun drainPending(): List<String>? = synchronized(lock) {
+        if (pending.isEmpty()) return@synchronized null
+        val lines = pending.toList()
+        pending.clear()
+        lines
     }
 
     private fun rotate(context: Context, file: File) {
@@ -238,9 +255,11 @@ object DiagnosticLog {
 
     private fun flushPendingSync(context: Context?, text: String) {
         if (context == null) return
-        val out = ensureWriter(context) ?: return
-        out.append(text)
-        out.flush()
+        synchronized(ioLock) {
+            val out = ensureWriter(context) ?: return
+            out.append(text)
+            out.flush()
+        }
     }
 
     private fun installCrashHandler() {

@@ -99,6 +99,28 @@ class ReaderLogicTest {
         assertEquals(middleZoneRect(1000f, 1000f, 0f).left, 1000f * 0.05f, 0.001f)
     }
 
+    /**
+     * 底边翻页条恒为「下一页」，且与 x 无关。调用方靠 [isBottomPagingStrip] 在 RTL 下把它
+     * 单独摘出来，否则会走左右热区的 rtl 映射，被翻成上一页。
+     */
+    @Test
+    fun `bottom paging strip is detected regardless of x`() {
+        val width = 1000f
+        val height = 2000f
+        val ratio = 0.3f
+        val stripY = height * 0.7f + 1f
+
+        assertTrue(isBottomPagingStrip(stripY, height, ratio))
+        // 与 x 无关：左中右都算底边条
+        assertEquals(TapZone.NEXT, tapZoneOf(10f, width, ratio, y = stripY, heightPx = height))
+        assertEquals(TapZone.NEXT, tapZoneOf(500f, width, ratio, y = stripY, heightPx = height))
+        assertEquals(TapZone.NEXT, tapZoneOf(990f, width, ratio, y = stripY, heightPx = height))
+
+        // 条外不是；尺寸未知时也不认（与 tapZoneOf 的 y/heightPx 缺省语义一致）
+        assertFalse(isBottomPagingStrip(height * 0.7f, height, ratio))
+        assertFalse(isBottomPagingStrip(stripY, 0f, ratio))
+    }
+
     @Test
     fun `double tap needs both time and position within limits`() {
         val timeout = 300L

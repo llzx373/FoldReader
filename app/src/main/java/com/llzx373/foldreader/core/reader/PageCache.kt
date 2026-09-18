@@ -59,29 +59,39 @@ internal fun LayoutConfig.diskKeyString(): String = listOf(
  */
 class FilePageDiskCache(private val dir: File) : PageDiskCache {
 
-    override fun load(key: PaginatorKey, charCount: Long): LongArray? {
+    /**
+     * 同一份边界文件的读写必须串行：`save` 走「写临时文件 + rename」，`append` 就地追加，
+     * `load` 直接读，而 [Paginator] 会在退出阅读器、后台全书分页、改版式等多处并发落盘。
+     * 不加锁时两个线程会同时写同一个 `.tmp`、或与 rename 交错，把边界文件写坏
+     * （下次打开头部校验不过只能丢掉缓存重排）。
+     */
+    private val ioLock = Any()
+
+    override fun load(key: PaginatorKey, charCount: Long): LongArray? = synchronized(ioLock) {
         val file = fileFor(key)
-        if (!file.isFile) return null
+        if (!file.isFile) return@synchronized null
         val result = runCatching { read(file, key, charCount) }.getOrNull()
         if (result == null) file.delete()
-        return result
+        result
     }
 
     override fun save(key: PaginatorKey, charCount: Long, bounds: LongArray) {
         if (bounds.isEmpty() || bounds[0] != 0L) return
-        dir.mkdirs()
-        val tmp = File(dir, fileFor(key).name + ".tmp")
-        runCatching {
-            DataOutputStream(tmp.outputStream().buffered()).use { out ->
-                out.write(headerBytes(key))
-                out.writeLong(charCount)
-                out.writeInt(bounds.size)
-                bounds.forEach { out.writeLong(it) }
-            }
-            val target = fileFor(key)
-            target.delete()
-            tmp.renameTo(target)
-        }.onFailure { tmp.delete() }
+        synchronized(ioLock) {
+            dir.mkdirs()
+            val tmp = File(dir, fileFor(key).name + ".tmp")
+            runCatching {
+                DataOutputStream(tmp.outputStream().buffered()).use { out ->
+                    out.write(headerBytes(key))
+                    out.writeLong(charCount)
+                    out.writeInt(bounds.size)
+                    bounds.forEach { out.writeLong(it) }
+                }
+                val target = fileFor(key)
+                target.delete()
+                tmp.renameTo(target)
+            }.onFailure { tmp.delete() }
+        }
     }
 
     override fun append(
@@ -92,36 +102,40 @@ class FilePageDiskCache(private val dir: File) : PageDiskCache {
     ): Boolean {
         if (allBounds.isEmpty() || allBounds[0] != 0L) return false
         if (persistedCount <= 0 || persistedCount > allBounds.size) return false
-        val file = fileFor(key)
-        if (!file.isFile) return false
-        val header = headerBytes(key)
-        val countOffset = header.size.toLong() + Long.SIZE_BYTES
-        val dataOffset = countOffset + Int.SIZE_BYTES
-        return runCatching {
-            RandomAccessFile(file, "rw").use { raf ->
-                if (raf.length() < dataOffset) return@use false
-                val onDiskHeader = ByteArray(header.size)
-                raf.seek(0)
-                raf.readFully(onDiskHeader)
-                if (!onDiskHeader.contentEquals(header)) return@use false
-                if (raf.readLong() != charCount) return@use false
-                if (raf.readInt() != persistedCount) return@use false
-                // 校验通过且没有新增：磁盘即最新，无需写
-                if (persistedCount == allBounds.size) return@use true
-                // 顺序讲究：先写数据、再更新条数、最后截断。
-                // 中途崩溃时文件里仍是旧条数，读取方只认条数内的字节，内容依旧自洽。
-                raf.seek(dataOffset + persistedCount * Long.SIZE_BYTES)
-                for (i in persistedCount until allBounds.size) raf.writeLong(allBounds[i])
-                raf.seek(countOffset)
-                raf.writeInt(allBounds.size)
-                raf.setLength(dataOffset + allBounds.size * Long.SIZE_BYTES)
-                true
-            }
-        }.getOrElse { false }
+        synchronized(ioLock) {
+            val file = fileFor(key)
+            if (!file.isFile) return false
+            val header = headerBytes(key)
+            val countOffset = header.size.toLong() + Long.SIZE_BYTES
+            val dataOffset = countOffset + Int.SIZE_BYTES
+            return runCatching {
+                RandomAccessFile(file, "rw").use { raf ->
+                    if (raf.length() < dataOffset) return@use false
+                    val onDiskHeader = ByteArray(header.size)
+                    raf.seek(0)
+                    raf.readFully(onDiskHeader)
+                    if (!onDiskHeader.contentEquals(header)) return@use false
+                    if (raf.readLong() != charCount) return@use false
+                    if (raf.readInt() != persistedCount) return@use false
+                    // 校验通过且没有新增：磁盘即最新，无需写
+                    if (persistedCount == allBounds.size) return@use true
+                    // 顺序讲究：先写数据、再更新条数、最后截断。
+                    // 中途崩溃时文件里仍是旧条数，读取方只认条数内的字节，内容依旧自洽。
+                    raf.seek(dataOffset + persistedCount * Long.SIZE_BYTES)
+                    for (i in persistedCount until allBounds.size) raf.writeLong(allBounds[i])
+                    raf.seek(countOffset)
+                    raf.writeInt(allBounds.size)
+                    raf.setLength(dataOffset + allBounds.size * Long.SIZE_BYTES)
+                    true
+                }
+            }.getOrElse { false }
+        }
     }
 
     override fun deleteForBook(bookId: Long) {
-        dir.listFiles { f -> f.isFile && boundsBookIdOf(f.name) == bookId }?.forEach { it.delete() }
+        synchronized(ioLock) {
+            dir.listFiles { f -> f.isFile && boundsBookIdOf(f.name) == bookId }?.forEach { it.delete() }
+        }
     }
 
     /** 头部字节：魔数 / 版本 / 完整 key（书号、几何、开孔规避、排版参数）。 */

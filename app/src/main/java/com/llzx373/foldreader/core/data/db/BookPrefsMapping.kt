@@ -3,13 +3,10 @@ package com.llzx373.foldreader.core.data.db
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.ComicDirection
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
-import com.llzx373.foldreader.core.data.settings.DarkThemeOption
-import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
-import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
 
 fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
@@ -23,20 +20,8 @@ fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
     themeId = themeId.name,
     customBackgroundArgb = customBackgroundArgb,
     customTextArgb = customTextArgb,
-    darkThemeOption = darkThemeOption.name,
     fontKey = fontKey,
-    dualPageMode = dualPageMode.name,
     pageTurnMode = pageTurnMode.name,
-    pageTurnHotspotRatio = pageTurnHotspotRatio,
-    middleTapAction = middleTapAction.name,
-    middleDoubleTapAction = middleDoubleTapAction.name,
-    volumeKeyPagingEnabled = volumeKeyPagingEnabled,
-    keepScreenOn = keepScreenOn,
-    showChapterTitle = showChapterTitle,
-    showPageProgress = showPageProgress,
-    showPageNumber = showPageNumber,
-    showBattery = showBattery,
-    showTime = showTime,
     readerBrightness = readerBrightness,
     autoPageEnabled = autoPageEnabled,
     autoPageMode = autoPageMode.name,
@@ -45,14 +30,16 @@ fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
     panelScreenOff = panelScreenOff,
     autoIndentEnabled = autoIndentEnabled,
     comicDirection = comicDirection.name,
-    comicDualPageCoverAlone = comicDualPageCoverAlone,
-    comicSpreadAutoDetect = comicSpreadAutoDetect,
     comicFitMode = comicFitMode.name,
-    comicScrollGapDp = comicScrollGapDp,
     pdfReadingMode = pdfReadingMode?.name,
 )
 
-/** 每书字段覆盖全局值，非书籍维度字段（手势开关、宽屏双页、书架与规则等）沿用 [global]。 */
+/**
+ * 每书字段覆盖全局值；其余（手势/显示开关、宽屏双页、书架与规则等）沿用 [global]。
+ *
+ * 这里只该出现「会随书独立演化」的字段——交互开关与显示项一律走全局直通，
+ * 否则设置页改完对已打开过的书不生效（每条书列都会盖住全局）。
+ */
 fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPreferences =
     global.copy(
         fontSizeSp = fontSizeSp,
@@ -64,20 +51,8 @@ fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPre
         themeId = enumOrDefault(themeId, ReadingTheme.GREEN),
         customBackgroundArgb = customBackgroundArgb,
         customTextArgb = customTextArgb,
-        darkThemeOption = enumOrDefault(darkThemeOption, DarkThemeOption.SYSTEM),
         fontKey = fontKey,
-        dualPageMode = enumOrDefault(dualPageMode, DualPageMode.AUTO),
         pageTurnMode = enumOrDefault(pageTurnMode, PageTurnMode.COVER),
-        pageTurnHotspotRatio = pageTurnHotspotRatio,
-        middleTapAction = enumOrDefault(middleTapAction, TapAction.TOGGLE_MENU),
-        middleDoubleTapAction = enumOrDefault(middleDoubleTapAction, TapAction.TOGGLE_ZOOM),
-        volumeKeyPagingEnabled = volumeKeyPagingEnabled,
-        keepScreenOn = keepScreenOn,
-        showChapterTitle = showChapterTitle,
-        showPageProgress = showPageProgress,
-        showPageNumber = showPageNumber,
-        showBattery = showBattery,
-        showTime = showTime,
         readerBrightness = readerBrightness,
         autoPageEnabled = autoPageEnabled,
         autoPageMode = enumOrDefault(autoPageMode, AutoPageMode.INTERVAL),
@@ -86,9 +61,6 @@ fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPre
         panelScreenOff = panelScreenOff,
         autoIndentEnabled = autoIndentEnabled,
         comicDirection = enumOrDefault(comicDirection, ComicDirection.LTR),
-        comicDualPageCoverAlone = comicDualPageCoverAlone,
-        comicSpreadAutoDetect = comicSpreadAutoDetect,
         comicFitMode = enumOrDefault(comicFitMode, ComicFitMode.FIT_PAGE),
-        comicScrollGapDp = comicScrollGapDp,
         pdfReadingMode = pdfReadingMode?.let { enumOrDefault(it, PdfReadingMode.PAGED) },
     )

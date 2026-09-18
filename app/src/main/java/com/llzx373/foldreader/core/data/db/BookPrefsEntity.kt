@@ -10,6 +10,18 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * 每书阅读偏好。
+ *
+ * 只有**会随书独立演化**的项才在这里：正文排版（字号/行距/边距/行长/段距/字距/字体/首行缩进）、
+ * 主题配色、翻页方式、阅读器内菜单里的项（亮度/自动翻页/桌面面板熄屏）、PDF 阅读模式，
+ * 以及漫画的方向与适应模式。
+ *
+ * 交互开关与显示项（双页模式、热区比例、中间单击/双击、音量键、常亮、页眉页脚显示、
+ * 封面单独/跨页识别/滚动页间距）刻意**不在这里**：它们是应用级偏好，由全局
+ * [com.llzx373.foldreader.core.data.settings.ReadingPreferences] 直通——否则设置页改完
+ * 对已打开过的书毫无作用。
+ */
 @Entity(
     tableName = "book_prefs",
     foreignKeys = [
@@ -32,21 +44,8 @@ data class BookPrefsEntity(
     val themeId: String = "GREEN",
     val customBackgroundArgb: Int? = null,
     val customTextArgb: Int? = null,
-    val darkThemeOption: String = "SYSTEM",
     val fontKey: String = "default",
-    val dualPageMode: String = "AUTO",
     val pageTurnMode: String = "COVER",
-    val pageTurnHotspotRatio: Float = 0.3f,
-    /** 中间点击区的单击 / 双击动作（[com.llzx373.foldreader.core.data.settings.TapAction]）。 */
-    @ColumnInfo(defaultValue = "TOGGLE_MENU") val middleTapAction: String = "TOGGLE_MENU",
-    @ColumnInfo(defaultValue = "TOGGLE_ZOOM") val middleDoubleTapAction: String = "TOGGLE_ZOOM",
-    val volumeKeyPagingEnabled: Boolean = false,
-    val keepScreenOn: Boolean = false,
-    val showChapterTitle: Boolean = true,
-    val showPageProgress: Boolean = true,
-    @ColumnInfo(defaultValue = "1") val showPageNumber: Boolean = true,
-    val showBattery: Boolean = true,
-    val showTime: Boolean = true,
     val readerBrightness: Float = -1f,
     val autoPageEnabled: Boolean = false,
     val autoPageMode: String = "INTERVAL",
@@ -56,10 +55,7 @@ data class BookPrefsEntity(
     @ColumnInfo(defaultValue = "1") val autoIndentEnabled: Boolean = true,
     /** 以下为漫画专用。 */
     val comicDirection: String = "LTR",
-    @ColumnInfo(defaultValue = "1") val comicDualPageCoverAlone: Boolean = true,
-    @ColumnInfo(defaultValue = "1") val comicSpreadAutoDetect: Boolean = true,
     val comicFitMode: String = "FIT_PAGE",
-    val comicScrollGapDp: Int = 0,
     /** PDF 的阅读模式（PAGED/TEXT）；null = 未由用户定过，按文档是否有正文决定。 */
     val pdfReadingMode: String? = null,
 )
@@ -81,6 +77,12 @@ interface BookPrefsDao {
 
     @Query("UPDATE book_prefs SET pageTurnMode = :mode")
     suspend fun applyGlobalPageTurnMode(mode: String)
+
+    @Query("UPDATE book_prefs SET comicFitMode = :mode")
+    suspend fun applyGlobalComicFitMode(mode: String)
+
+    @Query("UPDATE book_prefs SET comicDirection = :direction")
+    suspend fun applyGlobalComicDirection(direction: String)
 
     @Query("DELETE FROM book_prefs WHERE bookId = :bookId")
     suspend fun delete(bookId: Long)

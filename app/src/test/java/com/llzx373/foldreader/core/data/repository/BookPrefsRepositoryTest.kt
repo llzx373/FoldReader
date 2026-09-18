@@ -103,13 +103,18 @@ class BookPrefsRepositoryTest {
     @Test
     fun `观察合并每书字段与全局字段`() = runBlocking {
         val dao = FakeBookPrefsDao()
-        dao.upsert(BookPrefsEntity(bookId = 1, fontSizeSp = 30f, keepScreenOn = true))
+        dao.upsert(BookPrefsEntity(bookId = 1, fontSizeSp = 30f, pageTurnMode = "NONE"))
         val repository = BookPrefsRepository(dao, FakeSettingsRepository(global))
 
         val merged = repository.observe(bookId = 1).first()
 
         assertEquals(30f, merged.fontSizeSp, 0.0001f)
+        assertEquals("NONE", merged.pageTurnMode.name)
+        // 交互开关与显示项不在每书表里：直接取全局（设置页改完对所有书立即生效）
         assertTrue(merged.keepScreenOn)
+        assertTrue(merged.volumeKeyPagingEnabled)
+        assertEquals(0.5f, merged.pageTurnHotspotRatio, 0.0001f)
+        assertEquals(global.showPageNumber, merged.showPageNumber)
         assertEquals(global.wideScreenDualPage, merged.wideScreenDualPage)
         assertEquals(global.brightnessGestureEnabled, merged.brightnessGestureEnabled)
         assertEquals(global.swipeGestureEnabled, merged.swipeGestureEnabled)
@@ -126,10 +131,11 @@ class BookPrefsRepositoryTest {
     }
 
     @Test
-    fun `每书字段映射往返一致`() = runBlocking {
+    fun `每书字段映射往返一致，交互项回落传入的全局值`() = runBlocking {
         val entity = global.toBookPrefsEntity(bookId = 7)
         val roundTripped = entity.toReadingPreferences(ReadingPreferences())
 
+        // 会随书独立演化的字段：往返回这一行
         assertEquals(global.fontSizeSp, roundTripped.fontSizeSp, 0.0001f)
         assertEquals(global.lineSpacingMultiplier, roundTripped.lineSpacingMultiplier, 0.0001f)
         assertEquals(global.marginLevel, roundTripped.marginLevel)
@@ -139,24 +145,38 @@ class BookPrefsRepositoryTest {
         assertEquals(global.themeId, roundTripped.themeId)
         assertEquals(global.customBackgroundArgb, roundTripped.customBackgroundArgb)
         assertEquals(global.customTextArgb, roundTripped.customTextArgb)
-        assertEquals(global.darkThemeOption, roundTripped.darkThemeOption)
         assertEquals(global.fontKey, roundTripped.fontKey)
-        assertEquals(global.dualPageMode, roundTripped.dualPageMode)
         assertEquals(global.pageTurnMode, roundTripped.pageTurnMode)
-        assertEquals(global.pageTurnHotspotRatio, roundTripped.pageTurnHotspotRatio, 0.0001f)
-        assertEquals(global.volumeKeyPagingEnabled, roundTripped.volumeKeyPagingEnabled)
-        assertEquals(global.keepScreenOn, roundTripped.keepScreenOn)
-        assertEquals(global.showChapterTitle, roundTripped.showChapterTitle)
-        assertEquals(global.showPageProgress, roundTripped.showPageProgress)
-        assertEquals(global.showPageNumber, roundTripped.showPageNumber)
-        assertEquals(global.showBattery, roundTripped.showBattery)
-        assertEquals(global.showTime, roundTripped.showTime)
         assertEquals(global.readerBrightness, roundTripped.readerBrightness, 0.0001f)
         assertEquals(global.autoPageEnabled, roundTripped.autoPageEnabled)
         assertEquals(global.autoPageMode, roundTripped.autoPageMode)
         assertEquals(global.autoPageIntervalSec, roundTripped.autoPageIntervalSec)
         assertEquals(global.autoPageSpeedPx, roundTripped.autoPageSpeedPx, 0.0001f)
         assertEquals(global.panelScreenOff, roundTripped.panelScreenOff)
+        assertEquals(global.comicDirection, roundTripped.comicDirection)
+        assertEquals(global.comicFitMode, roundTripped.comicFitMode)
+        assertEquals(global.pdfReadingMode, roundTripped.pdfReadingMode)
+
+        // 交互开关与显示项不进每书表：取的是传进来的全局值（与那一行无关）
+        val otherGlobal = ReadingPreferences(
+            dualPageMode = DualPageMode.AUTO,
+            darkThemeOption = DarkThemeOption.LIGHT,
+            pageTurnHotspotRatio = 0.15f,
+            volumeKeyPagingEnabled = false,
+            keepScreenOn = false,
+            showPageNumber = false,
+            comicScrollGapDp = 24,
+        )
+        val fromOtherGlobal = entity.toReadingPreferences(otherGlobal)
+        assertEquals(otherGlobal.dualPageMode, fromOtherGlobal.dualPageMode)
+        assertEquals(otherGlobal.darkThemeOption, fromOtherGlobal.darkThemeOption)
+        assertEquals(otherGlobal.pageTurnHotspotRatio, fromOtherGlobal.pageTurnHotspotRatio, 0.0001f)
+        assertEquals(otherGlobal.volumeKeyPagingEnabled, fromOtherGlobal.volumeKeyPagingEnabled)
+        assertEquals(otherGlobal.keepScreenOn, fromOtherGlobal.keepScreenOn)
+        assertEquals(otherGlobal.showPageNumber, fromOtherGlobal.showPageNumber)
+        assertEquals(otherGlobal.comicScrollGapDp, fromOtherGlobal.comicScrollGapDp)
+        // 同一行里会随书演化的字段仍然来自这一行
+        assertEquals(global.fontSizeSp, fromOtherGlobal.fontSizeSp, 0.0001f)
     }
 
     @Test
@@ -186,6 +206,22 @@ class BookPrefsRepositoryTest {
         }
     }
 
+    @Test
+    fun `全局漫画适应模式与方向批量应用覆盖所有书`() = runBlocking {
+        val dao = FakeBookPrefsDao()
+        dao.upsert(BookPrefsEntity(bookId = 1, comicFitMode = "FIT_PAGE", comicDirection = "LTR"))
+        dao.upsert(BookPrefsEntity(bookId = 2, comicFitMode = "FIT_HEIGHT", comicDirection = "LTR"))
+        val repository = BookPrefsRepository(dao, FakeSettingsRepository(global))
+
+        repository.applyGlobalComicFitMode(ComicFitMode.FIT_WIDTH)
+        repository.applyGlobalComicDirection(ComicDirection.RTL)
+
+        dao.rows.forEach { row ->
+            assertEquals("FIT_WIDTH", row.comicFitMode)
+            assertEquals("RTL", row.comicDirection)
+        }
+    }
+
     private class FakeBookPrefsDao : BookPrefsDao {
         val rows = mutableListOf<BookPrefsEntity>()
         override fun observe(bookId: Long): Flow<BookPrefsEntity?> =
@@ -199,6 +235,16 @@ class BookPrefsRepositoryTest {
         override suspend fun applyGlobalPageTurnMode(mode: String) {
             rows.replaceAll {
                 it.copy(pageTurnMode = mode)
+            }
+        }
+        override suspend fun applyGlobalComicFitMode(mode: String) {
+            rows.replaceAll {
+                it.copy(comicFitMode = mode)
+            }
+        }
+        override suspend fun applyGlobalComicDirection(direction: String) {
+            rows.replaceAll {
+                it.copy(comicDirection = direction)
             }
         }
         override suspend fun delete(bookId: Long) {

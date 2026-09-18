@@ -44,6 +44,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
 import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
+import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.reader.dayStartMs
 import com.llzx373.foldreader.feature.reader.AutoPageClock
 import com.llzx373.foldreader.feature.reader.AutoPageTurnRequests
@@ -113,6 +114,8 @@ class ComicReaderViewModel(
     private val bookId: Long,
     private val bookshelfRepository: BookshelfRepository,
     private val bookPrefsRepository: BookPrefsRepository,
+    /** 应用级偏好（常亮/跨页配对/滚动页间距）直写全局：这些项不随书独立演化。 */
+    private val settingsRepository: SettingsRepository,
     /** 打开内容来源时用；漫画走容器，PDF 走沙箱文档。 */
     private val openSource: suspend (BookEntity, String?) -> PagedImageSource,
     private val extractionStore: ComicExtractionStore,
@@ -156,6 +159,15 @@ class ComicReaderViewModel(
     private val decodeMutex = Mutex()
     private val thumbnailLoading = mutableSetOf<Int>()
     private val thumbnailOrder = ArrayDeque<Int>()
+
+    /**
+     * 缩略图的登记与淘汰锁。
+     *
+     * 网格快速滚动时每个进入视口的条目都会起一个 IO 协程回填，`thumbnailLoading` /
+     * `thumbnailOrder` 都是普通集合：并发 `addLast` 会撞坏 ArrayDeque（`removeFirst` 抛
+     * NoSuchElementException / 扩容期下标越界），所以整段登记 + 写表 + 淘汰都放进这把锁。
+     */
+    private val thumbnailLock = Any()
 
     private val _spreadIndex = MutableStateFlow(ComicSpreadIndex.EMPTY)
     private val _features = MutableStateFlow(PagedReaderFeatures())
@@ -602,9 +614,12 @@ class ComicReaderViewModel(
         if (widthPx == targetWidthPx && heightPx == targetHeightPx) return
         targetWidthPx = widthPx
         targetHeightPx = heightPx
-        // 目标尺寸变了，已解码的页要么太小要么过大：整表清掉重来
-        clearImages()
-        decodeVisiblePages()
+        // 目标尺寸变了，已解码的页要么太小要么过大：整表清掉重来。
+        // 清表与解码回填共用同一把锁，否则两边会互相覆盖、字节计数也会漂
+        viewModelScope.launch {
+            decodeMutex.withLock { clearImages() }
+            decodeVisiblePages()
+        }
     }
 
     /** 单页/双页由界面按折叠姿态与偏好判定后回填。 */
@@ -646,11 +661,27 @@ class ComicReaderViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val image = runCatching { decode(index) }.getOrNull()
             if (image == null) {
-                failedPages[index] = true
+                markPageFailed(index)
                 return@launch
             }
-            failedPages.remove(index)
+            clearPageFailed(index)
             putImage(index, image)
+        }
+    }
+
+    /**
+     * 解码失败标记 / 清除。滚动模式下每个可见条目一个 IO 协程、翻页预取又是另一条，
+     * 它们会同时改这张快照表，所以与 [putImage] 共用 [decodeMutex] 串行化。
+     */
+    private suspend fun markPageFailed(index: Int) {
+        decodeMutex.withLock {
+            Snapshot.withMutableSnapshot { failedPages[index] = true }
+        }
+    }
+
+    private suspend fun clearPageFailed(index: Int) {
+        decodeMutex.withLock {
+            Snapshot.withMutableSnapshot { failedPages.remove(index) }
         }
     }
 
@@ -673,14 +704,20 @@ class ComicReaderViewModel(
      */
     fun ensureThumbnail(index: Int) {
         if (index !in 0 until _uiState.value.pageCount) return
-        if (thumbnails.containsKey(index)) return
-        if (thumbnailLoading.contains(index)) return
-        thumbnailLoading += index
+        synchronized(thumbnailLock) {
+            if (thumbnails.containsKey(index)) return
+            if (!thumbnailLoading.add(index)) return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val image = runCatching { loadThumbnail(index) }.getOrNull()
-            thumbnailLoading -= index
-            if (image == null) return@launch
-            Snapshot.withMutableSnapshot { putThumbnail(index, image) }
+            synchronized(thumbnailLock) {
+                // 写回与摘除登记必须在同一临界区：否则「已摘登记但还没写表」的窗口里
+                // 重组会再起一个协程，同一个 index 被写两次，淘汰队列随之错位
+                thumbnailLoading.remove(index)
+                if (image == null) return@launch
+                // 从 IO 线程改 SnapshotStateMap：走可变快照，界面侧才会被正确通知
+                Snapshot.withMutableSnapshot { putThumbnail(index, image) }
+            }
         }
     }
 
@@ -708,7 +745,7 @@ class ComicReaderViewModel(
         return File(extractionStore.thumbsDir(hash), "$index.jpg")
     }
 
-    /** 缩略图表按插入序限量淘汰：网格来回滚不该把几百张小图全留在内存里。 */
+    /** 缩略图表按插入序限量淘汰：网格来回滚不该把几百张小图全留在内存里。调用方须持有 [thumbnailLock]。 */
     private fun putThumbnail(index: Int, image: ImageBitmap) {
         if (thumbnails.put(index, image) == null) thumbnailOrder.addLast(index)
         while (thumbnailOrder.size > MAX_THUMBNAILS) {
@@ -780,8 +817,9 @@ class ComicReaderViewModel(
         }
     }
 
+    /** 屏幕常亮是应用级偏好（设置页也有）：写全局，否则设置页改了这里不生效。 */
     fun setKeepScreenOn(enabled: Boolean) {
-        viewModelScope.launch { bookPrefsRepository.update(bookId) { it.copy(keepScreenOn = enabled) } }
+        viewModelScope.launch { settingsRepository.setKeepScreenOn(enabled) }
     }
 
     fun setTheme(theme: ReadingTheme) {
@@ -802,16 +840,13 @@ class ComicReaderViewModel(
         }
     }
 
+    /** 跨页配对开关是应用级偏好：写全局。改完要重建跨页索引。 */
     fun setComicDualPageCoverAlone(enabled: Boolean) {
-        viewModelScope.launch {
-            bookPrefsRepository.update(bookId) { it.copy(comicDualPageCoverAlone = enabled) }
-        }
+        viewModelScope.launch { settingsRepository.setComicDualPageCoverAlone(enabled) }
     }
 
     fun setComicSpreadAutoDetect(enabled: Boolean) {
-        viewModelScope.launch {
-            bookPrefsRepository.update(bookId) { it.copy(comicSpreadAutoDetect = enabled) }
-        }
+        viewModelScope.launch { settingsRepository.setComicSpreadAutoDetect(enabled) }
     }
 
     fun setComicFitMode(mode: ComicFitMode) {
@@ -820,10 +855,9 @@ class ComicReaderViewModel(
         }
     }
 
+    /** 滚动页间距是应用级偏好：写全局。 */
     fun setComicScrollGapDp(gapDp: Int) {
-        viewModelScope.launch {
-            bookPrefsRepository.update(bookId) { it.copy(comicScrollGapDp = gapDp.coerceIn(0, 64)) }
-        }
+        viewModelScope.launch { settingsRepository.setComicScrollGapDp(gapDp.coerceIn(0, 64)) }
     }
 
     // ---- 解码与缓存 ----
@@ -849,10 +883,10 @@ class ComicReaderViewModel(
                 if (images.containsKey(index)) continue
                 val image = runCatching { decode(index) }.getOrNull()
                 if (image == null) {
-                    failedPages[index] = true
+                    markPageFailed(index)
                     continue
                 }
-                failedPages.remove(index)
+                clearPageFailed(index)
                 putImage(index, image)
             }
         }
@@ -888,14 +922,27 @@ class ComicReaderViewModel(
         images.remove(victim)?.let { imageBytes -= it.byteCount }
     }
 
-    /** 系统内存吃紧时由界面调用。 */
-    fun clearImageBitmaps() = clearImages()
+    /**
+     * 系统内存吃紧时由界面调用：丢掉已解码页，再把可见页解回来。
+     *
+     * 只清不补的话当前页会一直停在转圈占位上——翻页与列表都不会替你重来一次。
+     */
+    fun clearImageBitmaps() {
+        // 与 putImage 共用同一把锁：否则清表与并发解码回填会互相覆盖，字节计数也会漂
+        viewModelScope.launch {
+            decodeMutex.withLock { clearImages() }
+            decodeVisiblePages()
+        }
+    }
 
+    /** 清空已解码页表与失败标记。调用方须持有 [decodeMutex]。 */
     private fun clearImages() {
         // 不 recycle：位图可能正被当前帧的绘制持有，回收会直接崩在绘制阶段，
-        // 这里只断开引用让 GC 回收（与 ReaderViewModel 的插图缓存同一策略）
+        // 这里只断开引用让 GC 回收（与 ReaderViewModel 的插图缓存同一策略）。
+        // 失败标记一并清掉：低内存导致的解码失败多是暂时的，留着会让那一页永远显示「无法显示此页」
         Snapshot.withMutableSnapshot {
             images.clear()
+            failedPages.clear()
         }
         imageBytes = 0
     }
@@ -1092,6 +1139,7 @@ class ComicReaderViewModel(
                     bookId = bookId,
                     bookshelfRepository = container.bookshelfRepository,
                     bookPrefsRepository = container.bookPrefsRepository,
+                    settingsRepository = container.settingsRepository,
                     openSource = container::openPagedSource,
                     extractionStore = container.comicExtractionStore,
                     seriesCandidates = container::comicSeriesCandidates,

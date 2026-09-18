@@ -16,6 +16,7 @@ import com.llzx373.foldreader.core.paged.PagedSourcePasswordRequired
 import com.llzx373.foldreader.core.paged.PagedTextSelection
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.roundToInt
 
 /**
  * PDF 的页位图来源。
@@ -40,15 +41,21 @@ class PdfPagedSource private constructor(
     private val renderLock = Mutex()
 
     /**
-     * 每页的点尺寸（宽 to 高）。宽高比探测与页内选字都要它，缓存一份省掉重复 IPC。
+     * 每页的点尺寸（宽 to 高）。宽高比探测、渲染尺寸、页内选字都要它，缓存一份省掉重复 IPC。
      */
     private var pageSizesPt: Array<Pair<Float, Float>>? = null
 
-    private suspend fun pageSizes(): Array<Pair<Float, Float>>? {
-        pageSizesPt?.let { return it }
-        if (pageCount == 0) return null
+    /**
+     * 尺寸缓存的锁。这个类的方法都会被并发调用（预取、缩略图、选字），
+     * 不加锁时首个缓存为空，多路会各自发一次全量 `getPageInfos` 并互相覆盖。
+     */
+    private val pageSizesLock = Mutex()
+
+    private suspend fun pageSizes(): Array<Pair<Float, Float>>? = pageSizesLock.withLock {
+        pageSizesPt?.let { return@withLock it }
+        if (pageCount == 0) return@withLock null
         val infos = runCatching { document.getPageInfos(0 until pageCount) }.getOrNull()
-            ?: return null
+            ?: return@withLock null
         val sizes = Array(pageCount) { 0f to 0f }
         for (info in infos) {
             if (info.pageNum in sizes.indices) {
@@ -56,7 +63,7 @@ class PdfPagedSource private constructor(
             }
         }
         pageSizesPt = sizes
-        return sizes
+        sizes
     }
 
     /**
@@ -127,7 +134,7 @@ class PdfPagedSource private constructor(
 
     private suspend fun render(index: Int, width: Int, height: Int): Bitmap? {
         if (index !in 0 until pageCount) return null
-        val size = Size(width.coerceAtLeast(1), height.coerceAtLeast(1))
+        val size = renderSize(index, width, height)
         return renderLock.withLock {
             runCatching {
                 document.getPageBitmapSource(index).use { source ->
@@ -135,6 +142,26 @@ class PdfPagedSource private constructor(
                 }
             }.getOrNull()
         }
+    }
+
+    /**
+     * 渲染尺寸必须按页面自身宽高比缩放进请求的槽位。
+     *
+     * 沙箱侧是按 `scaledPageSizePx` **独立缩放 x/y** 的（`RenderingUtils.getTransformationMatrix`），
+     * 传进去什么尺寸页面就被拉伸成什么尺寸。而阅读器给的是「单页可用槽位」（窗口尺寸，
+     * 与页面比例无关），直接传会两错并犯：页面被拉变形，且位图尺寸恒等于槽位，
+     * 于是四种适应模式在绘制端全塌成同一档——点哪个都不变大变小。
+     */
+    private suspend fun renderSize(index: Int, width: Int, height: Int): Size {
+        val fallback = Size(width.coerceAtLeast(1), height.coerceAtLeast(1))
+        val (pageW, pageH) = pageSizes()?.getOrNull(index) ?: return fallback
+        if (pageW <= 0f || pageH <= 0f) return fallback
+        val scale = minOf(width / pageW, height / pageH)
+        if (scale <= 0f) return fallback
+        return Size(
+            (pageW * scale).roundToInt().coerceAtLeast(1),
+            (pageH * scale).roundToInt().coerceAtLeast(1),
+        )
     }
 
     override fun close() {

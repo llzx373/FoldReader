@@ -110,7 +110,11 @@ class Paginator(
         val target = offset.coerceIn(seedOrigin, content.charCount)
         var page = getOrPaginate(boundAtOrBefore(target))
         while (page.charEnd <= target && page.charEnd < content.charCount) {
-            page = advance(page.charEnd)
+            val next = advance(page.charEnd)
+            // 排不出内容的空页（charEnd 没前进）会让这里原地打转：实时索引还没推到该处时
+            // 确实可能出现。到此为止交给调用方，不能把翻页/滚动卡死。
+            if (next.charEnd <= page.charEnd) break
+            page = next
         }
         return page
     }
@@ -124,7 +128,10 @@ class Paginator(
         if (target <= seedOrigin) return null
         var page = getOrPaginate(boundAtOrBefore(target - 1))
         while (page.charEnd < target) {
-            page = advance(page.charEnd)
+            // 同 pageAt：空页不前进就停，避免死循环
+            val next = advance(page.charEnd)
+            if (next.charEnd <= page.charEnd) break
+            page = next
         }
         return page
     }

@@ -175,6 +175,9 @@ class BackupCodecTest {
             themeId = "NIGHT",
             fontKey = "serif",
             panelScreenOff = true,
+            comicDirection = "RTL",
+            comicFitMode = "FIT_WIDTH",
+            pdfReadingMode = "TEXT",
         )
         val json = BackupCodec(
             sourceBooks,
@@ -213,6 +216,10 @@ class BackupCodecTest {
         assertEquals("NIGHT", prefs.themeId)
         assertEquals("serif", prefs.fontKey)
         assertTrue(prefs.panelScreenOff)
+        // 漫画方向 / 适应模式与 PDF 阅读模式也是每书的：恢复后必须还在
+        assertEquals("RTL", prefs.comicDirection)
+        assertEquals("FIT_WIDTH", prefs.comicFitMode)
+        assertEquals("TEXT", prefs.pdfReadingMode)
 
         assertEquals(200L, targetBooks.bookmarks.single().charOffset)
         assertEquals("选中文本", targetBooks.annotations.single().selectedText)
@@ -595,6 +602,16 @@ class BackupCodecTest {
         override suspend fun applyGlobalPageTurnMode(mode: String) {
             rows.replaceAll {
                 it.copy(pageTurnMode = mode)
+            }
+        }
+        override suspend fun applyGlobalComicFitMode(mode: String) {
+            rows.replaceAll {
+                it.copy(comicFitMode = mode)
+            }
+        }
+        override suspend fun applyGlobalComicDirection(direction: String) {
+            rows.replaceAll {
+                it.copy(comicDirection = direction)
             }
         }
         override suspend fun delete(bookId: Long) {

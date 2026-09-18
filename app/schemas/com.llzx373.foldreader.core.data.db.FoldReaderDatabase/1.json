@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "2547c87660b933339a2d5f0e7308ee9c",
+    "identityHash": "61c678ffa1c87838f81222e5368b6b2d",
     "entities": [
       {
         "tableName": "books",
@@ -733,7 +733,7 @@
       },
       {
         "tableName": "book_prefs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bookId` INTEGER NOT NULL, `fontSizeSp` REAL NOT NULL, `lineSpacingMultiplier` REAL NOT NULL, `marginLevel` INTEGER NOT NULL, `maxLineChars` INTEGER NOT NULL DEFAULT 40, `paragraphSpacingEm` REAL NOT NULL DEFAULT 0.4, `letterSpacingEm` REAL NOT NULL DEFAULT 0.0, `themeId` TEXT NOT NULL, `customBackgroundArgb` INTEGER, `customTextArgb` INTEGER, `darkThemeOption` TEXT NOT NULL, `fontKey` TEXT NOT NULL, `dualPageMode` TEXT NOT NULL, `pageTurnMode` TEXT NOT NULL, `pageTurnHotspotRatio` REAL NOT NULL, `middleTapAction` TEXT NOT NULL DEFAULT 'TOGGLE_MENU', `middleDoubleTapAction` TEXT NOT NULL DEFAULT 'TOGGLE_ZOOM', `volumeKeyPagingEnabled` INTEGER NOT NULL, `keepScreenOn` INTEGER NOT NULL, `showChapterTitle` INTEGER NOT NULL, `showPageProgress` INTEGER NOT NULL, `showPageNumber` INTEGER NOT NULL DEFAULT 1, `showBattery` INTEGER NOT NULL, `showTime` INTEGER NOT NULL, `readerBrightness` REAL NOT NULL, `autoPageEnabled` INTEGER NOT NULL, `autoPageMode` TEXT NOT NULL, `autoPageIntervalSec` INTEGER NOT NULL, `autoPageSpeedPx` REAL NOT NULL, `panelScreenOff` INTEGER NOT NULL, `autoIndentEnabled` INTEGER NOT NULL DEFAULT 1, `comicDirection` TEXT NOT NULL, `comicDualPageCoverAlone` INTEGER NOT NULL DEFAULT 1, `comicSpreadAutoDetect` INTEGER NOT NULL DEFAULT 1, `comicFitMode` TEXT NOT NULL, `comicScrollGapDp` INTEGER NOT NULL, `pdfReadingMode` TEXT, PRIMARY KEY(`bookId`), FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bookId` INTEGER NOT NULL, `fontSizeSp` REAL NOT NULL, `lineSpacingMultiplier` REAL NOT NULL, `marginLevel` INTEGER NOT NULL, `maxLineChars` INTEGER NOT NULL DEFAULT 40, `paragraphSpacingEm` REAL NOT NULL DEFAULT 0.4, `letterSpacingEm` REAL NOT NULL DEFAULT 0.0, `themeId` TEXT NOT NULL, `customBackgroundArgb` INTEGER, `customTextArgb` INTEGER, `fontKey` TEXT NOT NULL, `pageTurnMode` TEXT NOT NULL, `readerBrightness` REAL NOT NULL, `autoPageEnabled` INTEGER NOT NULL, `autoPageMode` TEXT NOT NULL, `autoPageIntervalSec` INTEGER NOT NULL, `autoPageSpeedPx` REAL NOT NULL, `panelScreenOff` INTEGER NOT NULL, `autoIndentEnabled` INTEGER NOT NULL DEFAULT 1, `comicDirection` TEXT NOT NULL, `comicFitMode` TEXT NOT NULL, `pdfReadingMode` TEXT, PRIMARY KEY(`bookId`), FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "bookId",
@@ -797,20 +797,8 @@
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "darkThemeOption",
-            "columnName": "darkThemeOption",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
             "fieldPath": "fontKey",
             "columnName": "fontKey",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "dualPageMode",
-            "columnName": "dualPageMode",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -818,69 +806,6 @@
             "fieldPath": "pageTurnMode",
             "columnName": "pageTurnMode",
             "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "pageTurnHotspotRatio",
-            "columnName": "pageTurnHotspotRatio",
-            "affinity": "REAL",
-            "notNull": true
-          },
-          {
-            "fieldPath": "middleTapAction",
-            "columnName": "middleTapAction",
-            "affinity": "TEXT",
-            "notNull": true,
-            "defaultValue": "'TOGGLE_MENU'"
-          },
-          {
-            "fieldPath": "middleDoubleTapAction",
-            "columnName": "middleDoubleTapAction",
-            "affinity": "TEXT",
-            "notNull": true,
-            "defaultValue": "'TOGGLE_ZOOM'"
-          },
-          {
-            "fieldPath": "volumeKeyPagingEnabled",
-            "columnName": "volumeKeyPagingEnabled",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "keepScreenOn",
-            "columnName": "keepScreenOn",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "showChapterTitle",
-            "columnName": "showChapterTitle",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "showPageProgress",
-            "columnName": "showPageProgress",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "showPageNumber",
-            "columnName": "showPageNumber",
-            "affinity": "INTEGER",
-            "notNull": true,
-            "defaultValue": "1"
-          },
-          {
-            "fieldPath": "showBattery",
-            "columnName": "showBattery",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "showTime",
-            "columnName": "showTime",
-            "affinity": "INTEGER",
             "notNull": true
           },
           {
@@ -933,29 +858,9 @@
             "notNull": true
           },
           {
-            "fieldPath": "comicDualPageCoverAlone",
-            "columnName": "comicDualPageCoverAlone",
-            "affinity": "INTEGER",
-            "notNull": true,
-            "defaultValue": "1"
-          },
-          {
-            "fieldPath": "comicSpreadAutoDetect",
-            "columnName": "comicSpreadAutoDetect",
-            "affinity": "INTEGER",
-            "notNull": true,
-            "defaultValue": "1"
-          },
-          {
             "fieldPath": "comicFitMode",
             "columnName": "comicFitMode",
             "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "comicScrollGapDp",
-            "columnName": "comicScrollGapDp",
-            "affinity": "INTEGER",
             "notNull": true
           },
           {
@@ -987,7 +892,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2547c87660b933339a2d5f0e7308ee9c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '61c678ffa1c87838f81222e5368b6b2d')"
     ]
   }
 }
