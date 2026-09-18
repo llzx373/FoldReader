@@ -754,12 +754,23 @@
 - [x] 版本注入：`-PfoldReader.versionCode=999 -PfoldReader.versionName=9.9.9` 生效
 - [x] `git add --renormalize .` 后无意外改动，`gradlew` 保持 LF、`gradlew.bat` 保持 CRLF
 
-### M10.5 待人工 / 待验证
-- [ ] 生成正式 keystore 并配置 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` 四个 Secrets
-- [ ] 首次 CI 运行确认 `sdkmanager --install "platforms;android-37.0"` 的包名与 runner 仓库一致
-- [ ] 首次 CI 运行确认 `:app:lintDebug` 无既有问题（本地已通过）
+### M10.5 首次发布实跑结果（v1.0.0，2026-09-18）
+- [x] `main` 上 CI 跑通：单元测试（606 项）、Lint、Debug 构建、产物上传，全部成功
+- [x] `v1.0.0` tag 上 Release 跑通：解析版本号 → 确定签名方式（debug 降级，`写入签名配置` 被正确跳过）
+      → 构建 APK + AAB → apksigner 验签 → 整理产物 → 生成说明 → 创建 GitHub Release
+- [x] 线上产物：`FoldReader-1.0.0.apk`（约 11.1 MB）、`FoldReader-1.0.0.aab`（约 12.9 MB）、
+      `FoldReader-1.0.0-mapping.txt`（约 66.5 MB）
+- [x] 下载已发布的 APK 复核：`versionCode=10000`、`versionName=1.0.0`（tag 驱动注入生效）、
+      证书 `CN=Android Debug`。CI 出的 debug 证书指纹与本地不同，印证了「debug 密钥由构建机即时生成」
+- [x] **顺带修复**：`gradlew` 在 git 里是 100644（无可执行位），Linux runner 上 `./gradlew` 直接
+      exit 126，两个 job 一步没跑就挂。仓库在 Windows 上创建、本地跑的是 `gradlew.bat`，所以一直没暴露
+
+### M10.6 待人工
+- [ ] 生成正式 keystore 并配置 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`
+      （配好后下次发布自动切正式签名，告警与说明里的 debug 条目会自动消失）
 - [ ] README 截图按 `docs/images/README.md` 清单补齐后接入截图区
-- [ ] 打 `v1.0.0` tag 走通首次发布，并在真机上验证覆盖安装与全新安装
+- [ ] 真机验证：装了 v1.0.0（debug 签名）的设备，之后换正式签名的版本需要先卸载再装
+- [ ] dependabot 已按配置开出若干 PR（部分 PR 的 CI 是在 gradlew 修好之前跑的，会失败，重跑即可），逐个评估合并
 
 ---
 
