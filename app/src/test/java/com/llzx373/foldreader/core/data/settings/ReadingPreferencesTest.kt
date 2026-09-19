@@ -59,6 +59,31 @@ class ReadingPreferencesTest {
         assertTrue(ReadingPreferences().swipeGestureEnabled)
     }
 
+    /**
+     * 横滑判据的两个阈值有默认值，且刻意不是「屏宽比例」量级：
+     * 40dp 才是一拇指的自然行程，原实现按屏宽 15% 在展开态会长到 110–130dp。
+     */
+    @Test
+    fun `横滑判定阈值有可用默认值`() {
+        val defaults = ReadingPreferences()
+
+        assertEquals(40f, defaults.swipeDistanceDp, 0.0001f)
+        assertEquals(500f, defaults.swipeFlingVelocityDpPerSec, 0.0001f)
+        assertTrue(defaults.swipeDistanceDp in 20f..80f)
+        assertTrue(defaults.swipeFlingVelocityDpPerSec in 200f..1200f)
+    }
+
+    @Test
+    fun `横滑判定阈值按值读写`() {
+        val prefs = ReadingPreferences(swipeDistanceDp = 25f, swipeFlingVelocityDpPerSec = 800f)
+
+        assertEquals(25f, prefs.swipeDistanceDp, 0.0001f)
+        assertEquals(800f, prefs.swipeFlingVelocityDpPerSec, 0.0001f)
+        val restored = prefs.copy()
+        assertEquals(prefs, restored)
+        assertEquals(prefs.hashCode(), restored.hashCode())
+    }
+
     @Test
     fun `滑动翻页手势开关按值读写`() {
         val prefs = ReadingPreferences(swipeGestureEnabled = false)

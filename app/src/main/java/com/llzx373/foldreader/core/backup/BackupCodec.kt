@@ -336,6 +336,8 @@ class BackupCodec(
         .put("volumeKeyPagingEnabled", p.volumeKeyPagingEnabled)
         .put("brightnessGestureEnabled", p.brightnessGestureEnabled)
         .put("swipeGestureEnabled", p.swipeGestureEnabled)
+        .put("swipeDistanceDp", p.swipeDistanceDp.toDouble())
+        .put("swipeFlingVelocityDpPerSec", p.swipeFlingVelocityDpPerSec.toDouble())
         .put("keepScreenOn", p.keepScreenOn)
         .put("showChapterTitle", p.showChapterTitle)
         .put("showPageProgress", p.showPageProgress)
@@ -432,6 +434,14 @@ class BackupCodec(
         }
         if (json.has("swipeGestureEnabled")) {
             settingsRepository.setSwipeGestureEnabled(json.optBoolean("swipeGestureEnabled"))
+        }
+        if (json.has("swipeDistanceDp")) {
+            settingsRepository.setSwipeDistanceDp(json.optDouble("swipeDistanceDp").toFloat())
+        }
+        if (json.has("swipeFlingVelocityDpPerSec")) {
+            settingsRepository.setSwipeFlingVelocityDpPerSec(
+                json.optDouble("swipeFlingVelocityDpPerSec").toFloat(),
+            )
         }
         if (json.has("keepScreenOn")) settingsRepository.setKeepScreenOn(json.optBoolean("keepScreenOn"))
         if (json.has("showChapterTitle")) {

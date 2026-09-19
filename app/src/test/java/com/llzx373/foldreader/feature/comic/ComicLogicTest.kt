@@ -142,19 +142,41 @@ class ComicLogicTest {
     @Test
     fun `横滑方向与点击镜像一致`() {
         val threshold = 100f
-        // 不到阈值不翻页（两个方向、两种阅读方向都一样）
-        assertNull(comicSwipeForward(99f, threshold, rtl = false))
-        assertNull(comicSwipeForward(-99f, threshold, rtl = false))
-        assertNull(comicSwipeForward(99f, threshold, rtl = true))
-        assertNull(comicSwipeForward(-99f, threshold, rtl = true))
+        val fling = 800f
+        // 位移与甩速都不到线：不翻页（两个方向、两种阅读方向都一样）
+        assertNull(comicSwipeForward(99f, 0f, threshold, fling, rtl = false))
+        assertNull(comicSwipeForward(-99f, 0f, threshold, fling, rtl = false))
+        assertNull(comicSwipeForward(99f, 0f, threshold, fling, rtl = true))
+        assertNull(comicSwipeForward(-99f, 0f, threshold, fling, rtl = true))
 
         // LTR：左滑=下一页，右滑=上一页
-        assertEquals(true, comicSwipeForward(-120f, threshold, rtl = false))
-        assertEquals(false, comicSwipeForward(120f, threshold, rtl = false))
+        assertEquals(true, comicSwipeForward(-120f, 0f, threshold, fling, rtl = false))
+        assertEquals(false, comicSwipeForward(120f, 0f, threshold, fling, rtl = false))
 
         // 日漫：镜像——右滑才是下一页
-        assertEquals(true, comicSwipeForward(120f, threshold, rtl = true))
-        assertEquals(false, comicSwipeForward(-120f, threshold, rtl = true))
+        assertEquals(true, comicSwipeForward(120f, 0f, threshold, fling, rtl = true))
+        assertEquals(false, comicSwipeForward(-120f, 0f, threshold, fling, rtl = true))
+    }
+
+    /**
+     * 短促轻甩：位移远不到阈值、但脱手速度够快，也必须翻页——「滑一下没反应」正是死区的表现。
+     * 方向按速度定，并且同样随阅读方向镜像。
+     */
+    @Test
+    fun `短促轻甩也翻页且随阅读方向镜像`() {
+        val threshold = 100f
+        val fling = 800f
+
+        // LTR：左甩=下一页，右甩=上一页
+        assertEquals(true, comicSwipeForward(-10f, -2000f, threshold, fling, rtl = false))
+        assertEquals(false, comicSwipeForward(10f, 2000f, threshold, fling, rtl = false))
+
+        // 日漫：镜像
+        assertEquals(false, comicSwipeForward(-10f, -2000f, threshold, fling, rtl = true))
+        assertEquals(true, comicSwipeForward(10f, 2000f, threshold, fling, rtl = true))
+
+        // 慢拖且位移不足：仍是死区之外——不翻页
+        assertNull(comicSwipeForward(50f, 200f, threshold, fling, rtl = false))
     }
 
     @Test
@@ -186,9 +208,10 @@ class ComicLogicTest {
     @Test
     fun `下一页总从拖动方向的反侧滑入`() {
         val threshold = 100f
+        val fling = 800f
         for (rtl in listOf(false, true)) {
             for (drag in listOf(-200f, 200f)) {
-                val forward = comicSwipeForward(drag, threshold, rtl) ?: continue
+                val forward = comicSwipeForward(drag, 0f, threshold, fling, rtl) ?: continue
                 assertEquals(
                     "rtl=$rtl drag=$drag",
                     drag < 0f,
@@ -208,8 +231,8 @@ class ComicLogicTest {
         )
         // 左滑：LTR 下一页 → 日漫 上一页
         assertNotEquals(
-            comicSwipeForward(-200f, 100f, rtl = false),
-            comicSwipeForward(-200f, 100f, rtl = true),
+            comicSwipeForward(-200f, 0f, 100f, 800f, rtl = false),
+            comicSwipeForward(-200f, 0f, 100f, 800f, rtl = true),
         )
         // 下滚：LTR 下一页 → 日漫 上一页
         assertNotEquals(

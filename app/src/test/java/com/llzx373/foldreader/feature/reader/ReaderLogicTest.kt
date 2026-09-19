@@ -13,6 +13,7 @@ import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -144,6 +145,44 @@ class ReaderLogicTest {
         // 条外不是；尺寸未知时也不认（与 tapZoneOf 的 y/heightPx 缺省语义一致）
         assertFalse(isBottomPagingStrip(height * 0.7f, height, ratio))
         assertFalse(isBottomPagingStrip(stripY, 0f, ratio))
+    }
+
+    /**
+     * 横滑判据：位移过线，**或**甩得够快（短促轻甩）。只看位移时「正常滑一下」会落在
+     * 触摸 slop 与阈值之间的死区里——手势在、却没反应，这正是要修的手感问题。
+     */
+    @Test
+    fun `横滑：位移过线或甩得够快都成立`() {
+        val distance = 100f
+        val fling = 800f
+
+        // 位移过线：方向按位移
+        assertEquals(true, horizontalSwipeDirection(-200f, 0f, distance, fling))
+        assertEquals(false, horizontalSwipeDirection(200f, 0f, distance, fling))
+
+        // 位移远不到线，但甩得够快：短促轻甩也翻页，方向按速度
+        assertEquals(true, horizontalSwipeDirection(-10f, -2000f, distance, fling))
+        assertEquals(false, horizontalSwipeDirection(10f, 2000f, distance, fling))
+
+        // 位移与速度都不到线：不翻页
+        assertNull(horizontalSwipeDirection(50f, 300f, distance, fling))
+        assertNull(horizontalSwipeDirection(-50f, -300f, distance, fling))
+    }
+
+    @Test
+    fun `横滑：两个阈值都取等号`() {
+        val distance = 100f
+        val fling = 800f
+
+        // 恰好等于位移阈值：算成立
+        assertEquals(true, horizontalSwipeDirection(-100f, 0f, distance, fling))
+        assertEquals(false, horizontalSwipeDirection(100f, 0f, distance, fling))
+        // 恰好等于甩速阈值：算成立
+        assertEquals(true, horizontalSwipeDirection(0f, -800f, distance, fling))
+        assertEquals(false, horizontalSwipeDirection(0f, 800f, distance, fling))
+        // 两个都差一点：不翻页
+        assertNull(horizontalSwipeDirection(99f, 799f, distance, fling))
+        assertNull(horizontalSwipeDirection(-99f, -799f, distance, fling))
     }
 
     @Test

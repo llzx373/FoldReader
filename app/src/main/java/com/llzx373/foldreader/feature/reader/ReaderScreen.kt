@@ -83,6 +83,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -811,28 +812,47 @@ fun ReaderScreen(
                     onDragCancel = { selection = null },
                 )
             }
-            .pointerInput(scrollMode, prefs.swipeGestureEnabled, selection != null) {
+            .pointerInput(
+                scrollMode,
+                prefs.swipeGestureEnabled,
+                prefs.swipeDistanceDp,
+                prefs.swipeFlingVelocityDpPerSec,
+                selection != null,
+                density.density,
+            ) {
                 if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
-                var dragStartX = 0f
+                // 位移阈值是固定 dp（原为屏宽 15%，展开态约 110–130dp，拇指滑不到），
+                // 并补一条甩速判据：短促轻甩也能翻页，填掉「过了触摸 slop、没到阈值」的死区。
+                // 两个阈值都可在设置里调，故一并列进 pointerInput 的 key。
+                val distanceThreshold = prefs.swipeDistanceDp * density.density
+                val flingThreshold = prefs.swipeFlingVelocityDpPerSec * density.density
                 var dragged = 0f
+                var tracker: VelocityTracker? = null
                 detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        dragStartX = offset.x
+                    onDragStart = {
                         dragged = 0f
+                        tracker = VelocityTracker()
                     },
-                    onHorizontalDrag = { change, _ ->
-                        dragged = change.position.x - dragStartX
+                    onHorizontalDrag = { change, delta ->
+                        dragged += delta
+                        tracker?.addPosition(change.uptimeMillis, change.position)
                     },
                     onDragEnd = {
-                        val threshold = size.width * 0.15f
-                        if (dragged < -threshold) {
+                        horizontalSwipeDirection(
+                            draggedPx = dragged,
+                            velocityXPxPerSec = tracker?.calculateVelocity()?.x ?: 0f,
+                            distanceThresholdPx = distanceThreshold,
+                            flingVelocityPxPerSec = flingThreshold,
+                        )?.let { forward ->
                             viewModel.noteManualInteraction()
-                            latestTurn(true)
-                        } else if (dragged > threshold) {
-                            viewModel.noteManualInteraction()
-                            latestTurn(false)
+                            latestTurn(forward)
                         }
                         dragged = 0f
+                        tracker = null
+                    },
+                    onDragCancel = {
+                        dragged = 0f
+                        tracker = null
                     },
                 )
             }

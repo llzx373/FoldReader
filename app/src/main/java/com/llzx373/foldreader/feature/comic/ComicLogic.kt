@@ -2,6 +2,7 @@ package com.llzx373.foldreader.feature.comic
 
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.feature.reader.TapZone
+import com.llzx373.foldreader.feature.reader.horizontalSwipeDirection
 import kotlin.math.roundToInt
 
 /**
@@ -42,12 +43,20 @@ fun comicTapForward(zone: TapZone, rtl: Boolean): Boolean? = when (zone) {
     TapZone.MIDDLE -> null
 }
 
-/** 横滑的逻辑方向：true = 下一页，null = 位移不到阈值、不翻页。日漫下左右镜像。 */
-fun comicSwipeForward(draggedPx: Float, thresholdPx: Float, rtl: Boolean): Boolean? = when {
-    draggedPx < -thresholdPx -> !rtl
-    draggedPx > thresholdPx -> rtl
-    else -> null
-}
+/**
+ * 横滑的逻辑方向：true = 下一页，null = 位移与甩速都不足、不翻页。日漫下左右镜像。
+ *
+ * 判据本身是共享的 [horizontalSwipeDirection]（位移过线，或短促轻甩），这里只叠加阅读方向的镜像。
+ */
+fun comicSwipeForward(
+    draggedPx: Float,
+    velocityXPxPerSec: Float,
+    distanceThresholdPx: Float,
+    flingVelocityPxPerSec: Float,
+    rtl: Boolean,
+): Boolean? =
+    horizontalSwipeDirection(draggedPx, velocityXPxPerSec, distanceThresholdPx, flingVelocityPxPerSec)
+        ?.let { leftward -> if (leftward) !rtl else rtl }
 
 /** 滚轮的逻辑方向：true = 下一页。日漫下上下镜像（上滚=下一页）。零滚动量由调用方先过滤。 */
 fun comicWheelForward(deltaY: Float, rtl: Boolean): Boolean = (deltaY > 0f) != rtl

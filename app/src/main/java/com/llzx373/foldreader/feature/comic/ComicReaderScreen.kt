@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -576,20 +577,48 @@ fun ComicReaderScreen(
             .pointerInput(uiState.pageCount, prefs.pageTurnHotspotRatio, scrollMode, rtl) {
                 detectTapGestures { offset -> handleTap(offset, false) }
             }
-            .pointerInput(prefs.swipeGestureEnabled, rtl, scrollMode) {
+            .pointerInput(
+                prefs.swipeGestureEnabled,
+                prefs.swipeDistanceDp,
+                prefs.swipeFlingVelocityDpPerSec,
+                rtl,
+                scrollMode,
+                density.density,
+            ) {
                 if (!prefs.swipeGestureEnabled || scrollMode) return@pointerInput
+                // 位移阈值是固定 dp（原为屏宽 15%，展开态约 110–130dp，拇指滑不到），
+                // 并补一条甩速判据：短促轻甩也能翻页，填掉「过了触摸 slop、没到阈值」的死区。
+                // 两个阈值都可在设置里调，故一并列进 pointerInput 的 key。
+                val distanceThreshold = prefs.swipeDistanceDp * density.density
+                val flingThreshold = prefs.swipeFlingVelocityDpPerSec * density.density
                 var dragged = 0f
+                var tracker: VelocityTracker? = null
                 detectHorizontalDragGestures(
-                    onDragStart = { dragged = 0f },
+                    onDragStart = {
+                        dragged = 0f
+                        tracker = VelocityTracker()
+                    },
                     onHorizontalDrag = { change, delta ->
                         change.consume()
                         dragged += delta
+                        tracker?.addPosition(change.uptimeMillis, change.position)
                     },
                     onDragEnd = {
-                        val threshold = size.width * 0.15f
                         // 跟手：横滑是「把内容往哪边拖」，与「下一页」相反——LTR 左滑前进、
                         // 日漫镜像成右滑前进。方向翻译收在 comicSwipeForward，与动画滑入侧同一口径。
-                        comicSwipeForward(dragged, threshold, rtl)?.let { latestTurn(it) }
+                        comicSwipeForward(
+                            draggedPx = dragged,
+                            velocityXPxPerSec = tracker?.calculateVelocity()?.x ?: 0f,
+                            distanceThresholdPx = distanceThreshold,
+                            flingVelocityPxPerSec = flingThreshold,
+                            rtl = rtl,
+                        )?.let { latestTurn(it) }
+                        dragged = 0f
+                        tracker = null
+                    },
+                    onDragCancel = {
+                        dragged = 0f
+                        tracker = null
                     },
                 )
             }

@@ -46,6 +46,8 @@ class BookPrefsRepositoryTest {
         volumeKeyPagingEnabled = true,
         brightnessGestureEnabled = false,
         swipeGestureEnabled = false,
+        swipeDistanceDp = 30f,
+        swipeFlingVelocityDpPerSec = 700f,
         keepScreenOn = true,
         showChapterTitle = false,
         showPageProgress = false,
@@ -121,6 +123,8 @@ class BookPrefsRepositoryTest {
         assertEquals(global.wideScreenDualPage, merged.wideScreenDualPage)
         assertEquals(global.brightnessGestureEnabled, merged.brightnessGestureEnabled)
         assertEquals(global.swipeGestureEnabled, merged.swipeGestureEnabled)
+        assertEquals(global.swipeDistanceDp, merged.swipeDistanceDp, 0.0001f)
+        assertEquals(global.swipeFlingVelocityDpPerSec, merged.swipeFlingVelocityDpPerSec, 0.0001f)
         assertEquals(global.bookshelfGridView, merged.bookshelfGridView)
         assertEquals(global.customChapterRules, merged.customChapterRules)
         assertEquals(global.adCleanRules, merged.adCleanRules)
@@ -166,6 +170,8 @@ class BookPrefsRepositoryTest {
             dualPageMode = DualPageMode.AUTO,
             darkThemeOption = DarkThemeOption.LIGHT,
             pageTurnHotspotRatio = 0.15f,
+            swipeDistanceDp = 60f,
+            swipeFlingVelocityDpPerSec = 1100f,
             volumeKeyPagingEnabled = false,
             keepScreenOn = false,
             showPageNumber = false,
@@ -175,6 +181,12 @@ class BookPrefsRepositoryTest {
         assertEquals(otherGlobal.dualPageMode, fromOtherGlobal.dualPageMode)
         assertEquals(otherGlobal.darkThemeOption, fromOtherGlobal.darkThemeOption)
         assertEquals(otherGlobal.pageTurnHotspotRatio, fromOtherGlobal.pageTurnHotspotRatio, 0.0001f)
+        assertEquals(otherGlobal.swipeDistanceDp, fromOtherGlobal.swipeDistanceDp, 0.0001f)
+        assertEquals(
+            otherGlobal.swipeFlingVelocityDpPerSec,
+            fromOtherGlobal.swipeFlingVelocityDpPerSec,
+            0.0001f,
+        )
         assertEquals(otherGlobal.volumeKeyPagingEnabled, fromOtherGlobal.volumeKeyPagingEnabled)
         assertEquals(otherGlobal.keepScreenOn, fromOtherGlobal.keepScreenOn)
         assertEquals(otherGlobal.showPageNumber, fromOtherGlobal.showPageNumber)
@@ -283,6 +295,8 @@ class BookPrefsRepositoryTest {
         override suspend fun setVolumeKeyPagingEnabled(enabled: Boolean) = Unit
         override suspend fun setBrightnessGestureEnabled(enabled: Boolean) = Unit
         override suspend fun setSwipeGestureEnabled(enabled: Boolean) = Unit
+        override suspend fun setSwipeDistanceDp(distanceDp: Float) = Unit
+        override suspend fun setSwipeFlingVelocityDpPerSec(velocityDpPerSec: Float) = Unit
         override suspend fun setKeepScreenOn(enabled: Boolean) = Unit
         override suspend fun setShowChapterTitle(enabled: Boolean) = Unit
         override suspend fun setShowPageProgress(enabled: Boolean) = Unit

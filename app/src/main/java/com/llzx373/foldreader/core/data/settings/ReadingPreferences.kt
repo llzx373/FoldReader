@@ -72,6 +72,15 @@ data class ReadingPreferences(
     val volumeKeyPagingEnabled: Boolean = false,
     val brightnessGestureEnabled: Boolean = true,
     val swipeGestureEnabled: Boolean = true,
+    /**
+     * 横滑翻页的两个判定阈值（dp / dp·s⁻¹），判据见
+     * `com.llzx373.foldreader.feature.reader.horizontalSwipeDirection`：位移过线**或**甩速过线即翻页。
+     *
+     * 用 dp 而不是屏宽比例：按屏宽 15% 的话，展开态阈值会长到 110–130dp——比拇指一次自然滑动还长，
+     * 「正常滑一下」于是落在触摸 slop 与阈值之间的死区里。用户可以按自己的手感调这两项。
+     */
+    val swipeDistanceDp: Float = 40f,
+    val swipeFlingVelocityDpPerSec: Float = 500f,
     val keepScreenOn: Boolean = false,
     val showChapterTitle: Boolean = true,
     val showPageProgress: Boolean = true,

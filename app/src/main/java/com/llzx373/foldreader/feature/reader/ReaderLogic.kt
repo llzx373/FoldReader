@@ -10,6 +10,7 @@ import com.llzx373.foldreader.core.foldable.Posture
 import com.llzx373.foldreader.core.foldable.WidthCategory
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.reader.PageAvoidance
+import kotlin.math.abs
 
 /**
  * 点击分区。中间区（[MIDDLE]）不是一个动作，而是一块**可配置**的区域：
@@ -261,6 +262,28 @@ fun tapZoneOf(
         x > widthPx * (1f - ratio) -> TapZone.NEXT
         else -> TapZone.MIDDLE
     }
+}
+
+/**
+ * 横滑方向判据：返回 true = 向左滑（内容向左拖），null = 不翻页。
+ *
+ * 只看位移时，「正常滑一下」常常落在触摸 slop 与阈值之间的死区里——手势在、却毫无反应。
+ * 原先的阈值是屏宽的 15%（展开态约 110–130dp，远超拇指一次自然滑动），所以补上**速度**判据：
+ * 位移过 [distanceThresholdPx]，或甩速过 [flingVelocityPxPerSec]，任一成立即翻页。
+ * 位移够长时按位移定方向，否则按速度定方向（短促轻甩看的是脱手瞬间的朝向）。
+ *
+ * 两个阈值都以 dp 为单位（用户可在设置里调，见 `ReadingPreferences.swipeDistanceDp` /
+ * `swipeFlingVelocityDpPerSec`），调用方按密度换算成 px。
+ */
+fun horizontalSwipeDirection(
+    draggedPx: Float,
+    velocityXPxPerSec: Float,
+    distanceThresholdPx: Float,
+    flingVelocityPxPerSec: Float,
+): Boolean? = when {
+    abs(draggedPx) >= distanceThresholdPx -> draggedPx < 0f
+    abs(velocityXPxPerSec) >= flingVelocityPxPerSec -> velocityXPxPerSec < 0f
+    else -> null
 }
 
 enum class VolumeKeyDispatch { PAGE_PREV, PAGE_NEXT, SCROLL_BACK, SCROLL_FORTH }

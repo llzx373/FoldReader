@@ -53,6 +53,8 @@ class BackupCodecTest {
         pageTurnHotspotRatio = 0.5f,
         volumeKeyPagingEnabled = true,
         brightnessGestureEnabled = false,
+        swipeDistanceDp = 55f,
+        swipeFlingVelocityDpPerSec = 900f,
         keepScreenOn = true,
         showChapterTitle = false,
         showPageProgress = false,
@@ -458,6 +460,10 @@ class BackupCodecTest {
             update { copy(brightnessGestureEnabled = enabled) }
         override suspend fun setSwipeGestureEnabled(enabled: Boolean) =
             update { copy(swipeGestureEnabled = enabled) }
+        override suspend fun setSwipeDistanceDp(distanceDp: Float) =
+            update { copy(swipeDistanceDp = distanceDp) }
+        override suspend fun setSwipeFlingVelocityDpPerSec(velocityDpPerSec: Float) =
+            update { copy(swipeFlingVelocityDpPerSec = velocityDpPerSec) }
         override suspend fun setKeepScreenOn(enabled: Boolean) =
             update { copy(keepScreenOn = enabled) }
         override suspend fun setShowChapterTitle(enabled: Boolean) =

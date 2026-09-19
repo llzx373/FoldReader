@@ -312,6 +312,22 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             SwitchSetting("音量键翻页", prefs.volumeKeyPagingEnabled, viewModel::updateVolumeKeyPaging)
             SwitchSetting("左侧滑动调亮度", prefs.brightnessGestureEnabled, viewModel::updateBrightnessGesture)
             SwitchSetting("滑动翻页手势", prefs.swipeGestureEnabled, viewModel::updateSwipeGesture)
+            SliderSetting(
+                label = "横滑判定距离",
+                value = prefs.swipeDistanceDp,
+                valueRange = 20f..80f,
+                steps = 5,
+                format = { "%.0f dp".format(it) },
+                onChange = viewModel::updateSwipeDistance,
+            )
+            SliderSetting(
+                label = "横滑判定速度",
+                value = prefs.swipeFlingVelocityDpPerSec,
+                valueRange = 200f..1200f,
+                steps = 9,
+                format = { "%.0f dp/s".format(it) },
+                onChange = viewModel::updateSwipeFlingVelocity,
+            )
             SwitchSetting("屏幕常亮", prefs.keepScreenOn, viewModel::updateKeepScreenOn)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

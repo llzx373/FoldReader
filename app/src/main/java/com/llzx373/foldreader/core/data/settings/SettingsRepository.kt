@@ -27,6 +27,8 @@ interface SettingsRepository {
     suspend fun setVolumeKeyPagingEnabled(enabled: Boolean)
     suspend fun setBrightnessGestureEnabled(enabled: Boolean)
     suspend fun setSwipeGestureEnabled(enabled: Boolean)
+    suspend fun setSwipeDistanceDp(distanceDp: Float)
+    suspend fun setSwipeFlingVelocityDpPerSec(velocityDpPerSec: Float)
     suspend fun setKeepScreenOn(enabled: Boolean)
     suspend fun setShowChapterTitle(enabled: Boolean)
     suspend fun setShowPageProgress(enabled: Boolean)

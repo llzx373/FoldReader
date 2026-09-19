@@ -44,6 +44,8 @@ class SettingsRepositoryImpl(
         val VOLUME_KEY_PAGING_ENABLED = booleanPreferencesKey("volume_key_paging_enabled")
         val BRIGHTNESS_GESTURE_ENABLED = booleanPreferencesKey("brightness_gesture_enabled")
         val SWIPE_GESTURE_ENABLED = booleanPreferencesKey("swipe_gesture_enabled")
+        val SWIPE_DISTANCE_DP = floatPreferencesKey("swipe_distance_dp")
+        val SWIPE_FLING_VELOCITY_DP_PER_SEC = floatPreferencesKey("swipe_fling_velocity_dp_per_sec")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SHOW_CHAPTER_TITLE = booleanPreferencesKey("show_chapter_title")
         val SHOW_PAGE_PROGRESS = booleanPreferencesKey("show_page_progress")
@@ -105,6 +107,9 @@ class SettingsRepositoryImpl(
                     ?: defaults.brightnessGestureEnabled,
                 swipeGestureEnabled = prefs[Keys.SWIPE_GESTURE_ENABLED]
                     ?: defaults.swipeGestureEnabled,
+                swipeDistanceDp = prefs[Keys.SWIPE_DISTANCE_DP] ?: defaults.swipeDistanceDp,
+                swipeFlingVelocityDpPerSec = prefs[Keys.SWIPE_FLING_VELOCITY_DP_PER_SEC]
+                    ?: defaults.swipeFlingVelocityDpPerSec,
                 keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
                 showChapterTitle = prefs[Keys.SHOW_CHAPTER_TITLE] ?: defaults.showChapterTitle,
                 showPageProgress = prefs[Keys.SHOW_PAGE_PROGRESS] ?: defaults.showPageProgress,
@@ -223,6 +228,18 @@ class SettingsRepositoryImpl(
 
     override suspend fun setSwipeGestureEnabled(enabled: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.SWIPE_GESTURE_ENABLED] = enabled }
+    }
+
+    override suspend fun setSwipeDistanceDp(distanceDp: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.SWIPE_DISTANCE_DP] = distanceDp.coerceIn(20f, 80f)
+        }
+    }
+
+    override suspend fun setSwipeFlingVelocityDpPerSec(velocityDpPerSec: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.SWIPE_FLING_VELOCITY_DP_PER_SEC] = velocityDpPerSec.coerceIn(200f, 1200f)
+        }
     }
 
     override suspend fun setKeepScreenOn(enabled: Boolean) {

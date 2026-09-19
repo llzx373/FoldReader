@@ -107,6 +107,10 @@ class SettingsViewModel(
         launch { settingsRepository.setBrightnessGestureEnabled(enabled) }
     fun updateSwipeGesture(enabled: Boolean) =
         launch { settingsRepository.setSwipeGestureEnabled(enabled) }
+    fun updateSwipeDistance(distanceDp: Float) =
+        launch { settingsRepository.setSwipeDistanceDp(distanceDp) }
+    fun updateSwipeFlingVelocity(velocityDpPerSec: Float) =
+        launch { settingsRepository.setSwipeFlingVelocityDpPerSec(velocityDpPerSec) }
     fun updateKeepScreenOn(enabled: Boolean) = launch { settingsRepository.setKeepScreenOn(enabled) }
     fun updateShowChapterTitle(enabled: Boolean) =
         launch { settingsRepository.setShowChapterTitle(enabled) }
