@@ -74,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -101,6 +102,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.db.BookWithProgress
@@ -157,6 +159,8 @@ fun BookshelfScreen(
     var showBookmarkOverview by rememberSaveable { mutableStateOf(false) }
     var showMoveToGroupDialog by rememberSaveable { mutableStateOf(false) }
     var importRequest by remember { mutableStateOf<Pair<Uri, Boolean>?>(null) }
+    /** 外部一次可能送来多个文件（分享多选），排在这里逐个确认；只排不消费。 */
+    val importQueue = remember { mutableStateListOf<Uri>() }
     // null = 全部；"" = 未分组；其余为分组名
     var groupFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val selectionMode = selectedIds.isNotEmpty()
@@ -201,21 +205,45 @@ fun BookshelfScreen(
     val launchImport = {
         openDocumentLauncher.launch(
             arrayOf(
+                // 与 AndroidManifest 的「打开方式」过滤器保持同一份清单：少一条就意味着
+                // 那种格式在这里根本选不到（此前 cbz 与 pdf 就是这样漏掉的）
                 "text/plain",
                 "application/epub+zip",
                 // FB2 无标准注册 MIME，靠扩展名 + octet-stream 兜底
                 "application/x-fictionbook+xml",
+                "application/x-fictionbook",
+                "application/pdf",
+                "application/vnd.comicbook+zip",
+                "application/vnd.comicbook-rar",
+                "application/x-cbz",
+                "application/x-cbr",
+                "application/x-cbt",
+                "application/x-cb7",
+                "application/zip",
+                "application/x-zip-compressed",
+                "application/vnd.rar",
+                "application/x-rar-compressed",
+                "application/x-tar",
+                "application/x-7z-compressed",
                 "application/octet-stream",
             ),
         )
     }
 
     LaunchedEffect(Unit) {
-        app.container.pendingImportUri.collect { uri ->
-            if (uri != null) {
-                app.container.pendingImportUri.value = null
-                importRequest = uri to true
-            }
+        app.container.pendingImportUris.collect { incoming ->
+            if (incoming.isEmpty()) return@collect
+            app.container.pendingImportUris.value = emptyList()
+            importQueue.addAll(incoming)
+        }
+    }
+
+    // 队列里有文件、当前既没有对话框也不在导入中就取一个出来；确认或取消后这里会再跑一次，
+    // 接着问下一个。等导入结束再问，是为了不让下一个对话框盖在"正在导入"的遮罩上。
+    LaunchedEffect(importQueue.size, importRequest, importState) {
+        val busy = importState is ImportUiState.Importing
+        if (!busy && importRequest == null && importQueue.isNotEmpty()) {
+            importRequest = importQueue.removeAt(0) to true
         }
     }
 
@@ -234,7 +262,8 @@ fun BookshelfScreen(
                 viewModel.consumeImportState()
             }
             is ImportUiState.Duplicate -> {
-                if (state.sameFile && state.openAfter) onOpenBook(state.bookId, state.title)
+                // 外部送进来的文件本来就该打开——哪怕它早就在书架上了
+                if (state.openAfter) onOpenBook(state.bookId, state.title)
                 else snackbarHostState.showSnackbar("《${state.title}》已在书架")
                 viewModel.consumeImportState()
             }
@@ -569,7 +598,11 @@ fun BookshelfScreen(
                     convertTraditional = convert,
                 )
             },
-            onDismiss = { importRequest = null },
+            onDismiss = {
+                importRequest = null
+                // 取消一次当作不想继续处理这批外部文件，剩下的不再追问
+                importQueue.clear()
+            },
         )
     }
 
@@ -926,6 +959,34 @@ private fun PendingParseBadge(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 已清洗副本角标。
+ *
+ * 同一个源文件允许「原版」与「清洗版」两本并存（导入时选不同档位，或先浏览打开再带清洗导入），
+ * 两本标题一样，靠这个角标区分：带角标的那本读的是库内的清洗副本。
+ *
+ * 判据只看 TXT —— EPUB/FB2/PDF 的 `cleanedFilePath` 存的是**压平产物**，含义完全不同。
+ */
+@Composable
+private fun CleanedBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier,
+    ) {
+        Text(
+            text = "已清洗",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
+/** 是否是「清洗版」副本（只有 TXT 的 cleanedFilePath 才表示清洁结果）。 */
+private fun BookEntity.isCleanedCopy(): Boolean =
+    format == BookFormat.TXT && cleanedFilePath != null
+
 /** 漫画容器角标（CBZ/CBR/CBT/CB7/文件夹），与电子书架同架时用来区分。 */
 @Composable
 private fun ComicBadge(label: String, modifier: Modifier = Modifier) {
@@ -1101,6 +1162,12 @@ private fun BookGridItem(
                         .align(Alignment.BottomStart)
                         .padding(6.dp),
                 )
+            } else if (book.isCleanedCopy()) {
+                CleanedBadge(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp),
+                )
             }
             if (isPagedFormat(book.format)) {
                 ComicBadge(
@@ -1238,6 +1305,12 @@ private fun BookList(
                                 text = "待解析",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.secondary,
+                            )
+                        } else if (book.isCleanedCopy()) {
+                            Text(
+                                text = "已清洗",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }

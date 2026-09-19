@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import com.llzx373.foldreader.core.comic.ComicPageOrdering
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
+import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.isSupportedBookName
 import com.llzx373.foldreader.core.format.saf.SafTree
 import kotlinx.coroutines.CancellationException
@@ -30,11 +31,17 @@ class BatchImportUseCase private constructor(
         importBook: ImportBookUseCase,
         bookshelfRepository: BookshelfRepository,
         importComicDirectory: suspend (DocEntry) -> ImportBookUseCase.Result,
+        /**
+         * 批量导入没有导入对话框，清洗档位跟随设置页——与「浏览」打开同一套规则。
+         * 传 [CleanProfile.NONE]（默认）即整批不复制、不清洗。
+         */
+        profileProvider: suspend () -> CleanProfile = { CleanProfile.NONE },
     ) : this(
         safTree = SafTree(context.applicationContext),
         importOne = { entry ->
             importBook.import(
                 uri = Uri.parse(entry.uri),
+                profile = profileProvider(),
                 source = BookSource.EXTERNAL,
             )
         },
@@ -194,6 +201,8 @@ class BatchImportUseCase private constructor(
                 when (result) {
                     is ImportBookUseCase.Result.Imported -> {
                         importedIds += result.bookId
+                        // 选了清理的书会同时落一行**原版**，归组时不能把它漏在组外
+                        result.originalBookId?.let { importedIds += it }
                         imported += result.bookId to result.title
                     }
                     is ImportBookUseCase.Result.DuplicateSameUri ->

@@ -46,7 +46,7 @@ class BookPrewarmQueue(
                     BookFormat.COMIC -> runCatching { comicPrepare(job.bookId) }.isSuccess
                     BookFormat.PDF -> runCatching { pdfPrepare(job.bookId) }.isSuccess
                     else -> parserFor(job.format)
-                        ?.let { runCatching { it.prewarm(job.uri) }.isSuccess }
+                        ?.let { runCatching { it.prewarm(job.uri, job.bookId) }.isSuccess }
                         ?: false
                 }
                 if (prepared) runCatching { onPrepared(job.bookId) }

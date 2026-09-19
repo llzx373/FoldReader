@@ -15,6 +15,7 @@ import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.BookMeta
 import com.llzx373.foldreader.core.format.BookParser
 import com.llzx373.foldreader.core.format.FormatDetector
+import com.llzx373.foldreader.core.format.android.load
 import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.clean.CleanReport
 import com.llzx373.foldreader.core.format.clean.NovelCleaner
@@ -33,6 +34,8 @@ import kotlinx.coroutines.withContext
 class ImportBookUseCase(
     private val bookshelfRepository: BookshelfRepository,
     private val cleanedDir: File,
+    /** 源文件副本目录：导入时把原文原样复制一份进来，正文从此不依赖外部授权。 */
+    private val sourceDir: File,
     private val openChannel: (String) -> SeekableByteChannel,
     private val displayNameOf: (String) -> String?,
     private val traditionalMap: () -> Map<Char, Char>,
@@ -63,6 +66,7 @@ class ImportBookUseCase(
     ) : this(
         bookshelfRepository = bookshelfRepository,
         cleanedDir = File(context.filesDir, "cleaned"),
+        sourceDir = File(context.filesDir, "source"),
         openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
         traditionalMap = { TsCharMap.load(context) },
@@ -80,6 +84,11 @@ class ImportBookUseCase(
             val encodingConfidence: Float,
             /** 本次清洗的改动报告；未清洗（noop）时为 null。 */
             val cleanReport: CleanReport? = null,
+            /**
+             * 选清理导入时**同时**入库的原版那一行；noop 导入为 null。
+             * 批量导入按它把两行一起归组，否则同一次导入的原版会漏在分组外。
+             */
+            val originalBookId: Long? = null,
         ) : Result
 
         data class DuplicateSameUri(val bookId: Long, val title: String) : Result
@@ -142,12 +151,6 @@ class ImportBookUseCase(
         source: BookSource,
         onProgress: (Float) -> Unit,
     ): Result {
-        if (profile.isNoop) {
-            bookshelfRepository.findByFileUri(uriKey)
-                ?.takeIf { it.cleanedFilePath == null }
-                ?.let { return Result.DuplicateSameUri(it.id, it.title) }
-        }
-
         openChannel(uriKey).use { channel ->
             val displayName = displayNameOf(uriKey)
             val head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
@@ -168,7 +171,7 @@ class ImportBookUseCase(
                 return outcome.toImportResult()
             }
             if (format != null && format != BookFormat.TXT) {
-                // 非 TXT 不做文本清洗：不复制原文件，转换发生在首开压平时
+                // 非 TXT 不做文本清洗：正文由首开/后台预热压平而来（源文件同样先复制一份进来）
                 return importConverted(format, uriKey, channel, source, onProgress)
             }
             if (format == null && FormatDetector.isPdf(head)) {
@@ -190,32 +193,92 @@ class ImportBookUseCase(
                 val contentHash = hashOf(channel)
                 bookshelfRepository.findByContentHash(contentHash)
                     ?.let { return Result.DuplicateSameHash(it.id, it.title) }
-                return insert(uriKey, headText, contentHash, detection, cleanedFilePath = null, source)
+                return insert(
+                    uriKey = uriKey,
+                    contentFileUri = sourceCopyUri(channel, contentHash, BookFormat.TXT),
+                    headText = headText,
+                    contentHash = contentHash,
+                    detection = detection,
+                    cleanedFilePath = null,
+                    source = source,
+                )
             }
+
+            // 源副本与它的哈希必须在**清洗之前**取：清洗会顺着输入流把 channel 读到关闭
+            // （`Channels.newInputStream` 的流一关，底下的 channel 也跟着关），之后再想回头
+            // 复制原文就只剩 ClosedChannelException。副本按原文哈希命名，所以重复导入时
+            // 这一步直接命中已有文件，不产生额外写入。
+            val sourceHash = hashOf(channel)
+            val contentFileUri = sourceCopyUri(channel, sourceHash, BookFormat.TXT)
 
             val tmp = File(cleanedDir, ".tmp-${UUID.randomUUID()}.txt")
             try {
                 val cleanReport = writeCleanedCopy(channel, bom, detection, profile, tmp, onProgress)
                 val cleanedHash = hashOf(tmp)
-                bookshelfRepository.findByContentHash(cleanedHash)
-                    ?.let { return Result.DuplicateSameHash(it.id, it.title) }
                 val target = File(cleanedDir, "$cleanedHash.txt")
+                val existing = bookshelfRepository.findByContentHash(cleanedHash)
+                if (existing != null) {
+                    // 同一套规则洗出来的产物已经在架上：不重复插一行，直接把它打开。
+                    // 原版那一行可能还没有（早期版本只落了清洗版），顺手补齐。
+                    val originalId =
+                        ensureOriginalRow(uriKey, contentFileUri, headText, sourceHash, detection, source)
+                    return Result.Imported(
+                        existing.id,
+                        existing.title,
+                        detection.confidence,
+                        cleanReport,
+                        originalId,
+                    )
+                }
                 if (!target.exists() && !tmp.renameTo(target)) {
                     throw java.io.IOException("清洗副本写入失败: ${target.absolutePath}")
                 }
+                // 原版单独占一行，与清洗版并存：书架上是两个条目，用户自己挑看「原文」还是
+                // 「清洗后」。两行的 `fileUri` 指向**同一份**源副本，不额外占空间；阅读时按
+                // bookId 取 `cleanedFilePath`，所以点哪本读哪份。
+                val originalId =
+                    ensureOriginalRow(uriKey, contentFileUri, headText, sourceHash, detection, source)
                 return insert(
                     uriKey = uriKey,
+                    contentFileUri = contentFileUri,
                     headText = headText,
                     contentHash = cleanedHash,
                     detection = detection,
                     cleanedFilePath = target.absolutePath,
                     source = source,
                     cleanReport = cleanReport,
+                    originalBookId = originalId,
                 )
             } finally {
                 tmp.delete()
             }
         }
+    }
+
+    /**
+     * 确保**原版**在架上有一行，返回它的 bookId。
+     *
+     * 选了清理导入时，原版与清洗版各占一行：清洗是可逆的用户选择，「洗过之后还想看原文」
+     * 不该逼用户重新导入一次。两行的 `fileUri` 指向同一份源副本，重复导入时这一步是空操作。
+     */
+    private suspend fun ensureOriginalRow(
+        uriKey: String,
+        contentFileUri: String,
+        headText: String,
+        sourceHash: String,
+        detection: EncodingDetection,
+        source: BookSource,
+    ): Long {
+        bookshelfRepository.findByContentHash(sourceHash)?.let { return it.id }
+        return insertRow(
+            uriKey = uriKey,
+            contentFileUri = contentFileUri,
+            headText = headText,
+            contentHash = sourceHash,
+            detection = detection,
+            cleanedFilePath = null,
+            source = source,
+        ).first
     }
 
     private fun writeCleanedCopy(
@@ -263,9 +326,50 @@ class ImportBookUseCase(
         RandomAccessFile(file, "r").use { hashOf(it.channel) }
 
     /**
+     * 把源文件原样复制进私有目录，返回它的 URI；已经有同一份就直接复用。
+     *
+     * 外部「打开方式」给的 `content://` 是**临时**授权，任务一结束（或在最近任务里被划掉、
+     * 重启手机）就失效——正文若还引用它，这本书之后就会打不开。复制一份进来之后，「不清理」
+     * 与「清洗」两条路径的正文都落在私有目录里，阅读、重洗、撤销清理、切编码都只碰本地文件。
+     *
+     * 命名用**原文内容的哈希**：同一个文件无论从哪个入口、用哪个档位导入，都复用同一份副本。
+     * 名字里的扩展名只为了人看着方便——真实格式认的是库里的 `format` 与头部魔数。
+     */
+    private fun sourceCopyUri(channel: SeekableByteChannel, sourceHash: String, format: BookFormat): String {
+        val target = File(sourceDir, "$sourceHash.${sourceExtensionOf(format)}")
+        if (target.isFile) return fileUriOf(target)
+        sourceDir.mkdirs()
+        val tmp = File(sourceDir, ".tmp-${UUID.randomUUID()}.part")
+        try {
+            channel.position(0)
+            // 刻意不关闭这个输入流：它包着调用方的 channel，关了后面就没得读了
+            val input = Channels.newInputStream(channel)
+            tmp.outputStream().buffered().use { output -> input.copyTo(output) }
+            if (!tmp.renameTo(target) && !target.isFile) {
+                throw java.io.IOException("源文件副本写入失败: ${target.absolutePath}")
+            }
+        } finally {
+            tmp.delete()
+        }
+        return fileUriOf(target)
+    }
+
+    /** 私有目录里这一份的 URI 串。不用 `Uri.fromFile`：这条路径要在纯 JVM 单测里跑通。 */
+    private fun fileUriOf(file: File): String = "file://${file.absolutePath}"
+
+    private fun sourceExtensionOf(format: BookFormat): String = when (format) {
+        BookFormat.TXT -> "txt"
+        BookFormat.EPUB -> "epub"
+        BookFormat.FB2 -> "fb2"
+        else -> format.name.lowercase()
+    }
+
+    /**
      * 非 TXT（EPUB/FB2…）导入：跳过编码检测/文本清洗/标题启发；
      * 元数据由对应格式 parser 的 parseMeta 提供（失败回退文件名）。
-     * 不复制原文件——压平转换发生在首开或后台预热。
+     *
+     * 源文件同样先复制一份进来：压平产物虽然也在私有目录，但压平时仍要按源文件算内容哈希去
+     * 定位缓存，直接引用外部授权的话，授权一失效连已经压平过的书也打不开。
      */
     private suspend fun importConverted(
         format: BookFormat,
@@ -274,14 +378,13 @@ class ImportBookUseCase(
         source: BookSource,
         onProgress: (Float) -> Unit,
     ): Result {
-        bookshelfRepository.findByFileUri(uriKey)
-            ?.takeIf { it.cleanedFilePath == null }
-            ?.let { return Result.DuplicateSameUri(it.id, it.title) }
         val contentHash = hashOf(channel)
         bookshelfRepository.findByContentHash(contentHash)
             ?.let { return Result.DuplicateSameHash(it.id, it.title) }
+        // 之后的元数据/封面/压平都读这份副本：导入时授权还在，正好把该取的都取掉
+        val contentFileUri = sourceCopyUri(channel, contentHash, format)
         val meta = try {
-            convertedParsers[format]?.parseMeta(Uri.parse(uriKey))
+            convertedParsers[format]?.parseMeta(Uri.parse(contentFileUri))
         } catch (e: DrmProtectedException) {
             return Result.Failure(e.message ?: "受 DRM 保护，无法导入")
         } catch (t: Throwable) {
@@ -295,17 +398,17 @@ class ImportBookUseCase(
             ?: "未知书名"
         val coverPath = coversDir?.let { dir ->
             runCatching {
-                convertedParsers[format]?.extractCover(Uri.parse(uriKey))
+                convertedParsers[format]?.extractCover(Uri.parse(contentFileUri))
                     ?.let { writeCover(dir, contentHash, it) }
             }.getOrNull()
         }
         val bookId = bookshelfRepository.upsertBook(
-            convertedEntity(title, meta, uriKey, contentHash, format, source, coverPath),
+            convertedEntity(title, meta, contentFileUri, contentHash, format, source, coverPath),
         )
         onProgress(1f)
         // 压平交给后台队列：导入即刻返回，等用户真去点开时通常已经命中缓存。
         // 这里只是入队（非阻塞），失败也不影响导入结果。
-        runCatching { enqueuePrewarm(bookId, uriKey, format) }
+        runCatching { enqueuePrewarm(bookId, contentFileUri, format) }
         return Result.Imported(bookId, title, encodingConfidence = 1f)
     }
 
@@ -313,7 +416,7 @@ class ImportBookUseCase(
     internal fun convertedEntity(
         title: String,
         meta: BookMeta?,
-        uriKey: String,
+        contentFileUri: String,
         contentHash: String,
         format: BookFormat,
         source: BookSource,
@@ -321,7 +424,7 @@ class ImportBookUseCase(
     ): BookEntity = BookEntity(
         title = title,
         author = meta?.author,
-        fileUri = uriKey,
+        fileUri = contentFileUri,
         contentHash = contentHash,
         format = format,
         totalChars = 0,
@@ -345,15 +448,46 @@ class ImportBookUseCase(
     internal fun writeCover(dir: File, contentHash: String, cover: CoverImage): String =
         writeCoverFile(dir, contentHash, cover)
 
+    /**
+     * @param uriKey 只用来推断书名（显示名取自源文件）。
+     * @param contentFileUri 库里存的**正文来源**——私有目录里的源文件副本，与 [uriKey] 刻意分开：
+     *   两者一旦混用，书名会变成内容哈希。
+     * @param originalBookId 同一次导入里一并入库的原版那一行（选了清理才有），
+     *   由 [Result.Imported] 带出去，供批量导入把两行一起归组。
+     */
     private suspend fun insert(
         uriKey: String,
+        contentFileUri: String,
         headText: String,
         contentHash: String,
         detection: EncodingDetection,
         cleanedFilePath: String?,
         source: BookSource,
         cleanReport: CleanReport? = null,
+        originalBookId: Long? = null,
     ): Result {
+        val (bookId, title) = insertRow(
+            uriKey = uriKey,
+            contentFileUri = contentFileUri,
+            headText = headText,
+            contentHash = contentHash,
+            detection = detection,
+            cleanedFilePath = cleanedFilePath,
+            source = source,
+        )
+        return Result.Imported(bookId, title, detection.confidence, cleanReport, originalBookId)
+    }
+
+    /** 落一行，返回 `(bookId, title)`。 */
+    private suspend fun insertRow(
+        uriKey: String,
+        contentFileUri: String,
+        headText: String,
+        contentHash: String,
+        detection: EncodingDetection,
+        cleanedFilePath: String?,
+        source: BookSource,
+    ): Pair<Long, String> {
         val baseName = displayNameOf(uriKey)
             ?.substringBeforeLast('.')
             ?.takeIf { it.isNotBlank() }
@@ -362,7 +496,7 @@ class ImportBookUseCase(
             BookEntity(
                 title = title,
                 author = author,
-                fileUri = uriKey,
+                fileUri = contentFileUri,
                 contentHash = contentHash,
                 format = BookFormat.TXT,
                 totalChars = 0,
@@ -373,7 +507,7 @@ class ImportBookUseCase(
                 source = source,
             ),
         )
-        return Result.Imported(bookId, title, detection.confidence, cleanReport)
+        return bookId to title
     }
 
     companion object {

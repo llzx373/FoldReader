@@ -36,7 +36,7 @@ class PdfBookParser(
     private val openFlattenedContent: suspend (File) -> BookContent,
     private val openChannel: (Uri) -> SeekableByteChannel,
     private val displayNameOf: (Uri) -> String?,
-    private val bookIdResolver: suspend (Uri) -> Long? = { null },
+    private val bookIdResolver: suspend (Uri, Long?) -> Long? = { _, _ -> null },
     private val onChaptersIndexed: suspend (bookId: Long, chapters: List<Chapter>) -> Unit = { _, _ -> },
 ) : BookParser {
 
@@ -57,16 +57,19 @@ class PdfBookParser(
         withContext(Dispatchers.IO) { ensureFlattened(uri)?.chapters.orEmpty() }
 
     override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
+        openContent(uri, charsetOverride, null)
+
+    override suspend fun openContent(uri: Uri, charsetOverride: Charset?, bookId: Long?): BookContent =
         withContext(Dispatchers.IO) {
             // charsetOverride 忽略：压平产物固定 UTF-8
-            val flattened = ensureFlattenedAndIndexChapters(uri)
+            val flattened = ensureFlattenedAndIndexChapters(uri, bookId)
                 ?: throw IOException(SCANNED_MESSAGE)
             openFlattenedContent(flattened.file)
         }
 
     /** 预热：只做压平，不取内容。扫描件在这里安静返回（不是失败）。 */
-    override suspend fun prewarm(uri: Uri) {
-        withContext(Dispatchers.IO) { ensureFlattenedAndIndexChapters(uri) }
+    override suspend fun prewarm(uri: Uri, bookId: Long?) {
+        withContext(Dispatchers.IO) { ensureFlattenedAndIndexChapters(uri, bookId) }
     }
 
     /**
@@ -76,8 +79,8 @@ class PdfBookParser(
      * 字符数是流式数出来的，不是文件字节数：中文 PDF 一个字符 3 字节，
      * 用字节数当字符数会让进度条永远走不满。
      */
-    suspend fun prewarmAndCharCount(uri: Uri): Long? = withContext(Dispatchers.IO) {
-        val flattened = ensureFlattenedAndIndexChapters(uri) ?: return@withContext null
+    suspend fun prewarmAndCharCount(uri: Uri, bookId: Long? = null): Long? = withContext(Dispatchers.IO) {
+        val flattened = ensureFlattenedAndIndexChapters(uri, bookId) ?: return@withContext null
         var chars = 0L
         flattened.file.bufferedReader(Charsets.UTF_8).use { reader ->
             val buffer = CharArray(64 * 1024)
@@ -96,11 +99,11 @@ class PdfBookParser(
         }
 
     /** 压平（命中缓存零成本）；本次确实新压平时把目录回填进章节表（两种锚点一起写）。 */
-    private suspend fun ensureFlattenedAndIndexChapters(uri: Uri): FlattenedBook? {
+    private suspend fun ensureFlattenedAndIndexChapters(uri: Uri, bookId: Long?): FlattenedBook? {
         val flattened = ensureFlattened(uri) ?: return null
         if (flattened.fresh) {
-            bookIdResolver(uri)?.let { bookId ->
-                runCatching { onChaptersIndexed(bookId, flattened.chapters) }
+            bookIdResolver(uri, bookId)?.let { id ->
+                runCatching { onChaptersIndexed(id, flattened.chapters) }
             }
         }
         return flattened

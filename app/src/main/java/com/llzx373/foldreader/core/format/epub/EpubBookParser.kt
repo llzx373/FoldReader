@@ -36,7 +36,7 @@ class EpubBookParser(
     private val openFlattenedContent: suspend (File) -> BookContent,
     private val openChannel: (Uri) -> SeekableByteChannel,
     private val displayNameOf: (Uri) -> String?,
-    private val bookIdResolver: suspend (Uri) -> Long? = { null },
+    private val bookIdResolver: suspend (Uri, Long?) -> Long? = { _, _ -> null },
     private val onChaptersIndexed: suspend (bookId: Long, chapters: List<Chapter>) -> Unit = { _, _ -> },
     private val newParser: () -> XmlPullParser = { Xml.newPullParser() },
     /** 图片原始尺寸探测（默认 BitmapFactory 只读边界；JVM 测试注入假实现）。返回 null = 不可解码。 */
@@ -102,22 +102,25 @@ class EpubBookParser(
         }
 
     override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
+        openContent(uri, charsetOverride, null)
+
+    override suspend fun openContent(uri: Uri, charsetOverride: Charset?, bookId: Long?): BookContent =
         withContext(Dispatchers.IO) {
             // charsetOverride 忽略：压平产物固定 UTF-8
-            openFlattenedContent(ensureFlattenedAndIndexChapters(uri).file)
+            openFlattenedContent(ensureFlattenedAndIndexChapters(uri, bookId).file)
         }
 
     /** 预热：只做压平，不取内容。导入后由后台队列调用，好让首次打开直接命中缓存。 */
-    override suspend fun prewarm(uri: Uri) {
-        withContext(Dispatchers.IO) { ensureFlattenedAndIndexChapters(uri) }
+    override suspend fun prewarm(uri: Uri, bookId: Long?) {
+        withContext(Dispatchers.IO) { ensureFlattenedAndIndexChapters(uri, bookId) }
     }
 
     /** 压平（命中缓存则零成本）；本次确实新压平时顺带把真实 TOC 回填进章节表。 */
-    private suspend fun ensureFlattenedAndIndexChapters(uri: Uri): FlattenedBook {
+    private suspend fun ensureFlattenedAndIndexChapters(uri: Uri, bookId: Long?): FlattenedBook {
         val flattened = ensureFlattened(uri)
         if (flattened.fresh) {
-            bookIdResolver(uri)?.let { bookId ->
-                runCatching { onChaptersIndexed(bookId, flattened.chapters) }
+            bookIdResolver(uri, bookId)?.let { id ->
+                runCatching { onChaptersIndexed(id, flattened.chapters) }
             }
         }
         return flattened

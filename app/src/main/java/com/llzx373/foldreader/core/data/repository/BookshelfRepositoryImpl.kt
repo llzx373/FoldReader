@@ -32,6 +32,8 @@ class BookshelfRepositoryImpl(
     private val pageDiskCache: com.llzx373.foldreader.core.reader.PageDiskCache? = null,
     /** 漫画解压缓存与本地副本；删除书籍时按 contentHash 清理。 */
     private val comicStore: com.llzx373.foldreader.core.comic.ComicExtractionStore? = null,
+    /** 源文件副本目录；删除书籍时按 `fileUri` 清理（只在**这个目录内**才动手）。 */
+    private val sourceDir: java.io.File? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -88,9 +90,16 @@ class BookshelfRepositoryImpl(
         }
         pageDiskCache?.let { cache -> bookIds.forEach { cache.deleteForBook(it) } }
         val booksById = bookDao.getByIds(bookIds).associateBy { it.id }
+        // 清洗副本与源副本都是**内容寻址**的，同一个文件的原版与清洗版会共用同一份（源副本按原文
+        // 哈希，清洗副本按产物哈希——两行用同一套规则重洗就落到同一个文件上）。所以文件不能随行
+        // 一起删：先收集候选，等行删完再判「还有没有别人引用它」。
+        val cleanedCandidates = bookIds.mapNotNull { booksById[it]?.cleanedFilePath }.distinct()
+        val sourceCopyCandidates = bookIds.mapNotNull { id ->
+            val book = booksById[id] ?: return@mapNotNull null
+            book.sourceCopyFile(sourceDir)?.let { file -> book.fileUri to file }
+        }.distinctBy { it.second.absolutePath }
         bookIds.forEach { id ->
             val book = booksById[id]
-            book?.cleanedFilePath?.let { java.io.File(it).delete() }
             book?.coverPath?.let { java.io.File(it).delete() }
             if (book != null && convertedDir != null && book.contentHash.isNotBlank()) {
                 java.io.File(convertedDir, "${book.contentHash}.txt").delete()
@@ -114,6 +123,13 @@ class BookshelfRepositoryImpl(
             }
         }
         bookDao.deleteByIds(bookIds)
+        // 行已删完，这时反查为空才说明这份文件真的没人用了
+        cleanedCandidates.forEach { path ->
+            if (bookDao.getByCleanedFilePath(path) == null) java.io.File(path).delete()
+        }
+        sourceCopyCandidates.forEach { (uri, file) ->
+            if (bookDao.getByFileUri(uri) == null) file.delete()
+        }
     }
 
     override fun observeGroupNames(): Flow<List<String>> = bookDao.observeGroupNames()
@@ -203,4 +219,17 @@ class BookshelfRepositoryImpl(
         sessionDao.getBetween(startMs, endMs)
 
     override suspend fun getReadingDayCount(bookId: Long): Int = sessionDao.countReadingDays(bookId)
+}
+
+/**
+ * 这本书的源文件副本——`fileUri` 指向私有 source 目录里的那一份时返回它，否则 null。
+ *
+ * **只认这个目录内的路径**：漫画与 PDF 的 `fileUri` 仍然指向外部（可能是用户自己的文件），
+ * 拿它当路径去删会删掉用户的东西，所以必须按目录前缀卡住。
+ */
+private fun BookEntity.sourceCopyFile(sourceDir: java.io.File?): java.io.File? {
+    if (sourceDir == null) return null
+    val path = fileUri.removePrefix("file://")
+    val prefix = sourceDir.absolutePath + java.io.File.separator
+    return path.takeIf { it.startsWith(prefix) }?.let { java.io.File(it) }
 }

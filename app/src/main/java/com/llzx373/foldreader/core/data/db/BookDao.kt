@@ -66,11 +66,26 @@ interface BookDao {
     @Query("UPDATE books SET encoding = :encoding WHERE id = :bookId")
     suspend fun updateEncoding(bookId: Long, encoding: String)
 
-    @Query("SELECT * FROM books WHERE fileUri = :fileUri LIMIT 1")
+    /**
+     * 按源文件 URI 反查。
+     *
+     * 同一个 `fileUri` 可以对应多行（原版 + 清洗版），这里加 `ORDER BY id` 只是让「不知道
+     * bookId 的调用方」拿到确定的一行；知道 bookId 的调用方应当直接用主键查询。
+     */
+    @Query("SELECT * FROM books WHERE fileUri = :fileUri ORDER BY id LIMIT 1")
     suspend fun getByFileUri(fileUri: String): BookEntity?
 
     @Query("SELECT * FROM books WHERE contentHash = :contentHash LIMIT 1")
     suspend fun getByContentHash(contentHash: String): BookEntity?
+
+    /**
+     * 按清洗副本路径反查。
+     *
+     * 清洗产物是按**内容**命名并复用的，同一份文件可能被多行引用（同一个源文件的原版与清洗版
+     * 用同一套规则重洗时会落到同一个文件上），所以删书前必须用它确认「还有没有人用」。
+     */
+    @Query("SELECT * FROM books WHERE cleanedFilePath = :cleanedFilePath LIMIT 1")
+    suspend fun getByCleanedFilePath(cleanedFilePath: String): BookEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(book: BookEntity): Long

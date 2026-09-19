@@ -143,6 +143,7 @@ class BookshelfRepositoryGroupTest {
         }
         override suspend fun getByFileUri(fileUri: String): BookEntity? = null
         override suspend fun getByContentHash(contentHash: String): BookEntity? = null
+        override suspend fun getByCleanedFilePath(cleanedFilePath: String): BookEntity? = null
         override suspend fun upsert(book: BookEntity): Long = book.id
         override suspend fun update(book: BookEntity) = Unit
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit

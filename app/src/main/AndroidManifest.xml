@@ -37,6 +37,8 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/pdf" />
             </intent-filter>
             <!-- 漫画容器：zip / rar / tar / 7z 的各种 MIME 写法都收 -->
             <intent-filter>
@@ -46,6 +48,57 @@
 
                 <data android:scheme="content" />
                 <data android:scheme="file" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/x-cbt" />
+                <data android:mimeType="application/x-cb7" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/x-tar" />
+                <data android:mimeType="application/x-7z-compressed" />
+            </intent-filter>
+            <!--
+                “分享”绑定：SEND / SEND_MULTIPLE 的 URI 走 EXTRA_STREAM 或 clipData，
+                这类 Intent 通常没有 data，所以这两个过滤器**不能**声明 scheme，
+                只按 MIME 匹配（App 也因此会出现在系统分享面板里）。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/x-cbt" />
+                <data android:mimeType="application/x-cb7" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/x-tar" />
+                <data android:mimeType="application/x-7z-compressed" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/pdf" />
                 <data android:mimeType="application/vnd.comicbook+zip" />
                 <data android:mimeType="application/vnd.comicbook-rar" />
                 <data android:mimeType="application/x-cbz" />

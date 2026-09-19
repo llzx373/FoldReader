@@ -487,10 +487,10 @@
 - [x] 删除旧 `TextCleaner`，能力全部并入 `clean/`（一处真相）
 
 ### M12.2 测试集（`app/src/test/resources/novel-corpus/`）
-- [x] 21 条正向用例（input/expected + 人读说明 + 可选 `profile.txt`），覆盖用户提出的 10 类问题
+- [x] 23 条正向用例（input/expected + 人读说明 + 可选 `profile.txt`），覆盖用户提出的 10 类问题
       与补充调研出的字符/编码、行/段落、章节结构、内容噪音四层
-- [x] 5 条反向用例（`negatives/`）：诗行、拉丁词句、正文里的「收藏」、隔着正文的重复标题、
-      已排好的书——必须**逐字节不变**
+- [x] 6 条反向用例（`negatives/`）：诗行、拉丁词句、正文里的「收藏」、隔着正文的重复标题、
+      已排好的书、每行都缩进但每行都是完整句子——必须**逐字节不变**
 - [x] `NovelCorpusTest` 横向断言：全语料**幂等**（清洗两遍第二遍无变化）+ 反向用例零改动
 - [x] 各规则单测 + `CleanTogglesTest`（档位逐级包含、序列化往返、条目唯一）
 
@@ -503,6 +503,12 @@
       即权威续行信号，标点不作数
 - [x] **删空行把顶格的分篇标题并进上一段**，且原文空行个数会影响结论 → 不幂等。
       空行规整与段落重组改用同一套边界判据：空行只在「下一行能自己站稳」时才冗余
+- [x] **顶格的分篇标题被并进正文首行**（合集里标题与正文都不缩进的变体，语料 `21` 的正文
+      首行是缩进的，没盖住）：缩进判据无缩进可看，标点判据又把「不以句末标点收尾、超过
+      16 字」的标题行判成长行硬换行，标题连同中间的空行一起被并掉（实测 2 处，输出成
+      106 字与 80 字的顶格长行）。新增 `ChapterRepairRules.looksLikeFlushHeader`
+      （整行 `【…】` 起头 + 不含句末标点 + 不超标题长度），**刻意不并进 `looksLikeTitle`**
+      ——那个判据 `BlankLineRules` 也在用，并进去会把标题前的空行删掉。语料 `22` 覆盖
 - [x] 行中标题提行时**丢了正文侧的段首缩进**（段落起点信号丢失，二次清洗结果改变）
 - [x] `第 2 章`（带空格）被并进上一段 → 重组守卫改认「规范化后也是标题」
 - [x] 跨行的省略号**多出一倍**（`…………`）→ 标点规整挪到重组之后
@@ -530,6 +536,94 @@
 - [x] 只支持 TXT：EPUB/FB2/PDF-文本 有真实结构，不产生「硬换行 + 广告行」问题
 - [x] 缺章/乱序/空章只报告不自动改
 - [x] 导出清洗后的 TXT 到用户目录：未做（副本已在库内，属锦上添花）
+
+### M12.6 桌面验证工具（`tools/cleaner`，已完成）
+
+> 把清理引擎搬到桌面上跑：改规则后不必装 APK、导书、翻页找问题。详见 `tools/cleaner/README.md`。
+
+- [x] 独立 Gradle 模块（Kotlin JVM + Compose Desktop），**直接编译 app 的 `clean/` 源码**，规则一处真相
+- [x] 界面：打开 TXT / 编码自动检测与手动覆盖 / 三档 + 15 项逐项开关 / 原文⇄结果两栏 /
+      过滤框（如输入 `【` 直接定位所有分篇标题）/ 报告摘要与改动样例 / 结果另存为
+- [x] 测试同样复用 app 的 clean 测试与语料——同一套规格跑两遍，既是回归也是「两边行为一致」的证据
+- [x] `createDistributable` 出绿色包（自带运行时，字表随包内置）；须显式
+      `modules("jdk.charsets")`——GBK/GB18030/Big5 在这个模块里，而 `Charset.forName` 是
+      运行期查找，jpackage 静态分析看不到；缺了它 `EncodingDetector` 静态初始化就炸，
+      连 UTF-8 文件都打不开（只在绿色包复现，`gradlew run` 用完整 JDK 没事）
+- [x] 失败反馈给出**整条 cause 链**并落 stderr，不再只显示 `message`（静态初始化失败的
+      `ExceptionInInitializerError.message` 是 null，只打印它只会得到一句「读取失败：null」）
+- [x] 顺带拆分（由「共享文件不得引用 android.*」这条约束逼出来）：
+      `ChapterRules` 独立成文件；`TsCharMap` 只留纯解析、Android 加载器移到
+      `core/format/android/`——让「`clean/` 整包纯 JVM」成为绝对约束，不靠排除清单维持
+
+### M12.7 清洗结果的可见性 + 外部「打开方式」（真机反馈后修复）
+
+> 真机上发现：规则是对的，但读到的还是原文；外部「用 FoldReader 打开」直接落到书架。
+
+- [x] **取文按 bookId 而不是按 fileUri 反查**。`contentUriResolver` 与 `bookIdResolver` 各自
+      独立查一次 `findByFileUri`，而同一个 `fileUri` 允许有多行（原版 + 清洗版），
+      `getByFileUri` 又是 `LIMIT 1` 无排序 → 打开清洗版会读到原版的正文，偏移索引与章节
+      也写到原版那行上。`BookParser.openContent/parseChapters/prewarm` 增加 `bookId` 入参
+      （2 参版本保留为默认委托，EPUB/FB2/PDF 与测试桩不必改），调用方一律透传；
+      `getByFileUri` 补 `ORDER BY id` 兜底。回归用例 `TxtBookParserBookIdTest`
+- [x] **重洗后已打开的阅读器不换正文**：原先只订阅 `encoding`，而重洗写入恒为 UTF-8、
+      对已是副本的书是同值、被 `distinctUntilChanged` 吞掉。改为同时订阅 `cleanedFilePath`
+      （撤销清理也覆盖）；`ReaderHost` 改为订阅书行
+- [x] **原版/清洗版在书架分不清**：「已清洗」角标（网格 + 列表）+ 详情页「正文：原文件 / 清洗副本」
+      （判据带 `format == TXT`——EPUB/FB2/PDF 的 `cleanedFilePath` 是压平产物，含义不同）
+- [x] **「浏览」打开与「导入目录为分组」跟设置页档位**（原先恒定 `CleanProfile.NONE`）：
+      配方组装收到 `feature/importer/CleanProfileFactory`，三处入口共用一份规则（含纯函数
+      `cleanProfileOf` 与单测）；浏览打开接上清洗进度
+- [x] **外部「打开方式」落到书架**：入口扩到 `VIEW` / `SEND` / `SEND_MULTIPLE`，URI 从
+      `data` / `clipData` / `EXTRA_STREAM` 三处取，多个文件排队逐个确认；到达时若不在书架页
+      先切回书架再弹对话框；清单补 `application/pdf` 与 FB2 的第二种 MIME 写法，并按
+      scheme/authority 落一行诊断日志（文件名不入日志）
+- [x] 补齐受支持格式清单：`SupportedBooks` 与 `FormatDetector` 认 FB2 的 MIME，
+      `launchImport` 的 MIME 数组补齐 PDF 与全部漫画写法，清单表格写进设计文档 6.2
+- [x] **导入时复制一份原文**进 `filesDir/source/`（按原文内容哈希命名），`fileUri` 指向它：
+      外部「打开方式」的临时授权一失效，直接引用它的书就打不开（表现为「无法打开书籍 /
+      Permission Denial」，重试无效）。TXT 与 EPUB/FB2 都覆盖；同一个文件的原版与清洗版
+      共用同一份副本，故删书改成「行删完再判是否还有别的书引用」；漫画与 PDF 仍只登记外部源
+- [x] 踩到的坑记一笔：源副本必须在**清洗之前**取——清洗顺着输入流把 channel 读到关闭
+      （`Channels.newInputStream` 的流关闭会连带关掉 channel），之后再复制原文只剩
+      `ClosedChannelException`（message 为 null，日志里只有一句"导入失败"）
+- [x] 真机反馈「还是未清洗 + 角标仍是外部的」后补的排查手段：
+      - 「导出正文 / 导出清洗后文本」（详情页，系统「另存为」）——把库里那一份拿出来直接比，
+        结掉「工具里洗成功、App 里看不到」这种只能靠猜的局面
+      - 打开 TXT 时记一行正文来源（`reader: bookId=… 正文=私有文件:<hash>.txt / 外部源:<scheme>`），
+        `正文=外部源` 说明这本书根本没有清洗副本
+      - 澄清语义：「外」角标 = **来源**（外部 App / 文件选择器送进来的），与是否清洗无关；
+        是否清洗看「已清洗」角标与详情页的「正文：原文件 / 清洗副本」
+- [x] 顺着「有副本却像在读原文」这条线做代码审查时发现的**真 bug**：清洗副本按内容命名并复用，
+      同一个源文件的原版与清洗版用同一套规则重洗会**落到同一个文件**上，而删书无条件删
+      `cleanedFilePath` → 删一本把另一本的正文删掉。改为与源副本同样「行删完再反查引用数」，
+      新增 `BookDao.getByCleanedFilePath`；回归用例在 `BookshelfRepositoryDeleteTest`
+- [x] 审查结论（链路本身无误，逐行核对过）：阅读器传 bookId → `resolveContent` 用 bookId 取
+      `getBook(bookId).cleanedFilePath` → 打开该文件；偏移索引的有效性判据是**清洗副本自己的**
+      fileLength/contentHash/charset，旧索引不会被复用；重洗后 `cleanedFilePath` 变化会触发重开。
+      即「有清洗副本却读到原文」在当前源码里不成立，线上若仍出现，只能是没有副本 / 点错那一本 /
+      包是旧的这几种
+
+### M12.8 排版版（每行都缩进）与「原版 + 清洗版」并存（已完成）
+
+> 起因：一本下载站**精校版** TXT——全篇每一行都带缩进（续行也缩进）、行与行之间还留一个空行
+> （双倍行距），段落被硬换行切成一段多行。旧判据下整本合不上，用户只能看到「原文形态」的结果。
+
+- [x] **段落重组新增第三条路**：下一行带缩进时先看**上一行有没有说完话**——行尾是句末标点
+      才是新段落；没说完、且达 `WRAP_MIN_CHARS`（16 字）下限或引号未闭合的就是续行，
+      空行在这条路上不作数（它只是行距）。安全边界是「收尾」这一条：正常书段落必以标点结尾，
+      所以对既有书的行为一个字节都没变
+- [x] 语料 `23-indent-every-line`（正向）+ `negatives/06-indent-every-line-clean`
+      （反向，钉死「每行都缩进但每行都是完整句子」不许被并）
+- [x] `ParagraphRulesTest` 补三条断言：放宽本身、引号未闭合、以及「收尾 / 短行」两条安全边界
+- [x] **导入选清理时原版与清洗版各占一个书架条目**：两行共用同一份源副本；重复导入同一档位
+      直接打开已有的清洗版（不再提示「已在书架」）；原版那一行缺失时补齐
+- [x] `ImportBookCleanTest` 覆盖：首次选清理即两条、重复导入回到同一本清洗版、
+      「不清理」那一支仍按内容去重
+- [x] **下一行以引号起头仍是新段落**：实测补出来的守卫——网文里「上一段结尾漏个标点」
+      很常见，少了它，那份文件里有六十多处整段对话被吞进上一句
+- [x] 实测（一本 4695 行 / 2348 非空行的排版版）：合并 **1091** 处、输出 **1257** 行，
+      旧判据是 **0** 处 / 2348 行；清洗两遍结果不变（幂等成立）
+- [x] 全量回归：`:tools:cleaner:test` 113 项、`:app:testDebugUnitTest` 745 项，全绿
 
 ---
 

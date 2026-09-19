@@ -185,6 +185,8 @@ class ReaderViewModel(
     /** 每页宽高（Default 线程写、IO 线程预取位图时读）。 */
     @Volatile private var lastPageWidthPx = 0
     private var appliedEncoding: String? = null
+    /** 打开时那一份正文所在的清洗副本路径；null 表示当时直接读原文件。 */
+    private var appliedCleanedPath: String? = null
     private var pendingReopenAnchor = -1L
     private var baseReadingMillis = 0L
     private var firstReadAtMs = 0L
@@ -513,18 +515,30 @@ class ReaderViewModel(
             }
         }
         viewModelScope.launch {
+            // 盘上的正文有两个可变因素：编码（决定怎么解码）与清洗副本路径（决定读哪一份文件）。
+            // 任一变化都说明内存里这一份已经过期——「智能整理」重洗完就属于后者，必须重开。
             bookshelfRepository.observeBook(bookId)
-                .map { it?.encoding.orEmpty() }
+                .map { it?.encoding.orEmpty() to it?.cleanedFilePath }
                 .distinctUntilChanged()
-                .collect { encoding ->
-                    val applied = appliedEncoding
-                    if (applied != null && encoding != applied) reopenWithEncoding()
+                // 智能整理是连写两行（先副本路径、再编码）。不合并的话会重开两次，
+                // 头一次用的还是没更新完的编码，正文会闪一下乱码。等它写完再开。
+                .debounce(REOPEN_SETTLE_MS)
+                .collect { (encoding, cleanedPath) ->
+                    if (appliedEncoding != null &&
+                        (encoding != appliedEncoding || cleanedPath != appliedCleanedPath)
+                    ) {
+                        reopenContent()
+                    }
                 }
         }
         viewModelScope.launch { autoPageLoop() }
     }
 
-    private fun reopenWithEncoding() {
+    /**
+     * 重开正文：编码变了（换解码方式）或清洗副本换了（智能整理/撤销清理）时调用。
+     * 保留当前阅读位置，清掉分页器与章节，重新走一次 [openBook]。
+     */
+    private fun reopenContent() {
         pendingReopenAnchor = anchorOffset.value
         runCatching { (content as? java.io.Closeable)?.close() }
         content = null
@@ -564,10 +578,11 @@ class ReaderViewModel(
                 // 章节扫描不再挡在首帧前：实时索引完成后由 onChaptersIndexed 落库，
                 // 本章节的 observeChapters 收集器随数据库更新自动刷新。
                 val opened = withContext(Dispatchers.IO) {
-                    parser.openContent(uri, charsetOverride)
+                    parser.openContent(uri, charsetOverride, bookId)
                 }
                 content = opened
                 appliedEncoding = book.encoding
+                appliedCleanedPath = book.cleanedFilePath
                 // 能走到这里就说明压平产物已就绪（本次压平或命中缓存）：回写标记，书架角标随之消失。
                 // 预热失败或进程中途被杀时，这条就是兜底。
                 if (book.format != BookFormat.TXT) {
@@ -646,7 +661,7 @@ class ReaderViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             firstFrameRendered.filter { it }.first()
             if (chapters.isNotEmpty()) return@launch
-            val scanned = runCatching { parser.parseChapters(uri, charsetOverride) }
+            val scanned = runCatching { parser.parseChapters(uri, charsetOverride, bookId) }
                 .onFailure { DiagnosticLog.line("章节补扫失败 bookId=$bookId: ${it.message}") }
                 .getOrNull() ?: return@launch
             if (chapters.isEmpty()) {
@@ -1422,6 +1437,9 @@ class ReaderViewModel(
     companion object {
         /** 锚点深于该字数且页边界缓存未覆盖时，才启用段首播种起排（浅位置从 0 排足够快）。 */
         private const val SEED_MIN_ANCHOR_CHARS = 30_000L
+
+        /** 正文源变化后的合并窗口：智能整理连写「副本路径 + 编码」两行，等它写完再重开一次。 */
+        private const val REOPEN_SETTLE_MS = 100L
 
         /** 首帧上屏后再延迟该时长，才启动全书后台分页，避开首次翻页。 */
         private const val FULL_BOUNDS_IDLE_DELAY_MS = 400L

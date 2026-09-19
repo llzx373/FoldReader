@@ -79,6 +79,7 @@ fun FileBrowserScreen(
     val entries by viewModel.entries.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val openingFile by viewModel.openingFile.collectAsState()
+    val openingProgress by viewModel.openingProgress.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var removeRootTarget by remember { mutableStateOf<BrowserRoot?>(null) }
@@ -162,7 +163,8 @@ fun FileBrowserScreen(
                     }
                 currentRoots.isEmpty() && path.isEmpty() -> EmptyState(
                     title = "还没有授权文件夹",
-                    description = "授权一个文件夹，直接浏览并打开其中的 TXT 电子书，不会复制原文件",
+                    description = "授权一个文件夹后直接浏览其中的电子书；打开时会把它复制一份进" +
+                        "应用内并入库（按设置页的清洗档位处理），原文件不会被改动",
                     actionLabel = "选择文件夹",
                     onAction = { treeLauncher.launch(null) },
                     illustration = { BrowserFolderIllustration() },
@@ -189,7 +191,11 @@ fun FileBrowserScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         LoadingIndicator()
                         Text(
-                            text = if (batchEnumerating) "正在扫描目录…" else "正在打开…",
+                            text = when {
+                                batchEnumerating -> "正在扫描目录…"
+                                openingProgress >= 0f -> "正在打开… ${(openingProgress * 100).toInt()}%"
+                                else -> "正在打开…"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -305,7 +311,7 @@ private fun EntryList(
     if (!loading && entries.isEmpty()) {
         EmptyState(
             title = "此文件夹没有可导入的内容",
-            description = "仅显示子文件夹与支持的书籍/漫画（TXT / EPUB / FB2 / CBZ / CBR / CBT / CB7）",
+            description = "仅显示子文件夹与支持的书籍/漫画（TXT / EPUB / FB2 / PDF / CBZ / CBR / CBT / CB7）",
         )
         return
     }

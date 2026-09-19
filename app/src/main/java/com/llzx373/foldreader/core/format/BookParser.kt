@@ -72,6 +72,19 @@ interface BookParser {
     suspend fun parseChapters(uri: Uri, charsetOverride: Charset? = null): List<Chapter>
     suspend fun openContent(uri: Uri, charsetOverride: Charset? = null): BookContent
 
+    /**
+     * 同上，但由调用方指明正在处理哪一本书。
+     *
+     * 同一个 `fileUri` 允许对应库里多行（原版 + 清洗版），按 URI 反查只能命中其中不确定的一行；
+     * 调用方本来就知道 bookId，透传下来才能让正文、偏移索引与章节都落在正确的那本书上。
+     * 不知道 bookId 的调用方走上面那两个方法即可。
+     */
+    suspend fun parseChapters(uri: Uri, charsetOverride: Charset?, bookId: Long?): List<Chapter> =
+        parseChapters(uri, charsetOverride)
+
+    suspend fun openContent(uri: Uri, charsetOverride: Charset?, bookId: Long?): BookContent =
+        openContent(uri, charsetOverride)
+
     /** 提取内嵌封面（仅 EPUB 等格式实现）；无封面或条目非图片时返回 null。 */
     suspend fun extractCover(uri: Uri): CoverImage? = null
 
@@ -93,5 +106,5 @@ interface BookParser {
      *
      * 调用方必须容忍失败：预热只是加速，失败等同于没预热，首次打开会照常重来。
      */
-    suspend fun prewarm(uri: Uri) {}
+    suspend fun prewarm(uri: Uri, bookId: Long? = null) {}
 }

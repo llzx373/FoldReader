@@ -14,6 +14,7 @@ import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionDao
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -113,6 +114,44 @@ class BookshelfRepositoryDeleteTest {
         assertEquals(listOf(1L), pageDiskCache.deletedBooks)
     }
 
+    /**
+     * 清洗副本与源副本都是**内容寻址**的，同一个源文件的原版与清洗版会共用同一份
+     * （两行用同一套规则重洗就落到同一个文件上）。删书不能无条件删文件，否则删一本会把
+     * 另一本的正文一起删掉——那一本以后打开只有「无法打开书籍」。
+     */
+    @Test
+    fun `共享的清洗副本与源副本只在最后一个引用者被删时才清理`() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("foldreader-delete").toFile()
+        val sourceDir = File(dir, "source").apply { mkdirs() }
+        val sourceCopy = File(sourceDir, "h1.txt").apply { writeText("原文") }
+        val cleanedCopy = File(dir, "cleaned-h1.txt").apply { writeText("清洗后") }
+        val sharedSourceUri = "file://${sourceCopy.absolutePath}"
+
+        bookDao.books.replaceAll {
+            if (it.id == 1L || it.id == 2L) {
+                it.copy(fileUri = sharedSourceUri, cleanedFilePath = cleanedCopy.absolutePath)
+            } else {
+                it
+            }
+        }
+        val repoWithSourceDir = BookshelfRepositoryImpl(
+            bookDao = bookDao,
+            progressDao = progressDao,
+            chapterDao = FakeChapterDao(),
+            bookmarkDao = bookmarkDao,
+            annotationDao = annotationDao,
+            sessionDao = FakeSessionDao(),
+            pageDiskCache = pageDiskCache,
+            sourceDir = sourceDir,
+        )
+
+        repoWithSourceDir.deleteBooks(listOf(1L))
+        assertTrue("还有一行在用，两个文件都不能删", sourceCopy.isFile && cleanedCopy.isFile)
+
+        repoWithSourceDir.deleteBooks(listOf(2L))
+        assertTrue("最后一个引用者被删，两个文件才该清掉", !sourceCopy.exists() && !cleanedCopy.exists())
+    }
+
     private fun book(id: Long) = BookEntity(
         id = id,
         title = "书$id",
@@ -155,8 +194,11 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun updateEncoding(bookId: Long, encoding: String) {
             books.replaceAll { if (it.id == bookId) it.copy(encoding = encoding) else it }
         }
-        override suspend fun getByFileUri(fileUri: String): BookEntity? = null
+        override suspend fun getByFileUri(fileUri: String): BookEntity? =
+            books.firstOrNull { it.fileUri == fileUri }
         override suspend fun getByContentHash(contentHash: String): BookEntity? = null
+        override suspend fun getByCleanedFilePath(cleanedFilePath: String): BookEntity? =
+            books.firstOrNull { it.cleanedFilePath == cleanedFilePath }
         override suspend fun upsert(book: BookEntity): Long = book.id
         override suspend fun update(book: BookEntity) = Unit
         override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit

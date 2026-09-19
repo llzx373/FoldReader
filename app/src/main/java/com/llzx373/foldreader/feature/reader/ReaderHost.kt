@@ -12,21 +12,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.llzx373.foldreader.FoldReaderApplication
-import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.feature.bookshelf.isPagedFormat
 import com.llzx373.foldreader.feature.comic.ComicReaderScreen
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * 阅读页分发：按书籍格式选择阅读器实现。
@@ -56,10 +52,9 @@ fun ReaderHost(
 ) {
     val app = LocalContext.current.applicationContext as FoldReaderApplication
     // 书与偏好都要**跟着变化**：PDF 在阅读中切「页式/文本」时，这里要当场换掉读者，
-    // 而不是等用户退出去重进（那是最容易被当成"没生效"的交互）
-    val book by produceState<BookEntity?>(initialValue = null, bookId) {
-        value = withContext(Dispatchers.IO) { app.container.bookshelfRepository.getBook(bookId) }
-    }
+    // 而不是等用户退出去重进（那是最容易被当成"没生效"的交互）。
+    // 书行走订阅而不是取一次同理：「智能整理」重写完 cleanedFilePath 后要当场反映。
+    val book by app.container.bookshelfRepository.observeBook(bookId).collectAsState(initial = null)
     val prefs by app.container.bookPrefsRepository.observe(bookId).collectAsState(initial = null)
     val switchScope = rememberCoroutineScope()
 

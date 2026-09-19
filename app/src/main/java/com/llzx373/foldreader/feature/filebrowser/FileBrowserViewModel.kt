@@ -13,8 +13,10 @@ import com.llzx373.foldreader.core.comic.ComicContainer
 import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
+import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.isSupportedBookName
 import com.llzx373.foldreader.core.format.saf.SafTree
+import com.llzx373.foldreader.feature.importer.CleanProfileFactory
 import com.llzx373.foldreader.feature.importer.ComicImportUseCase
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +58,7 @@ class FileBrowserViewModel(
     private val importBook: ImportBookUseCase,
     private val safTree: SafTree,
     private val comicImport: ComicImportUseCase,
+    private val cleanProfileFactory: CleanProfileFactory,
 ) : ViewModel() {
 
     // null = 尚未加载（DataStore 首次发射前），用于区分"加载中"与"无授权根"
@@ -75,6 +78,10 @@ class FileBrowserViewModel(
 
     private val _openingFile = MutableStateFlow(false)
     val openingFile: StateFlow<Boolean> = _openingFile.asStateFlow()
+
+    /** 打开文件的进度（0..1）；负数表示不确定（未启用清洗时没有进度可报）。 */
+    private val _openingProgress = MutableStateFlow(-1f)
+    val openingProgress: StateFlow<Float> = _openingProgress.asStateFlow()
 
     private val _events = MutableSharedFlow<FileBrowserEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<FileBrowserEvent> = _events.asSharedFlow()
@@ -140,10 +147,20 @@ class FileBrowserViewModel(
         }
     }
 
+    /**
+     * 打开一本小说。
+     *
+     * 走的是和书架导入同一条清洗链路（跟随设置页的档位）——原先这里传的是默认的
+     * `CleanProfile.NONE`，于是同一个文件从「浏览」进来永远读不到清洗结果。
+     * 导入会把原文件复制一份进应用私有目录（`filesDir/source/`），库里只引用这一份，
+     * 之后不受外部授权存续的影响。
+     * 大文件清洗要花时间，进度接到 [openingProgress] 上，不再是一动不动地「正在打开…」。
+     */
     fun openFile(entry: BrowserEntry) {
         if (entry.isDirectory || _openingFile.value) return
         viewModelScope.launch {
             _openingFile.value = true
+            _openingProgress.value = -1f
             // 树授权已覆盖子文档，这里尽力再取一次持久化权限，失败不影响后续读取
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -151,11 +168,15 @@ class FileBrowserViewModel(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
+            val profile = runCatching { cleanProfileFactory.fromSettings() }
+                .getOrDefault(CleanProfile.NONE)
             val result = importBook.import(
                 uri = entry.uri,
+                profile = profile,
                 source = BookSource.EXTERNAL,
-            )
+            ) { progress -> _openingProgress.value = progress }
             _openingFile.value = false
+            _openingProgress.value = -1f
             when (result) {
                 is ImportBookUseCase.Result.Imported ->
                     _events.emit(FileBrowserEvent.OpenBook(result.bookId, result.title))
@@ -256,6 +277,7 @@ class FileBrowserViewModel(
                     importBook = container.importBookUseCase,
                     safTree = container.safTree,
                     comicImport = container.comicImportUseCase,
+                    cleanProfileFactory = container.cleanProfileFactory,
                 )
             }
         }

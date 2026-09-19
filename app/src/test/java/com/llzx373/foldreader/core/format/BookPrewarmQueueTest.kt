@@ -29,6 +29,7 @@ class BookPrewarmQueueTest {
     /** 记录 prewarm 调用；[fail] 为 true 时模拟压平失败。 */
     private class FakeParser(private val fail: Boolean = false) : BookParser {
         val warmed = ConcurrentLinkedQueue<String>()
+        val warmedBookIds = ConcurrentLinkedQueue<Long?>()
 
         override suspend fun parseMeta(uri: Uri): BookMeta = error("未使用")
 
@@ -38,8 +39,9 @@ class BookPrewarmQueueTest {
         override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
             error("未使用")
 
-        override suspend fun prewarm(uri: Uri) {
+        override suspend fun prewarm(uri: Uri, bookId: Long?) {
             warmed += uri.toString()
+            warmedBookIds += bookId
             if (fail) throw IllegalStateException("模拟压平失败")
         }
     }
@@ -75,6 +77,8 @@ class BookPrewarmQueueTest {
             advanceUntilIdle()
 
             assertEquals(listOf(bookUri(1), bookUri(2)), parser.warmed.toList())
+            // bookId 必须一起透传：同一个 fileUri 可能有多行，按 URI 反查会落到另一本上
+            assertEquals(listOf(1L, 2L), parser.warmedBookIds.toList())
             assertEquals(listOf(1L, 2L), prepared)
         } finally {
             scope.cancel()
@@ -152,7 +156,7 @@ class BookPrewarmQueueTest {
                 error("未使用")
             override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
                 error("未使用")
-            override suspend fun prewarm(uri: Uri) {
+            override suspend fun prewarm(uri: Uri, bookId: Long?) {
                 maxConcurrent = maxOf(maxConcurrent, concurrent.incrementAndGet())
                 kotlinx.coroutines.yield()
                 concurrent.decrementAndGet()

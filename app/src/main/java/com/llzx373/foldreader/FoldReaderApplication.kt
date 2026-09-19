@@ -21,6 +21,7 @@ import com.llzx373.foldreader.core.comic.ComicContainers
 import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.ChapterRules
+import com.llzx373.foldreader.core.format.android.load
 import com.llzx373.foldreader.core.format.clean.TsCharMap
 import com.llzx373.foldreader.core.format.epub.EpubBookParser
 import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
@@ -41,7 +42,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class AppContainer(context: Context) {
-    val pendingImportUri = MutableStateFlow<Uri?>(null)
+    /**
+     * 外部（「打开方式」/「分享」）送进来、还没被导入对话框消费的文件。
+     *
+     * 用列表而不是单个 Uri：`ACTION_SEND_MULTIPLE` 一次可能送好几个，进程里排着队等用户逐个确认。
+     */
+    val pendingImportUris = MutableStateFlow<List<Uri>>(emptyList())
     val activeReaderBookId = MutableStateFlow<Long?>(null)
     val appContext: Context = context.applicationContext
     val foldableStateProvider = FoldableStateProvider(
@@ -59,6 +65,13 @@ class AppContainer(context: Context) {
     val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
     /** 页边界缓存目录（改版式会生成多份文件，删书时按 bookId 清理）。 */
     val pageBoundsDir = File(context.filesDir, "page_bounds")
+    /**
+     * 源文件副本目录（`<原文内容哈希>.<ext>`）。
+     *
+     * 导入时把原文原样复制一份进来，库里只引用这一份：外部「打开方式」给的授权是临时的，
+     * 引用它就意味着那本书在任务结束后就打不开了。
+     */
+    val sourceDir = File(context.filesDir, "source")
     /** 漫画目录：`cache/<hash>/` 是可回收的解压缓存与缩略图，`local/<hash>/` 是用户选择的本地副本。 */
     val comicExtractionStore = com.llzx373.foldreader.core.comic.ComicExtractionStore(
         File(context.filesDir, "comics"),
@@ -76,8 +89,11 @@ class AppContainer(context: Context) {
         coversDir = coversDir,
         pageDiskCache = pageDiskCache,
         comicStore = comicExtractionStore,
+        sourceDir = sourceDir,
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
+    /** 清洗配方组装：导入对话框、浏览打开、批量导入共用同一份规则。 */
+    val cleanProfileFactory = com.llzx373.foldreader.feature.importer.CleanProfileFactory(settingsRepository)
     val fileBrowserRootsStore = FileBrowserRootsStore(context)
     /** SAF 目录访问（文件浏览器 / 目录批量导入 / 漫画目录容器共用）。 */
     val safTree = com.llzx373.foldreader.core.format.saf.SafTree(appContext)
@@ -96,16 +112,19 @@ class AppContainer(context: Context) {
     private val chapterRules: suspend () -> List<Regex> = {
         ChapterRules.merge(settingsRepository.preferences.first().customChapterRules)
     }
+    // 同一个 fileUri 在库里可能有多行（原版 + 清洗版），所以调用方给了 bookId 就一律以它为准，
+    // 只有不知道 bookId 的调用方（如 JVM 单测、旧的 2 参入口）才回落到按 URI 反查。
+    private val bookIdForUri: suspend (android.net.Uri, Long?) -> Long? = { uri, bookId ->
+        bookId ?: bookshelfRepository.findByFileUri(uri.toString())?.id
+    }
     val txtBookParser = TxtBookParser(
         context = context,
         offsetIndexStore = offsetIndexStore,
         indexScope = parserScope,
-        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
-        contentUriResolver = { uri ->
-            bookshelfRepository.findByFileUri(uri.toString())
-                ?.cleanedFilePath
-                ?.let { Uri.fromFile(java.io.File(it)) }
-                ?: uri
+        bookIdResolver = bookIdForUri,
+        contentUriResolver = { uri, bookId ->
+            val cleaned = bookId?.let { bookshelfRepository.getBook(it)?.cleanedFilePath }
+            cleaned?.let { Uri.fromFile(java.io.File(it)) } ?: uri
         },
         onBookIndexed = onBookIndexed,
         onChaptersIndexed = { bookId, chapters ->
@@ -119,12 +138,12 @@ class AppContainer(context: Context) {
         context = context,
         offsetIndexStore = offsetIndexStore,
         indexScope = parserScope,
-        bookIdResolver = { uri ->
+        bookIdResolver = { uri, _ ->
             uri.lastPathSegment
                 ?.substringBeforeLast('.')
                 ?.let { bookshelfRepository.findByContentHash(it)?.id }
         },
-        contentUriResolver = { it },
+        contentUriResolver = { uri, _ -> uri },
         onBookIndexed = onBookIndexed,
         // 压平文件的章节来自 EPUB/FB2 的 .toc sidecar，这里扫出来的结果由下面那行空回调丢弃。
         // 用空规则集跳过索引扫描期间的逐行正则匹配——那次扫描只剩纯解码，没有白做的活。
@@ -138,7 +157,7 @@ class AppContainer(context: Context) {
         openFlattenedContent = openFlattenedContent,
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
-        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
+        bookIdResolver = bookIdForUri,
         onChaptersIndexed = { bookId, chapters ->
             bookshelfRepository.saveChapters(bookId, chapters)
         },
@@ -148,7 +167,7 @@ class AppContainer(context: Context) {
         openFlattenedContent = openFlattenedContent,
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
-        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
+        bookIdResolver = bookIdForUri,
         onChaptersIndexed = { bookId, chapters ->
             bookshelfRepository.saveChapters(bookId, chapters)
         },
@@ -163,7 +182,7 @@ class AppContainer(context: Context) {
         openFlattenedContent = openFlattenedContent,
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
-        bookIdResolver = { uri -> bookshelfRepository.findByFileUri(uri.toString())?.id },
+        bookIdResolver = bookIdForUri,
         onChaptersIndexed = { bookId, chapters ->
             bookshelfRepository.saveChapters(bookId, chapters)
         },
@@ -359,7 +378,7 @@ class AppContainer(context: Context) {
         // 第二趟：文本型才抽正文压平（扫描件在这里安静返回 null，页式阅读不受影响）。
         // 压平与章节回填都在 PdfBookParser 里，和 EPUB/FB2 走同一条管线。
         val charCount = withContext(Dispatchers.IO) {
-            runCatching { pdfBookParser.prewarmAndCharCount(Uri.parse(book.fileUri)) }.getOrNull()
+            runCatching { pdfBookParser.prewarmAndCharCount(Uri.parse(book.fileUri), book.id) }.getOrNull()
         }
         bookshelfRepository.updateConvertedFile(
             bookId = book.id,
@@ -467,6 +486,8 @@ class AppContainer(context: Context) {
             }
             outcome.toImportResult()
         },
+        // 批量导入没有对话框：清洗档位跟随设置页，与「浏览」打开一致
+        profileProvider = cleanProfileFactory::fromSettings,
     )
 
     /**

@@ -20,6 +20,7 @@ class ImportConvertedMetaTest {
     private val useCase = ImportBookUseCase(
         bookshelfRepository = FakeRepo(),
         cleanedDir = File("unused"),
+        sourceDir = File("unused"),
         openChannel = { error("不需要") },
         displayNameOf = { null },
         traditionalMap = { emptyMap() },
@@ -114,7 +115,7 @@ class ImportConvertedMetaTest {
         val book = useCase.convertedEntity(
             title = fullMeta.title,
             meta = fullMeta,
-            uriKey = "content://test/book.epub",
+            contentFileUri = "file:///data/source/abc123.epub",
             contentHash = "abc123",
             format = BookFormat.EPUB,
             source = BookSource.IMPORT,
@@ -139,7 +140,7 @@ class ImportConvertedMetaTest {
         val book = useCase.convertedEntity(
             title = "未知书名",
             meta = null,
-            uriKey = "content://test/book.epub",
+            contentFileUri = "file:///data/source/abc123.epub",
             contentHash = "abc123",
             format = BookFormat.EPUB,
             source = BookSource.EXTERNAL,

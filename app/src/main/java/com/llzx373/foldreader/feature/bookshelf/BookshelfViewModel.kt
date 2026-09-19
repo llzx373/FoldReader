@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.bookshelf
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -17,21 +18,25 @@ import com.llzx373.foldreader.core.format.OffsetIndexStore
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.clean.CleanReport
-import com.llzx373.foldreader.core.format.clean.CleanToggles
+import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.feature.importer.BatchImportUseCase
+import com.llzx373.foldreader.feature.importer.CleanProfileFactory
 import com.llzx373.foldreader.feature.importer.ComicImportUseCase
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import com.llzx373.foldreader.feature.importer.RecleanBookUseCase
+import java.io.File
+import java.nio.channels.Channels
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 书架客户端排序：均为稳定键，阅读行为不会改变列表顺序（进度排序仅在进度百分比变化跨越他书时移动）。 */
 private fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): List<BookWithProgress> =
@@ -60,7 +65,6 @@ sealed interface ImportUiState {
     data class Duplicate(
         val bookId: Long,
         val title: String,
-        val sameFile: Boolean,
         val openAfter: Boolean,
     ) : ImportUiState
     data class Error(val message: String) : ImportUiState
@@ -80,6 +84,7 @@ sealed interface BatchImportUiState {
 }
 
 class BookshelfViewModel(
+    private val appContext: Context,
     private val importBook: ImportBookUseCase,
     private val batchImport: BatchImportUseCase,
     private val bookshelfRepository: BookshelfRepository,
@@ -88,6 +93,7 @@ class BookshelfViewModel(
     private val offsetIndexStore: OffsetIndexStore,
     private val comicImport: ComicImportUseCase,
     private val reclean: RecleanBookUseCase,
+    private val cleanProfileFactory: CleanProfileFactory,
 ) : ViewModel() {
 
     val books: StateFlow<List<BookWithProgress>> = combine(
@@ -154,10 +160,12 @@ class BookshelfViewModel(
                         openAfter = openAfterImport,
                         cleanSummary = result.cleanReport?.summary(),
                     )
+                // 「同一路径」与「内容相同」现在都只是"已在书架"：来源 URI 已改成私有副本，
+                // 判定本身是内容判定。外部送进来的文件照样要打开，所以两者都用 openAfterImport。
                 is ImportBookUseCase.Result.DuplicateSameUri ->
-                    ImportUiState.Duplicate(result.bookId, result.title, sameFile = true, openAfter = openAfterImport)
+                    ImportUiState.Duplicate(result.bookId, result.title, openAfter = openAfterImport)
                 is ImportBookUseCase.Result.DuplicateSameHash ->
-                    ImportUiState.Duplicate(result.bookId, result.title, sameFile = false, openAfter = false)
+                    ImportUiState.Duplicate(result.bookId, result.title, openAfter = openAfterImport)
                 is ImportBookUseCase.Result.Failure ->
                     ImportUiState.Error(result.message ?: "未知错误")
             }
@@ -198,29 +206,56 @@ class BookshelfViewModel(
     }
 
     /**
+     * 把这本书的正文另存到用户选的位置。
+     *
+     * [cleanedCopy] = true 导出**清洗副本**（阅读器实际读的那一份），false 导出原文。
+     * 库里的副本看不见摸不着，光看阅读页的排版很难判断清洗到底生效没有——留这个出口，
+     * 就是为了能在手机上把两份文本各导一份出来并排比（或传回电脑上 diff）。
+     */
+    fun exportText(
+        bookId: Long,
+        cleanedCopy: Boolean,
+        target: Uri,
+        onResult: (String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                runCatching {
+                    val book = bookshelfRepository.getBook(bookId) ?: error("书籍不存在")
+                    val cleanedPath = book.cleanedFilePath
+                    if (cleanedCopy && cleanedPath == null) error("这本书没有清洗副本")
+                    val sourceKey = if (cleanedCopy) {
+                        Uri.fromFile(File(cleanedPath!!)).toString()
+                    } else {
+                        book.fileUri
+                    }
+                    val output = appContext.contentResolver.openOutputStream(target)
+                        ?: error("无法写入所选位置")
+                    UriChannels.open(appContext, Uri.parse(sourceKey)).use { channel ->
+                        output.use { out ->
+                            val copied = Channels.newInputStream(channel).copyTo(out)
+                            out.flush()
+                            copied
+                        }
+                    }
+                }.fold(
+                    onSuccess = { bytes -> "已导出 ${bytes / 1024} KB" },
+                    onFailure = { "导出失败：${it.message ?: "未知错误"}" },
+                )
+            }
+            onResult(message)
+        }
+    }
+
+    /**
      * 组装一次导入要用的清洗配方。
      *
-     * - [cleanLevel] 为 null = 这次不清理（[CleanProfile.NONE]，不物化副本）。
-     * - 繁简是正交偏好，单独由 [convertTraditional] 决定，不随档位走。
-     * - 自定义广告正则始终参与——那是用户显式配的规则，不该再要一个开关去启用。
+     * 规则本体在 [CleanProfileFactory]（浏览与批量导入共用同一份），这里只是把对话框的选择转过去。
      */
     private suspend fun buildCleanProfile(
         cleanLevel: CleanLevel?,
         convertTraditional: Boolean,
-    ): CleanProfile {
-        if (cleanLevel == null) return CleanProfile.NONE
-        val prefs = settingsRepository.preferences.first()
-        val base = if (cleanLevel == CleanLevel.CUSTOM) {
-            prefs.cleanToggles
-        } else {
-            CleanToggles.preset(cleanLevel)
-        }
-        return CleanProfile(
-            level = cleanLevel,
-            toggles = base.copy(traditionalToSimplified = convertTraditional),
-            adPatterns = prefs.adCleanRules.mapNotNull { runCatching { Regex(it) }.getOrNull() },
-        )
-    }
+    ): CleanProfile = cleanProfileFactory.forLevel(cleanLevel, convertTraditional)
 
     /**
      * 「智能整理」的预览：按 [cleanLevel] 只跑清洗、不落盘，报告走 [cleanPreview] 状态。
@@ -376,7 +411,7 @@ class BookshelfViewModel(
         bookshelfRepository.saveChapters(bookId, emptyList())
         val override = EncodingDetector.forNameOrNull(book.encoding)
         val scanned = runCatching {
-            parsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override)
+            parsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override, bookId)
         }.getOrDefault(emptyList())
         bookshelfRepository.saveChapters(bookId, scanned)
     }
@@ -412,6 +447,7 @@ class BookshelfViewModel(
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 BookshelfViewModel(
+                    appContext = container.appContext,
                     importBook = container.importBookUseCase,
                     batchImport = container.batchImportUseCase,
                     bookshelfRepository = container.bookshelfRepository,
@@ -420,6 +456,7 @@ class BookshelfViewModel(
                     offsetIndexStore = container.offsetIndexStore,
                     comicImport = container.comicImportUseCase,
                     reclean = container.recleanBookUseCase,
+                    cleanProfileFactory = container.cleanProfileFactory,
                 )
             }
         }

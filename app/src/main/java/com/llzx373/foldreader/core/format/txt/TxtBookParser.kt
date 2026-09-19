@@ -2,6 +2,7 @@ package com.llzx373.foldreader.core.format.txt
 
 import android.content.Context
 import android.net.Uri
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.format.BookContent
 import com.llzx373.foldreader.core.format.BookMeta
 import com.llzx373.foldreader.core.format.BookParser
@@ -30,16 +31,28 @@ class TxtBookParser(
     private val context: Context,
     private val offsetIndexStore: OffsetIndexStore? = null,
     private val indexScope: CoroutineScope? = null,
-    private val bookIdResolver: suspend (Uri) -> Long? = { null },
-    private val contentUriResolver: suspend (Uri) -> Uri = { it },
+    private val bookIdResolver: suspend (Uri, Long?) -> Long? = { _, _ -> null },
+    private val contentUriResolver: suspend (Uri, Long?) -> Uri = { uri, _ -> uri },
     private val onBookIndexed: suspend (bookId: Long, totalChars: Long) -> Unit = { _, _ -> },
     /** 实时索引（异步建偏移索引）扫描完成后回传章节，调用方负责落库与通知 UI。 */
     private val onChaptersIndexed: suspend (bookId: Long, chapters: List<Chapter>) -> Unit = { _, _ -> },
     private val chapterRules: suspend () -> List<Regex> = { ChapterRules.DEFAULT },
 ) : BookParser {
 
+    /**
+     * 取正文用的真实 URI 与这本书的 bookId。
+     *
+     * 调用方知道 bookId 时会直接采用，不再按 URI 反查——同一个 `fileUri` 可能对应库里多行
+     * （原版 + 清洗版），按 URI 反查会落到另一本上，正文与偏移索引就串了。
+     */
+    private suspend fun resolveContent(uri: Uri, bookId: Long?): Pair<Uri, Long?> {
+        val effectiveBookId = bookIdResolver(uri, bookId)
+        return contentUriResolver(uri, effectiveBookId) to effectiveBookId
+    }
+
     override suspend fun parseMeta(uri: Uri): BookMeta = withContext(Dispatchers.IO) {
-        UriChannels.open(context, contentUriResolver(uri)).use { channel ->
+        val (contentUri, _) = resolveContent(uri, null)
+        UriChannels.open(context, contentUri).use { channel ->
             val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
             val detection = EncodingDetector.detect(sample)
             BookMeta(
@@ -51,14 +64,22 @@ class TxtBookParser(
         }
     }
 
-    override suspend fun parseChapters(uri: Uri, charsetOverride: Charset?): List<Chapter> {
-        val index = index(uri, charsetOverride)
-        persistIndex(uri, index)
+    override suspend fun parseChapters(uri: Uri, charsetOverride: Charset?): List<Chapter> =
+        parseChapters(uri, charsetOverride, null)
+
+    override suspend fun parseChapters(uri: Uri, charsetOverride: Charset?, bookId: Long?): List<Chapter> {
+        val index = index(uri, charsetOverride, bookId)
+        persistIndex(uri, index, bookId)
         return index.chapters
     }
 
-    suspend fun index(uri: Uri, charsetOverride: Charset? = null): TxtIndex = withContext(Dispatchers.IO) {
-        UriChannels.open(context, contentUriResolver(uri)).use { channel ->
+    suspend fun index(
+        uri: Uri,
+        charsetOverride: Charset? = null,
+        bookId: Long? = null,
+    ): TxtIndex = withContext(Dispatchers.IO) {
+        val (contentUri, _) = resolveContent(uri, bookId)
+        UriChannels.open(context, contentUri).use { channel ->
             val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
             val charset = effectiveCharset(sample, charsetOverride)
             val bom = EncodingDetector.bomLengthOf(sample)
@@ -66,54 +87,62 @@ class TxtBookParser(
         }
     }
 
-    override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent = withContext(Dispatchers.IO) {
-        val contentUri = contentUriResolver(uri)
-        val channel = UriChannels.open(context, contentUri)
-        try {
-            val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
-            val charset = effectiveCharset(sample, charsetOverride)
-            val bom = EncodingDetector.bomLengthOf(sample)
-            val store = offsetIndexStore
-            val scope = indexScope
-            val bookId = bookIdResolver(uri)
-            if (store != null && bookId != null) {
-                val fileLength = channel.size()
-                val contentHash = contentHash(channel, fileLength)
-                val key = bookId.toString()
-                val snapshot = runCatching {
-                    store.loadValid(key, fileLength, contentHash, charset.name())
-                }.getOrNull()
-                if (snapshot != null) {
-                    return@withContext TxtBookContent(
-                        channel = channel,
-                        charset = charset,
-                        offsetIndex = OffsetIndex.restore(snapshot),
-                    )
+    override suspend fun openContent(uri: Uri, charsetOverride: Charset?): BookContent =
+        openContent(uri, charsetOverride, null)
+
+    override suspend fun openContent(uri: Uri, charsetOverride: Charset?, bookId: Long?): BookContent =
+        withContext(Dispatchers.IO) {
+            val (contentUri, effectiveBookId) = resolveContent(uri, bookId)
+            // 「读到的还是原文」这类问题只能靠"实际打开的是哪一份"来定位，记一行现场。
+            // 私有文件的文件名是内容哈希，不含用户的文件名。
+            DiagnosticLog.line(
+                "reader: bookId=$effectiveBookId 正文=${describeContentUri(contentUri)}",
+            )
+            val channel = UriChannels.open(context, contentUri)
+            try {
+                val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
+                val charset = effectiveCharset(sample, charsetOverride)
+                val bom = EncodingDetector.bomLengthOf(sample)
+                val store = offsetIndexStore
+                val scope = indexScope
+                if (store != null && effectiveBookId != null) {
+                    val fileLength = channel.size()
+                    val contentHash = contentHash(channel, fileLength)
+                    val key = effectiveBookId.toString()
+                    val snapshot = runCatching {
+                        store.loadValid(key, fileLength, contentHash, charset.name())
+                    }.getOrNull()
+                    if (snapshot != null) {
+                        return@withContext TxtBookContent(
+                            channel = channel,
+                            charset = charset,
+                            offsetIndex = OffsetIndex.restore(snapshot),
+                        )
+                    }
+                    if (scope != null) {
+                        return@withContext openLiveContent(
+                            uri = contentUri,
+                            channel = channel,
+                            charset = charset,
+                            bom = bom,
+                            fileLength = fileLength,
+                            contentHash = contentHash,
+                            key = key,
+                            bookId = effectiveBookId,
+                            store = store,
+                            parentScope = scope,
+                            rules = chapterRules(),
+                        )
+                    }
                 }
-                if (scope != null) {
-                    return@withContext openLiveContent(
-                        uri = contentUri,
-                        channel = channel,
-                        charset = charset,
-                        bom = bom,
-                        fileLength = fileLength,
-                        contentHash = contentHash,
-                        key = key,
-                        bookId = bookId,
-                        store = store,
-                        parentScope = scope,
-                        rules = chapterRules(),
-                    )
-                }
+                val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules())
+                persistIndex(uri, index, effectiveBookId)
+                TxtBookContent(channel, charset, index.offsetIndex)
+            } catch (t: Throwable) {
+                channel.close()
+                throw t
             }
-            val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules())
-            persistIndex(uri, index)
-            TxtBookContent(channel, charset, index.offsetIndex)
-        } catch (t: Throwable) {
-            channel.close()
-            throw t
         }
-    }
 
     private fun openLiveContent(
         uri: Uri,
@@ -190,23 +219,28 @@ class TxtBookParser(
         return content
     }
 
-    private suspend fun persistIndex(uri: Uri, index: TxtIndex) {
+    private suspend fun persistIndex(uri: Uri, index: TxtIndex, bookId: Long?) {
         val store = offsetIndexStore ?: return
-        val bookId = bookIdResolver(uri) ?: return
+        val (contentUri, effectiveBookId) = resolveContent(uri, bookId)
+        if (effectiveBookId == null) return
         runCatching {
-            UriChannels.open(context, contentUriResolver(uri)).use { channel ->
+            UriChannels.open(context, contentUri).use { channel ->
                 val fileLength = channel.size()
                 store.saveValid(
-                    key = bookId.toString(),
+                    key = effectiveBookId.toString(),
                     snapshot = index.offsetIndex.snapshot(),
                     fileLength = fileLength,
                     contentHash = contentHash(channel, fileLength),
                     charsetName = index.charset.name(),
                 )
             }
-            onBookIndexed(bookId, index.charCount)
+            onBookIndexed(effectiveBookId, index.charCount)
         }
     }
+
+    /** 诊断用：只说"读的是哪一份"，不记完整 URI（外部 URI 可能带着用户的文件名）。 */
+    private fun describeContentUri(uri: Uri): String =
+        if (uri.scheme == "file") "私有文件:${uri.lastPathSegment}" else "外部源:${uri.scheme}"
 
     private fun contentHash(channel: SeekableByteChannel, fileLength: Long): String =
         ContentHasher.hash(fileLength) { offset, length -> UriChannels.readAt(channel, offset, length) }

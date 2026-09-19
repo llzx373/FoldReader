@@ -235,6 +235,20 @@ class BatchImportUseCaseTest {
     }
 
     @Test
+    fun `选了清理的书会把原版那一行一起归组`() = runBlocking {
+        val groupCalls = mutableListOf<Pair<List<Long>, String?>>()
+        val useCase = BatchImportUseCase(
+            // 清洗版 11L 与它一并入库的原版 10L（同一个源文件的相邻两行）
+            importOne = { ImportBookUseCase.Result.Imported(11L, "甲", 1f, originalBookId = 10L) },
+            assignGroup = { ids, name -> groupCalls += ids to name },
+        )
+
+        useCase.importDirectory(listOf(entry("甲.txt")), "新组")
+
+        assertEquals(listOf(listOf(11L, 10L) to "新组"), groupCalls)
+    }
+
+    @Test
     fun `组名为空白时不赋组`() = runBlocking {
         val groupCalls = mutableListOf<Pair<List<Long>, String?>>()
         val useCase = BatchImportUseCase(

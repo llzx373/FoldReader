@@ -72,6 +72,18 @@ fun FoldReaderApp() {
         windowPortrait = windowPortrait,
     )
 
+    // 外部「打开方式」/「分享」送文件进来时，App 可能正停在浏览或设置页。导入对话框长在书架上，
+    // 不切回去用户只会看到"什么都没发生"——这一步就是那个"没有其他东西"的补丁。
+    LaunchedEffect(Unit) {
+        container.pendingImportUris.collect { incoming ->
+            val route = navController.currentBackStackEntry?.destination?.route
+            if (incoming.isNotEmpty() && route != Routes.BOOKSHELF) {
+                ReturnTrace.log("open-with: 收到外部文件，切回书架（当前 $route）")
+                navController.navigateTopLevel(Routes.BOOKSHELF)
+            }
+        }
+    }
+
     // 外壳导航组件形态与路由无关：阅读页由 ReaderOverlay 全窗口渲染，不再从 content 槽进出。
     // （曾经把非顶层路由切成 NavigationSuiteType.None：进书时退场中的书架会因 rail 消失整体
     // 左移，退书时又会因 rail 变宽整体右推；也不要碰 scaffold state，其内部有按 state 驱动的

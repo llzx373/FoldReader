@@ -19,5 +19,6 @@ fun isSupportedBookName(name: String, mimeType: String?): Boolean {
         mimeType == "text/plain" ||
         mimeType == FormatDetector.EPUB_MIME_TYPE ||
         mimeType == FormatDetector.PDF_MIME_TYPE ||
+        mimeType in FormatDetector.FB2_MIME_TYPES ||
         ComicContainers.fromMime(mimeType) != null
 }

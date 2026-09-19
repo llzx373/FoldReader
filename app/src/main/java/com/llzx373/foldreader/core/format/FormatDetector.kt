@@ -13,6 +13,14 @@ object FormatDetector {
     const val EPUB_MIME_TYPE = "application/epub+zip"
     const val PDF_MIME_TYPE = "application/pdf"
 
+    /**
+     * FB2 没有注册的正式 MIME，两种写法都遇到过。
+     *
+     * 很多来源（下载目录、第三方文件管理器）压根不给 .fb2 后缀或把它报成这两种之一，
+     * 所以判定与「是否可导入」的白名单都要认它，否则清单里广告了 FB2 却在别处看不到。
+     */
+    val FB2_MIME_TYPES = setOf("application/x-fictionbook+xml", "application/x-fictionbook")
+
     fun detect(displayName: String?, mimeType: String?, head: ByteArray): BookFormat? {
         if (isEpub(head)) return BookFormat.EPUB
         if (isFb2Zip(head)) return BookFormat.FB2
@@ -23,7 +31,8 @@ object FormatDetector {
         val ext = name?.substringAfterLast('.', "")
         return when {
             ext == "epub" || mimeType == EPUB_MIME_TYPE -> BookFormat.EPUB
-            ext == "fb2" || name?.endsWith(".fb2.zip") == true -> BookFormat.FB2
+            ext == "fb2" || name?.endsWith(".fb2.zip") == true || mimeType in FB2_MIME_TYPES ->
+                BookFormat.FB2
             ext == "pdf" || mimeType == PDF_MIME_TYPE -> BookFormat.PDF
             // 漫画判定放在 EPUB/FB2 之后（它们也是 zip）、TXT 之前
             // （把 zip/rar 当纯文本解只会得到乱码）

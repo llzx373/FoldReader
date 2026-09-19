@@ -1,6 +1,8 @@
 package com.llzx373.foldreader.feature.bookshelf
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -58,6 +60,17 @@ fun BookDetailDialog(
     val scope = rememberCoroutineScope()
     var refreshTick by remember { mutableIntStateOf(0) }
     var showEncodingPicker by remember { mutableStateOf(false) }
+    // 导出走系统的「另存为」：默认文件名按内容标记，方便两份并排比
+    var exportCleanedCopy by remember { mutableStateOf(true) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { target ->
+        if (target != null) {
+            viewModel.exportText(bookId, cleanedCopy = exportCleanedCopy, target = target) { message ->
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val detail by produceState<Triple<BookEntity?, ReadingProgressEntity?, Int>?>(
         initialValue = null,
         bookId,
@@ -124,6 +137,13 @@ fun BookDetailDialog(
                     DetailRow("分组", book.groupName ?: "未分组")
                     if (!isComic) {
                         DetailRow("总字数", "%,d 字".format(book.totalChars))
+                        if (book.format == BookFormat.TXT) {
+                            // 同一个源文件允许「原版」与「清洗版」并存，这里说清这一本读的是哪一份
+                            DetailRow(
+                                "正文",
+                                if (book.cleanedFilePath != null) "清洗副本" else "原文件",
+                            )
+                        }
                     }
                     DetailRow("阅读进度", percent)
                     DetailRow("累计时长", formatDurationZh(totalMillis))
@@ -223,6 +243,27 @@ fun BookDetailDialog(
                                         viewModel.consumeCleanPreview()
                                     },
                                 )
+                            }
+                            // 清洗到底生效没有，看阅读页的排版很容易看走眼：把两份文本各导一份出来
+                            // 直接比（电脑上 diff 也行）。有副本才谈得上「对照」。
+                            val hasCleanedCopy = book.cleanedFilePath != null
+                            TextButton(
+                                onClick = {
+                                    exportCleanedCopy = hasCleanedCopy
+                                    exportLauncher.launch(exportFileName(book.title, hasCleanedCopy))
+                                },
+                            ) {
+                                Text(if (hasCleanedCopy) "导出清洗后文本" else "导出正文")
+                            }
+                            if (hasCleanedCopy) {
+                                TextButton(
+                                    onClick = {
+                                        exportCleanedCopy = false
+                                        exportLauncher.launch(exportFileName(book.title, cleaned = false))
+                                    },
+                                ) {
+                                    Text("导出原文")
+                                }
                             }
                         }
                     }
@@ -367,4 +408,13 @@ private fun DetailRow(label: String, value: String, onClick: (() -> Unit)? = nul
             modifier = Modifier.weight(0.65f),
         )
     }
+}
+
+/** 非法文件名字符（各平台通用的一套）与导出默认名。 */
+private val ILLEGAL_FILE_NAME_CHARS = Regex("[\\\\/:*?\"<>|]")
+
+/** 导出的默认文件名：书名里可能有路径分隔符，清掉再当文件名用。 */
+private fun exportFileName(title: String, cleaned: Boolean): String {
+    val safe = title.replace(ILLEGAL_FILE_NAME_CHARS, "_").trim().take(80).ifBlank { "book" }
+    return if (cleaned) "$safe-清洗后.txt" else "$safe-原文.txt"
 }
