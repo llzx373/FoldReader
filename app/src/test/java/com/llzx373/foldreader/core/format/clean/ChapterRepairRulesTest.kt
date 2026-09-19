@@ -63,6 +63,25 @@ class ChapterRepairRulesTest {
     }
 
     @Test
+    fun `顶格分篇标题形态识别`() {
+        assertTrue(ChapterRepairRules.looksLikeFlushHeader("【第二篇】"))
+        assertTrue(ChapterRepairRules.looksLikeFlushHeader("【第二篇】作者：某某"))
+        assertTrue(ChapterRepairRules.looksLikeFlushHeader("【外传·某某某篇】（某某某篇）作者：某某某某某"))
+    }
+
+    @Test
+    fun `分篇标题形态不吞正文与章节标题`() {
+        // 正文里的 `【…】` 夹在句中、或整行成句 → 不是标题
+        assertFalse(ChapterRepairRules.looksLikeFlushHeader("他翻开【图鉴】看了看"))
+        assertFalse(ChapterRepairRules.looksLikeFlushHeader("【系统】检测到宿主已激活。"))
+        // 超出行长上限的不是标题
+        assertFalse(ChapterRepairRules.looksLikeFlushHeader("【" + "某".repeat(45) + "】"))
+        // 章节标题与普通行不受影响
+        assertFalse(ChapterRepairRules.looksLikeFlushHeader("第二章 云涌"))
+        assertFalse(ChapterRepairRules.looksLikeFlushHeader(""))
+    }
+
+    @Test
     fun `目录表头识别`() {
         assertTrue(ChapterRepairRules.isTocHeader("目录"))
         assertTrue(ChapterRepairRules.isTocHeader("目 录"))

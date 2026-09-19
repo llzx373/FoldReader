@@ -1,20 +1,5 @@
 package com.llzx373.foldreader.core.format
 
-object ChapterRules {
-    private const val CN_NUM = "0-9０-９零一二三四五六七八九十百千万两"
-    const val MAX_TITLE_LENGTH = 40
-
-    val DEFAULT: List<Regex> = listOf(
-        Regex("^(?:正文|序卷|作品相关|VIP卷)?\\s*第[$CN_NUM]+[章节卷回部篇][^\\n]{0,35}$"),
-        Regex("^[Cc][Hh][Aa][Pp][Tt][Ee][Rr]\\s*\\d{1,6}[^\\n]{0,35}$"),
-        Regex("^\\d{1,6}[、.．]\\s*\\S[^\\n]{0,34}$"),
-        Regex("^(?:楔子|序章|序言|引子|前言|终章|尾声|番外篇?)[^\\n]{0,35}$"),
-    )
-
-    fun merge(customPatterns: List<String>): List<Regex> =
-        customPatterns.mapNotNull { runCatching { Regex(it) }.getOrNull() } + DEFAULT
-}
-
 class ChapterScanner(
     private val rules: List<Regex> = ChapterRules.DEFAULT,
 ) {

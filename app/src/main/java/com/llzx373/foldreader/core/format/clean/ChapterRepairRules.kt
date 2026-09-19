@@ -36,6 +36,12 @@ internal object ChapterRepairRules {
 
     private val TOC_HEADER = Regex("^\\s*目\\s*录\\s*$")
 
+    /** 顶格分篇标题的形态：整行 `【…】` 起头（后面可以是空、副题 `（…）`、`作者：…` 或篇名）。 */
+    private val FLUSH_HEADER = Regex("^【[^】]{1,40}】.*$")
+
+    /** 标题不是句子：整行出现句末标点就说明它更像正文（`【系统】检测到宿主。`）。 */
+    private val FLUSH_HEADER_SENTENCE = Regex("[。！？]")
+
     /** 是否是章节标题行（与 [ChapterScanner] 同规则：先 trim，再整行匹配）。 */
     fun isTitle(line: String): Boolean {
         val trimmed = line.trim()
@@ -51,6 +57,27 @@ internal object ChapterRepairRules {
      * 标题就再也提不出来了。
      */
     fun looksLikeTitle(line: String): Boolean = isTitle(canonicalizeTitle(line))
+
+    /**
+     * 顶格的分篇标题（合集类文件的形态）：`【第二篇】`、`【篇名】（副题）作者：某某`。
+     *
+     * 与 [looksLikeTitle] **刻意分开**，两处判据的落点不同：
+     * - 这个形态不参与章节标题的规范化与去重（它不是「第 N 章」），所以不能并进 [isTitle]；
+     * - [BlankLineRules] 也调 [looksLikeTitle]，若并进去，分篇标题前的空行会被判冗余删掉，
+     *   而那个空行正是「顶格行不是续行」的唯一依据。
+     *
+     * 它只回答一个问题：这一行自成一体，**段落重组不能把它并进上一段、也不能把它下面那段并进来**。
+     *
+     * 判据是「整行以 `【…】` 起头 + 不含句末标点 + 不超标题长度」：正文里出现 `【…】`
+     * 通常是夹在句子中间的（`他翻开【图鉴】看了看。`），整行以它起头又一句都不成句的，
+     * 几乎只能是标题行。宁可把这种行漏并（段落少并一次），也不能把标题粘进正文。
+     */
+    fun looksLikeFlushHeader(line: String): Boolean {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty() || trimmed.length > ChapterRules.MAX_TITLE_LENGTH) return false
+        if (FLUSH_HEADER_SENTENCE.containsMatchIn(trimmed)) return false
+        return FLUSH_HEADER.matches(trimmed)
+    }
 
     fun isTocHeader(line: String): Boolean = TOC_HEADER.matches(line)
 

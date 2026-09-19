@@ -35,6 +35,8 @@ androidxPdf = "1.0.0-beta01"
 pdfboxAndroid = "2.0.27.0"
 # JVM 单测里的 Android API（Paint / BitmapFactory / SQLite / Compose UI）
 robolectric = "4.17"
+# 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
+composeMultiplatform = "1.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -83,5 +85,7 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }

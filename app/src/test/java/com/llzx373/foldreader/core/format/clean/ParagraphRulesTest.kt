@@ -28,6 +28,37 @@ class ParagraphRulesTest {
         assertFalse(merge("第二章 云涌", "他睁开眼睛。"))
     }
 
+    /**
+     * 真实文件形态：合集里分篇标题**顶格**写，正文也**顶格**写（不是缩进分段）。
+     * 上一行是标题、不以句末标点收尾、又超过 16 字，标点判据下会被判成「长行硬换行」而并掉。
+     */
+    @Test
+    fun `顶格分篇标题不被并进下一段`() {
+        assertFalse(
+            merge(
+                "【外传·某某某篇】（某某某篇）作者：某某某某某",
+                "天色暗了下来，街上静悄悄的，",
+                blanks = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `顶格分篇标题也不吞掉下一段`() {
+        // 对照：同样位置换成普通长行，照常合并
+        assertTrue(merge("夜色像一张巨大的网，悄无声息地笼罩了整座城市，", "街道上的行人渐渐稀少。"))
+        assertFalse(merge("夜色像一张巨大的网，悄无声息地笼罩了整座城市，", "【第二篇】作者：某某"))
+        // 缩进起头的段落同样不能吞掉顶格分篇标题
+        assertFalse(
+            ParagraphRules.shouldMerge(
+                "他停下脚步。",
+                "【第二篇】作者：某某",
+                paragraphIndented = true,
+                blankLinesBetween = 0,
+            ),
+        )
+    }
+
     @Test
     fun `长行且无句末标点时合并`() {
         val prev = "夜色像一张巨大的网，悄无声息地笼罩了整座城市，"
@@ -113,6 +144,67 @@ class ParagraphRulesTest {
                 "第二章 云涌",
                 paragraphIndented = true,
                 blankLinesBetween = 0,
+            ),
+        )
+    }
+
+    /**
+     * 「每一行都带缩进」的排版版（下载站精校版：全篇每行缩进、行间还留空行）。
+     * 这种文件里缩进不是段落信号，只能看上一行有没有说完话，空行也不作数。
+     */
+    @Test
+    fun `每行都缩进的排版版里，没说完的行照样并回`() {
+        assertTrue(
+            ParagraphRules.shouldMerge(
+                "第一段开头在这里被硬换行切断，后面还有",
+                "\u3000一句接着往下说，这一行同样带着缩进，",
+                paragraphIndented = true,
+                blankLinesBetween = 1,
+            ),
+        )
+        // 引号没闭合时更要并
+        assertTrue(
+            ParagraphRules.shouldMerge(
+                "\u3000他抬起头，轻声说道：“你还",
+                "\u3000记得那年冬天的事吗？”",
+                paragraphIndented = true,
+                blankLinesBetween = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `每行都缩进时，收尾的行仍按新段落算`() {
+        // 这是这条新判据的安全边界：正常书里段落一定以句末标点收尾，因此行为不变
+        assertFalse(
+            ParagraphRules.shouldMerge(
+                "\u3000第二段只有一行，以句末标点结尾。",
+                "\u3000第三段开头。",
+                paragraphIndented = true,
+                blankLinesBetween = 1,
+            ),
+        )
+        // 短行不认定为「被硬换行切断」——即便每行都缩进也不并
+        assertFalse(
+            ParagraphRules.shouldMerge(
+                "\u3000他停下脚步，",
+                "\u3000风从窗外吹进来。",
+                paragraphIndented = true,
+                blankLinesBetween = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `每行都缩进时，引号起头的下一行仍是新段落`() {
+        // 上一段结尾漏了标点很常见，但下一行是对话开头——不能被吞掉
+        // （真实文件上实测到过这一处误并，才补的守卫）
+        assertFalse(
+            ParagraphRules.shouldMerge(
+                "\u3000第四段这里没有句末标点收尾，但它确实够长，",
+                "\u3000『引号起头的新一段』",
+                paragraphIndented = true,
+                blankLinesBetween = 1,
             ),
         )
     }
