@@ -22,7 +22,7 @@ coroutines = "1.10.2"
 datastore = "1.2.0"
 json = "20250517"
 room = "2.8.4"
-ksp = "2.2.10-2.0.2"
+ksp = "2.3.12"
 # 漫画容器读取：commons-compress 覆盖 zip/tar/7z，junrar 覆盖 rar
 commonsCompress = "1.28.0"
 # 7z 的 LZMA/LZMA2 解码由 xz 提供（commons-compress 把它声明为可选依赖，
