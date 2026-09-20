@@ -523,6 +523,43 @@ fun ComicReaderScreen(
     }
     val latestTurn by rememberUpdatedState<(Boolean) -> Unit> { forward -> turn(forward) }
 
+    // 与文本阅读器同一条坑：pointerInput 抓死开书时的单页叶矩形，拖动就变成整幅掀。
+    val latestBeginPeelDrag by rememberUpdatedState<(Boolean, Offset) -> Unit> { peelFwd, pos ->
+        scope.launch {
+            if (peel.busy || animPages != null) return@launch
+            val logicalFwd = peelFwd != rtl
+            val state = uiState
+            val target = if (logicalFwd) {
+                spreadIndex.next(state.pageIndex)
+            } else {
+                spreadIndex.previous(state.pageIndex)
+            } ?: return@launch
+            val currentPages = spreadIndex.pagesOf(state.pageIndex)
+            val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
+            val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
+            val (left, right) = currentPeelLeaves(dualLeaves)
+            val leaf = activePeelLeaf(peelFwd, left, right)
+            val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
+            val local = screenToLeafLocal(contentLocal, leaf)
+            val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
+            val gen = peelGeneration + 1
+            peelGeneration = gen
+            peelTarget = target
+            if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
+                peelTarget = null
+                return@launch
+            }
+            if (peelGeneration != gen) return@launch
+            peel.beginDrag(peelFwd, corner, leaf, local)
+        }
+    }
+    val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
+        screenToLeafLocal(
+            Offset(pos.x - contentRect.left, pos.y - contentRect.top),
+            peel.leaf,
+        )
+    }
+
     // 自动翻页·间隔模式：到点由 ViewModel 发请求。滚动模式下翻页要顺手把列表滚过去，
     // 否则页号变了而画面还在原处（列表只在进入滚动模式时对过一次页号）。
     LaunchedEffect(viewModel, scrollMode) {
@@ -733,6 +770,7 @@ fun ComicReaderScreen(
                 prefs.swipeFlingVelocityDpPerSec,
                 prefs.pageTurnMode,
                 rtl,
+                dual,
                 scrollMode,
                 density.density,
             ) {
@@ -757,40 +795,9 @@ fun ComicReaderScreen(
                                 if (abs(dragged) < 8f) return@detectHorizontalDragGestures
                                 started = true
                                 peelFwd = dragged < 0f
-                                val logicalFwd = peelFwd != rtl
-                                val pos = change.position
-                                scope.launch {
-                                    if (peel.busy || animPages != null) return@launch
-                                    val state = uiState
-                                    val target = if (logicalFwd) {
-                                        spreadIndex.next(state.pageIndex)
-                                    } else {
-                                        spreadIndex.previous(state.pageIndex)
-                                    } ?: return@launch
-                                    val currentPages = spreadIndex.pagesOf(state.pageIndex)
-                                    val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
-                                    val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
-                                    val (left, right) = currentPeelLeaves(dualLeaves)
-                                    val leaf = activePeelLeaf(peelFwd, left, right)
-                                    val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
-                                    val local = screenToLeafLocal(contentLocal, leaf)
-                                    val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
-                                    val gen = peelGeneration + 1
-                                    peelGeneration = gen
-                                    peelTarget = target
-                                    if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
-                                        peelTarget = null
-                                        return@launch
-                                    }
-                                    if (peelGeneration != gen) return@launch
-                                    peel.beginDrag(peelFwd, corner, leaf, local)
-                                }
+                                latestBeginPeelDrag(peelFwd, change.position)
                             } else if (peel.phase == PeelPhase.Drag) {
-                                val contentLocal = Offset(
-                                    change.position.x - contentRect.left,
-                                    change.position.y - contentRect.top,
-                                )
-                                peel.updateDrag(screenToLeafLocal(contentLocal, peel.leaf))
+                                peel.updateDrag(latestPeelDragLocal(change.position))
                             }
                         },
                         onDragEnd = {

@@ -511,6 +511,36 @@ fun ReaderScreen(
         turn(forward)
     }
 
+    // pointerInput 的 lambda 不会随重组更新。点击走 latestTurn，拖动必须同样读到
+    // 最新的双页叶矩形——否则开书后第一帧还是单页时就把整屏当成一叶抓死，
+    // 表现为「点按双页掀一叶、拖动却整幅单页翻」。
+    val latestBeginPeelDrag by rememberUpdatedState<(Boolean, Offset) -> Unit> { dragForward, pos ->
+        scope.launch {
+            if (peel.busy || animSpread != null) return@launch
+            val target = viewModel.adjacentSpread(dragForward) ?: return@launch
+            val (left, right) = currentPeelLeaves()
+            val leaf = activePeelLeaf(dragForward, left, right)
+            val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
+            val local = screenToLeafLocal(contentLocal, leaf)
+            val corner = peelCornerFor(local, leaf.width, leaf.height, dragForward)
+            val gen = peelGeneration + 1
+            peelGeneration = gen
+            peelTarget = target
+            if (!preparePeelBitmaps(dragForward, target, leaf)) {
+                peelTarget = null
+                return@launch
+            }
+            if (peelGeneration != gen) return@launch
+            peel.beginDrag(dragForward, corner, leaf, local)
+        }
+    }
+    val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
+        screenToLeafLocal(
+            Offset(pos.x - contentRect.left, pos.y - contentRect.top),
+            peel.leaf,
+        )
+    }
+
     // 系统栏统一策略：任何转场期间（进/出阅读、去往设置）系统栏保持可见且不变，
     // 对侧页面（书架/设置）在转场每一帧拿到的 inset 都是最终值——inset 落地是异步的，
     // 若在转场中途才切换系统栏，对侧会先按 inset=0 布局再突变（上/下/横向跳变）。
@@ -960,6 +990,7 @@ fun ReaderScreen(
             .pointerInput(
                 scrollMode,
                 rawMode,
+                spreadDual,
                 prefs.swipeGestureEnabled,
                 prefs.swipeDistanceDp,
                 prefs.swipeFlingVelocityDpPerSec,
@@ -987,31 +1018,9 @@ fun ReaderScreen(
                                 if (abs(dragged) < 8f) return@detectHorizontalDragGestures
                                 started = true
                                 dragForward = dragged < 0f
-                                val pos = change.position
-                                scope.launch {
-                                    if (peel.busy || animSpread != null) return@launch
-                                    val target = viewModel.adjacentSpread(dragForward) ?: return@launch
-                                    val (left, right) = currentPeelLeaves()
-                                    val leaf = activePeelLeaf(dragForward, left, right)
-                                    val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
-                                    val local = screenToLeafLocal(contentLocal, leaf)
-                                    val corner = peelCornerFor(local, leaf.width, leaf.height, dragForward)
-                                    val gen = peelGeneration + 1
-                                    peelGeneration = gen
-                                    peelTarget = target
-                                    if (!preparePeelBitmaps(dragForward, target, leaf)) {
-                                        peelTarget = null
-                                        return@launch
-                                    }
-                                    if (peelGeneration != gen) return@launch
-                                    peel.beginDrag(dragForward, corner, leaf, local)
-                                }
+                                latestBeginPeelDrag(dragForward, change.position)
                             } else if (peel.phase == PeelPhase.Drag) {
-                                val contentLocal = Offset(
-                                    change.position.x - contentRect.left,
-                                    change.position.y - contentRect.top,
-                                )
-                                peel.updateDrag(screenToLeafLocal(contentLocal, peel.leaf))
+                                peel.updateDrag(latestPeelDragLocal(change.position))
                             }
                         },
                         onDragEnd = {
