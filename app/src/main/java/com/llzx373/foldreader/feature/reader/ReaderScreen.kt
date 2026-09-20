@@ -116,10 +116,12 @@ import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.feature.bookshelf.BookCover
+import androidx.compose.ui.graphics.asComposePath
 import com.llzx373.foldreader.feature.reader.peel.PeelController
 import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
 import com.llzx373.foldreader.feature.reader.peel.PeelPhase
+import com.llzx373.foldreader.feature.reader.peel.PeelRenderer
 import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
 import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
@@ -1223,17 +1225,6 @@ fun ReaderScreen(
                         } else {
                             null
                         }
-                        if (spreadDual) {
-                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
-                            SpineOverlay(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(SPINE_OVERLAY_WIDTH)
-                                    .offset {
-                                        IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
-                                    },
-                            )
-                        }
                         val curBmp = peelCurrentBmp
                         val nxtBmp = peelNextBmp
                         val backBmp = peelBackBmp
@@ -1252,6 +1243,25 @@ fun ReaderScreen(
                                 back = backBmp?.takeUnless { it.isRecycled },
                                 extendLeft = extL,
                                 extendRight = extR,
+                            )
+                        }
+                        if (spreadDual) {
+                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
+                            val spineLeft = (spineCenter - spineOverlayPx / 2f).roundToInt()
+                            val spineClip = peelFrameNow?.takeIf {
+                                curBmp != null && nxtBmp != null &&
+                                    !curBmp.isRecycled && !nxtBmp.isRecycled
+                            }?.let { frame ->
+                                PeelRenderer.flapPathInContent(frame, peel.leaf).also { path ->
+                                    path.offset(-spineLeft.toFloat(), 0f)
+                                }.asComposePath()
+                            }
+                            SpineOverlay(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(SPINE_OVERLAY_WIDTH)
+                                    .offset { IntOffset(spineLeft, 0) },
+                                clipOut = spineClip,
                             )
                         }
                     }

@@ -9,7 +9,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -113,36 +120,51 @@ fun ReaderFooter(
     }
 }
 
+/**
+ * 双页中缝阴影。仿真翻页时叠在掀纸上面，用 [clipOut] 扣掉翻起的那片，
+ * 这样左右两半都还在，只是被纸背盖住的那一块看不见。
+ */
 @Composable
-fun SpineOverlay(modifier: Modifier = Modifier) {
+fun SpineOverlay(
+    modifier: Modifier = Modifier,
+    clipOut: Path? = null,
+) {
     Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val mid = w / 2f
-        val shadowWidth = minOf(16.dp.toPx(), mid)
-        drawRect(
-            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                listOf(Color.Transparent, Color.Black.copy(alpha = 0.10f)),
-                startX = mid - shadowWidth,
-                endX = mid,
-            ),
-            topLeft = androidx.compose.ui.geometry.Offset(mid - shadowWidth, 0f),
-            size = androidx.compose.ui.geometry.Size(shadowWidth, h),
-        )
-        drawRect(
-            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                listOf(Color.Black.copy(alpha = 0.10f), Color.Transparent),
-                startX = mid,
-                endX = mid + shadowWidth,
-            ),
-            topLeft = androidx.compose.ui.geometry.Offset(mid, 0f),
-            size = androidx.compose.ui.geometry.Size(shadowWidth, h),
-        )
-        drawLine(
-            color = Color.Black.copy(alpha = 0.18f),
-            start = androidx.compose.ui.geometry.Offset(mid, 0f),
-            end = androidx.compose.ui.geometry.Offset(mid, h),
-            strokeWidth = 1.dp.toPx(),
-        )
+        if (clipOut != null) {
+            clipPath(clipOut, ClipOp.Difference) { drawSpineGradient() }
+        } else {
+            drawSpineGradient()
+        }
     }
+}
+
+private fun DrawScope.drawSpineGradient() {
+    val w = size.width
+    val h = size.height
+    val mid = w / 2f
+    val shadowWidth = minOf(16.dp.toPx(), mid)
+    drawRect(
+        brush = Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.Black.copy(alpha = 0.10f)),
+            startX = mid - shadowWidth,
+            endX = mid,
+        ),
+        topLeft = Offset(mid - shadowWidth, 0f),
+        size = Size(shadowWidth, h),
+    )
+    drawRect(
+        brush = Brush.horizontalGradient(
+            listOf(Color.Black.copy(alpha = 0.10f), Color.Transparent),
+            startX = mid,
+            endX = mid + shadowWidth,
+        ),
+        topLeft = Offset(mid, 0f),
+        size = Size(shadowWidth, h),
+    )
+    drawLine(
+        color = Color.Black.copy(alpha = 0.18f),
+        start = Offset(mid, 0f),
+        end = Offset(mid, h),
+        strokeWidth = 1.dp.toPx(),
+    )
 }

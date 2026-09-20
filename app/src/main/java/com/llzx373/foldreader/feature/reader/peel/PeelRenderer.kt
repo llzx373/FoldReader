@@ -87,6 +87,13 @@ object PeelRenderer {
         )
     }
 
+    /** 纸背轮廓平移到内容区坐标，给书脊 overlay 扣掉翻起的纸。 */
+    fun flapPathInContent(frame: PeelFrame, leaf: PeelLeaf): Path {
+        val path = flapPath(frame, leaf.width, leaf.height)
+        path.offset(leaf.originX, leaf.originY)
+        return path
+    }
+
     private fun drawUnder(
         canvas: Canvas,
         next: Bitmap?,

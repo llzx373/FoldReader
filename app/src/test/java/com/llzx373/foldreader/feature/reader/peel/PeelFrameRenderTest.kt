@@ -5,10 +5,14 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Region
 import android.graphics.Shader
 import android.graphics.Typeface
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -285,6 +289,39 @@ class PeelFrameRenderTest {
         )
         page.recycle()
         out.recycle()
+    }
+
+    @Test
+    fun `右翻中段纸背还不盖住左右靠书脊的内缘`() {
+        val (leftLeaf, rightLeaf) = peelLeaves(
+            dual = true,
+            contentWidth = dualW.toFloat(),
+            contentHeight = dualH.toFloat(),
+            pageWidth = dualPageW.toFloat(),
+            splitLeft = dualPageW.toFloat(),
+            splitRight = (dualPageW + dualHinge).toFloat(),
+        )
+        checkNotNull(rightLeaf)
+        val touch = autoPlayTouch(0.45f, PeelCorner.BOTTOM_RIGHT, rightLeaf.width, rightLeaf.height)
+        val frame = checkNotNull(
+            peelFrame(
+                touchLocal = touch,
+                corner = PeelCorner.BOTTOM_RIGHT,
+                width = rightLeaf.width,
+                height = rightLeaf.height,
+                bindingOnly = false,
+            ),
+        )
+        val flap = PeelRenderer.flapPathInContent(frame, rightLeaf)
+        val y = rightLeaf.height * 0.35f
+        assertFalse(
+            "turning-leaf gutter should stay outside flap at mid peel",
+            pathContains(flap, rightLeaf.originX + 10f, y),
+        )
+        assertFalse(
+            "opposite-leaf gutter should stay outside flap at mid peel",
+            pathContains(flap, leftLeaf.width - 10f, y),
+        )
     }
 
     private fun writeSequence(
@@ -727,6 +764,23 @@ class PeelFrameRenderTest {
         if (!override.isNullOrBlank()) return File(override)
         val cwd = File(System.getProperty("user.dir") ?: ".")
         return File(cwd, "build/peel-frames")
+    }
+
+    private fun pathContains(path: Path, x: Float, y: Float): Boolean {
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        if (bounds.isEmpty) return false
+        val region = Region()
+        region.setPath(
+            path,
+            Region(
+                bounds.left.toInt() - 1,
+                bounds.top.toInt() - 1,
+                bounds.right.toInt() + 1,
+                bounds.bottom.toInt() + 1,
+            ),
+        )
+        return region.contains(x.toInt(), y.toInt())
     }
 
     private fun colorNear(pixel: Int, color: Int, slop: Int): Boolean {
