@@ -610,8 +610,15 @@ class ComicReaderViewModel(
 
     /** 界面按当前视口尺寸回填：决定降采样倍率，尺寸变化（折叠/旋转）后重解码可见页。 */
     fun setDecodeTarget(widthPx: Int, heightPx: Int) {
-        if (widthPx <= 0 || heightPx <= 0) return
+        if (widthPx < 64 || heightPx < 64) return
         if (widthPx == targetWidthPx && heightPx == targetHeightPx) return
+        if (targetWidthPx > 0 && targetHeightPx > 0) {
+            val slopW = maxOf(32, (targetWidthPx * 0.05f).toInt())
+            val slopH = maxOf(32, (targetHeightPx * 0.05f).toInt())
+            if (abs(widthPx - targetWidthPx) <= slopW && abs(heightPx - targetHeightPx) <= slopH) {
+                return
+            }
+        }
         targetWidthPx = widthPx
         targetHeightPx = heightPx
         // 目标尺寸变了，已解码的页要么太小要么过大：整表清掉重来。
@@ -673,7 +680,7 @@ class ComicReaderViewModel(
      * 等到某一页解码完成（或失败/超时）。仿真翻页要把现成位图烘进离屏缓存，
      * 预取窗口通常已经覆盖相邻跨页，这里只是补上竞态。
      */
-    suspend fun awaitPage(index: Int, timeoutMs: Long = 600L): PagedPageImage? {
+    suspend fun awaitPage(index: Int, timeoutMs: Long = 1500L): PagedPageImage? {
         if (index !in 0 until _uiState.value.pageCount) return null
         images[index]?.let { return it }
         if (failedPages[index] == true) return null
@@ -882,13 +889,10 @@ class ComicReaderViewModel(
 
     private fun visiblePages(): List<Int> {
         val state = _uiState.value
-        val index = _spreadIndex.value
-        val visible = index.pagesOf(state.pageIndex)
-        // 预取：向后多取一个跨页（双页一次跨两页），再补前一页
-        val window = if (state.dual) 4 else 2
-        return visible +
-            (state.pageIndex + 1..state.pageIndex + window).filter { it in 0 until state.pageCount } +
-            (state.pageIndex - 1 downTo (state.pageIndex - window).coerceAtLeast(0))
+        return comicPrefetchPages(
+            visible = _spreadIndex.value.pagesOf(state.pageIndex),
+            pageCount = state.pageCount,
+        )
     }
 
     private fun decodeVisiblePages() {
@@ -1129,8 +1133,8 @@ class ComicReaderViewModel(
         /** 已解码页的内存预算上限。 */
         const val MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
-        /** 无论预算如何，至少保留当前页附近的这么多页。 */
-        const val KEEP_NEAREST_PAGES = 4
+        /** 无论预算如何，至少保留当前可见跨页再前后各两页（最多 6 张）加一点余量。 */
+        const val KEEP_NEAREST_PAGES = 8
 
         /** 超过这个页数就不再整本探测宽高比（收益递减，几千页的合集扫一遍不值得）。 */
         const val MAX_SIZE_PROBE_PAGES = 2000

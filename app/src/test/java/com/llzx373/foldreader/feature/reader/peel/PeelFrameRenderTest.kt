@@ -182,6 +182,12 @@ class PeelFrameRenderTest {
         )
         val singleSpan = creaseSpanAlongBottom(midSingle, singleH - 40)
         assertTrue("single crease/flap span was $singleSpan px", singleSpan > 200)
+        val flapTouch = autoPlayTouch(0.5f, PeelCorner.BOTTOM_RIGHT, singleW.toFloat(), singleH.toFloat())
+        val flapPx = midSingle.getPixel(flapTouch.x.toInt(), flapTouch.y.toInt())
+        assertTrue(
+            "single-page flap should be blank paper, was ${Integer.toHexString(flapPx)}",
+            colorNear(flapPx, currentBg, slop = 70) && !colorNear(flapPx, currentText, slop = 80),
+        )
         midSingle.recycle()
 
         val midDual = BitmapFactory.decodeFile(dualFiles[4].absolutePath)
@@ -229,9 +235,56 @@ class PeelFrameRenderTest {
             "late dual flap should cover part of the left leaf, was ${Integer.toHexString(coveredLeft)}",
             !colorNear(coveredLeft, currentBg, slop = 28),
         )
+        val coveredFar = endDual.getPixel(24, 24)
+        assertTrue(
+            "dual end frame should merge onto the far left, was ${Integer.toHexString(coveredFar)}",
+            !colorNear(coveredFar, currentBg, slop = 28),
+        )
         endDual.recycle()
 
         println("peel frames written to ${outDir.absolutePath}")
+    }
+
+    @Test
+    fun `letterbox dest 露出纸色而不是把图拉满`() {
+        val page = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888)
+        page.eraseColor(0xFF00AA00.toInt())
+        val out = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val frame = checkNotNull(
+            peelFrame(
+                touchLocal = Offset(188f, 188f),
+                corner = PeelCorner.BOTTOM_RIGHT,
+                width = 200f,
+                height = 200f,
+                bindingOnly = false,
+            ),
+        )
+        val paper = 0xFFFFEEDD.toInt()
+        PeelRenderer.draw(
+            canvas = canvas,
+            frame = frame,
+            leafWidth = 200f,
+            leafHeight = 200f,
+            current = page,
+            next = page,
+            backgroundArgb = paper,
+            density = 1f,
+            currentFit = PeelBitmapFit(50f, 50f, 150f, 150f),
+            nextFit = PeelBitmapFit(50f, 50f, 150f, 150f),
+        )
+        val margin = out.getPixel(8, 8)
+        assertTrue(
+            "leaf margin should stay paper, was ${Integer.toHexString(margin)}",
+            colorNear(margin, paper, slop = 8),
+        )
+        val content = out.getPixel(100, 80)
+        assertTrue(
+            "letterboxed page should keep source color, was ${Integer.toHexString(content)}",
+            colorNear(content, 0xFF00AA00.toInt(), slop = 8),
+        )
+        page.recycle()
+        out.recycle()
     }
 
     private fun writeSequence(
@@ -407,13 +460,21 @@ class PeelFrameRenderTest {
         val canvas = Canvas(bmp)
         drawDualBase(canvas, leftLeaf, rightLeaf, leftPage, rightCurrent)
         drawSpine(canvas, leftLeaf, rightLeaf)
-        val touch = autoPlayTouch(t, PeelCorner.BOTTOM_RIGHT, rightLeaf.width, rightLeaf.height)
+        val opposite = peelOppositeWidth(PeelCorner.BOTTOM_RIGHT, rightLeaf, leftLeaf, rightLeaf)
+        val touch = autoPlayTouch(
+            t,
+            PeelCorner.BOTTOM_RIGHT,
+            rightLeaf.width,
+            rightLeaf.height,
+            oppositeWidth = opposite,
+        )
         val frame = peelFrame(
             touchLocal = touch,
             corner = PeelCorner.BOTTOM_RIGHT,
             width = rightLeaf.width,
             height = rightLeaf.height,
             bindingOnly = autoPlayBindingOnly(t),
+            oppositeWidth = opposite,
         )
         if (frame != null) {
             canvas.save()

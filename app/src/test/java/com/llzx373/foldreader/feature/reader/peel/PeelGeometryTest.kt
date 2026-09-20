@@ -172,6 +172,36 @@ class PeelGeometryTest {
     }
 
     @Test
+    fun `双页终帧触点落到对页远角才能盖住另一叶`() {
+        val pageW = 960f
+        val pageH = 1600f
+        val opp = 960f
+        near(Offset(-opp, pageH), dualCoverPoint(br, pageW, pageH, opp))
+        val a = autoPlayTouch(1f, br, pageW, pageH, opp)
+        near(Offset(-opp, pageH), a, eps = 2f)
+        val frame = peelFrame(a, br, pageW, pageH, bindingOnly = true, oppositeWidth = opp)!!
+        assertTrue(frame.touch.x <= -pageW + 2f)
+        assertEquals(pageH, frame.touch.y, 2f)
+        assertTrue(hypot(frame.touch.x, frame.touch.y - pageH) <= pageW + 1.5f)
+        near(Offset(-opp, 0f), dualCoverPoint(PeelCorner.TOP_RIGHT, pageW, pageH, opp))
+        near(Offset(pageW + opp, pageH), dualCoverPoint(PeelCorner.BOTTOM_LEFT, pageW, pageH, opp))
+        near(Offset(pageW + opp, 0f), dualCoverPoint(PeelCorner.TOP_LEFT, pageW, pageH, opp))
+    }
+
+    @Test
+    fun `横屏按短边比例即可完成不必拖过对角线`() {
+        val w = 2340f
+        val h = 1080f
+        val far = Offset(w - 200f, h)
+        val nearTouch = Offset(w - 80f, h)
+        assertTrue(peelEndShouldComplete(far, br, w, h, 0f, 0f))
+        assertFalse(peelEndShouldComplete(nearTouch, br, w, h, 0f, 0f))
+        val swipeLike = Offset(w - 110f, h)
+        assertTrue(peelEndShouldComplete(swipeLike, br, w, h, 0f, 0f, completeDistancePx = 100f))
+        assertFalse(peelEndShouldComplete(nearTouch, br, w, h, 0f, 0f, completeDistancePx = 100f))
+    }
+
+    @Test
     fun `底边与侧边反射落在 A-C 连线上`() {
         val frame = peelFrame(autoPlayTouch(0.5f, br, w, h), br, w, h)!!
         val f = frame.cornerPoint

@@ -116,6 +116,7 @@ import com.llzx373.foldreader.feature.reader.resolveTabletopLayout
 import com.llzx373.foldreader.feature.reader.supportsTapAction
 import com.llzx373.foldreader.feature.reader.tapZoneOf
 import com.llzx373.foldreader.feature.reader.volumeKeyDispatch
+import com.llzx373.foldreader.feature.reader.peel.PeelBitmapFit
 import com.llzx373.foldreader.feature.reader.peel.PeelController
 import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
@@ -123,6 +124,7 @@ import com.llzx373.foldreader.feature.reader.peel.PeelPhase
 import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
 import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
+import com.llzx373.foldreader.feature.reader.peel.peelOppositeWidth
 import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -263,14 +265,14 @@ fun ComicReaderScreen(
         heightPx = size.height.toFloat(),
     )
 
-    LaunchedEffect(dual) { viewModel.setDualPage(dual) }
-
     // 解码目标 = 单页实际可用的槽位尺寸；折叠/旋转改变尺寸时重解码
     val decodeTargetW = (
         if (dual) maxOf(splitLeftPx, size.width - splitRightPx) else contentRect.width
         ).roundToInt()
     val decodeTargetH = contentRect.height.roundToInt()
+    LaunchedEffect(dual) { viewModel.setDualPage(dual) }
     LaunchedEffect(decodeTargetW, decodeTargetH) {
+        if (decodeTargetW < 64 || decodeTargetH < 64) return@LaunchedEffect
         viewModel.setDecodeTarget(decodeTargetW, decodeTargetH)
     }
 
@@ -365,33 +367,106 @@ fun ComicReaderScreen(
     var peelCurrentBmp by remember { mutableStateOf<Bitmap?>(null) }
     var peelNextBmp by remember { mutableStateOf<Bitmap?>(null) }
     var peelBackBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelCurrentFit by remember { mutableStateOf<PeelBitmapFit?>(null) }
+    var peelNextFit by remember { mutableStateOf<PeelBitmapFit?>(null) }
+    var peelBackFit by remember { mutableStateOf<PeelBitmapFit?>(null) }
+    /** true = 这次烘了离屏拷贝，结束时才 recycle；引用解码缓存时绝不能 recycle。 */
+    var peelOwnsBitmaps by remember { mutableStateOf(false) }
     var peelGeneration by remember { mutableLongStateOf(0L) }
     var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
+    val lastPeelCancelGeom = remember { intArrayOf(-1, -1, -1, -1, -1) }
+    /** 掀页开始时锁死的左右叶。覆盖层只用这份，避免配对在动画中途翻转。 */
+    var peelLeafSession by remember { mutableStateOf<Pair<PeelLeaf, PeelLeaf?>?>(null) }
 
     fun recyclePeelBitmaps() {
-        peelCurrentBmp?.recycle()
-        peelNextBmp?.recycle()
-        peelBackBmp?.recycle()
+        if (peelOwnsBitmaps) {
+            peelCurrentBmp?.recycle()
+            peelNextBmp?.recycle()
+            peelBackBmp?.recycle()
+        }
+        peelOwnsBitmaps = false
         peelCurrentBmp = null
         peelNextBmp = null
         peelBackBmp = null
+        peelCurrentFit = null
+        peelNextFit = null
+        peelBackFit = null
     }
 
-    LaunchedEffect(dual, contentRect, splitLeftPx, splitRightPx) {
-        animPages = null
-        peelGeneration += 1
+    fun adoptPeelBitmaps(
+        current: Bitmap,
+        next: Bitmap?,
+        back: Bitmap?,
+        currentFit: PeelBitmapFit?,
+        nextFit: PeelBitmapFit?,
+        backFit: PeelBitmapFit?,
+        owns: Boolean,
+    ) {
+        recyclePeelBitmaps()
+        peelOwnsBitmaps = owns
+        peelCurrentBmp = current
+        peelNextBmp = next
+        peelBackBmp = back
+        peelCurrentFit = currentFit
+        peelNextFit = nextFit
+        peelBackFit = backFit
+    }
+
+    fun finishPeel() {
         peel.reset()
         peelTarget = null
+        peelLeafSession = null
         recyclePeelBitmaps()
+    }
+
+    LaunchedEffect(
+        dual,
+        contentRect.width.roundToInt(),
+        contentRect.height.roundToInt(),
+        splitLeftPx.roundToInt(),
+        splitRightPx.roundToInt(),
+    ) {
+        val dualBit = if (dual) 1 else 0
+        val w = contentRect.width.roundToInt()
+        val h = contentRect.height.roundToInt()
+        val sl = splitLeftPx.roundToInt()
+        val sr = splitRightPx.roundToInt()
+        val slop = 8
+        val prev = lastPeelCancelGeom
+        if (prev[0] >= 0 &&
+            prev[0] == dualBit &&
+            abs(prev[1] - w) <= slop &&
+            abs(prev[2] - h) <= slop &&
+            abs(prev[3] - sl) <= slop &&
+            abs(prev[4] - sr) <= slop
+        ) {
+            return@LaunchedEffect
+        }
+        lastPeelCancelGeom[0] = dualBit
+        lastPeelCancelGeom[1] = w
+        lastPeelCancelGeom[2] = h
+        lastPeelCancelGeom[3] = sl
+        lastPeelCancelGeom[4] = sr
+        animPages = null
+        peelGeneration += 1
+        finishPeel()
     }
 
     fun currentPeelLeaves(dualLeaves: Boolean): Pair<PeelLeaf, PeelLeaf?> = comicPeelLeaves(
         dualLeaves = dualLeaves,
         contentWidth = contentRect.width,
         contentHeight = contentRect.height,
-        splitLeft = splitLeftPx,
-        splitRight = splitRightPx,
+        splitLeft = splitLeftPx - contentRect.left,
+        splitRight = splitRightPx - contentRect.left,
     )
+
+    fun lockPeelLeaves(currentPages: List<Int>, targetPages: List<Int>): Pair<Boolean, Pair<PeelLeaf, PeelLeaf?>> {
+        val targetWide = targetPages.singleOrNull()?.let { viewModel.isWideSpan(it) } == true
+        val dualLeaves = dual && uiState.dual && comicPeelUsesDualLeaves(currentPages, targetWide)
+        val leaves = currentPeelLeaves(dualLeaves)
+        peelLeafSession = leaves
+        return dualLeaves to leaves
+    }
 
     suspend fun preparePeelBitmaps(
         peelForward: Boolean,
@@ -400,18 +475,98 @@ fun ComicReaderScreen(
         leaf: PeelLeaf,
         dualLeaves: Boolean,
     ): Boolean {
-        val needed = (currentPages + targetPages).distinct()
-        for (index in needed) viewModel.awaitPage(index)
+        val ids = if (dualLeaves) {
+            comicPeelPageIds(peelForward, currentPages, targetPages, rtl)
+        } else {
+            null
+        }
+        val needed = buildList {
+            addAll(currentPages)
+            addAll(targetPages)
+            ids?.current?.let { add(it) }
+            ids?.next?.let { add(it) }
+            ids?.back?.let { add(it) }
+        }.distinct()
+        kotlinx.coroutines.coroutineScope {
+            for (index in needed) {
+                launch { viewModel.awaitPage(index, timeoutMs = 800L) }
+            }
+        }
         val snapshot = needed.mapNotNull { idx -> viewModel.images[idx]?.let { idx to it } }.toMap()
         if (currentPages.isNotEmpty() && currentPages.none { snapshot.containsKey(it) }) return false
+        if (dualLeaves && (ids == null || !snapshot.containsKey(ids.current))) return false
         val w = leaf.width.roundToInt().coerceAtLeast(1)
         val h = leaf.height.roundToInt().coerceAtLeast(1)
         val bg = colors.background.toArgb()
         val fit = prefs.comicFitMode
         val currentWide = currentPages.singleOrNull()?.let { viewModel.isWideSpan(it) } == true
         val targetWide = targetPages.singleOrNull()?.let { viewModel.isWideSpan(it) } == true
+        val splitL = splitLeftPx - contentRect.left
+        val splitR = splitRightPx - contentRect.left
+        if (dualLeaves && ids != null) {
+            val curImg = snapshot[ids.current]
+            val nxtImg = ids.next?.let { snapshot[it] }
+            val bakImg = ids.back?.let { snapshot[it] }
+            val curBmp = pagedStillBitmap(curImg)
+            if (curBmp != null &&
+                canReusePagedStill(curImg) &&
+                canReusePagedStill(nxtImg) &&
+                canReusePagedStill(bakImg)
+            ) {
+                adoptPeelBitmaps(
+                    current = curBmp,
+                    next = pagedStillBitmap(nxtImg),
+                    back = pagedStillBitmap(bakImg),
+                    currentFit = comicPeelPageFit(curImg, leaf.width, leaf.height, fit),
+                    nextFit = nxtImg?.let { comicPeelPageFit(it, leaf.width, leaf.height, fit) },
+                    backFit = bakImg?.let { comicPeelPageFit(it, leaf.width, leaf.height, fit) },
+                    owns = false,
+                )
+                return true
+            }
+        } else if (currentPages.size <= 1 && targetPages.size <= 1) {
+            val curImg = currentPages.firstOrNull()?.let { snapshot[it] }
+            val nxtImg = targetPages.firstOrNull()?.let { snapshot[it] }
+            val curBmp = pagedStillBitmap(curImg)
+            if (curBmp != null && canReusePagedStill(curImg) && canReusePagedStill(nxtImg)) {
+                adoptPeelBitmaps(
+                    current = curBmp,
+                    next = pagedStillBitmap(nxtImg),
+                    back = null,
+                    currentFit = comicPeelSpreadPageFit(
+                        image = curImg,
+                        pages = currentPages,
+                        dual = dual,
+                        rtl = rtl,
+                        wideSpan = currentWide,
+                        leafWidth = leaf.width,
+                        leafHeight = leaf.height,
+                        splitLeft = splitL,
+                        splitRight = splitR,
+                        fitMode = fit,
+                    ),
+                    nextFit = nxtImg?.let {
+                        comicPeelSpreadPageFit(
+                            image = it,
+                            pages = targetPages,
+                            dual = dual,
+                            rtl = rtl,
+                            wideSpan = targetWide,
+                            leafWidth = leaf.width,
+                            leafHeight = leaf.height,
+                            splitLeft = splitL,
+                            splitRight = splitR,
+                            fitMode = fit,
+                        )
+                    },
+                    backFit = null,
+                    owns = false,
+                )
+                return true
+            }
+        }
         val triple = withContext(Dispatchers.Default) {
-            if (!dualLeaves) {
+            if (!dualLeaves || ids == null) {
                 Triple(
                     renderComicSpreadBitmap(
                         pages = currentPages,
@@ -421,8 +576,8 @@ fun ComicReaderScreen(
                         wideSpan = currentWide,
                         widthPx = w,
                         heightPx = h,
-                        splitLeft = splitLeftPx,
-                        splitRight = splitRightPx,
+                        splitLeft = splitL,
+                        splitRight = splitR,
                         backgroundArgb = bg,
                         fitMode = fit,
                     ),
@@ -434,30 +589,30 @@ fun ComicReaderScreen(
                         wideSpan = targetWide,
                         widthPx = w,
                         heightPx = h,
-                        splitLeft = splitLeftPx,
-                        splitRight = splitRightPx,
+                        splitLeft = splitL,
+                        splitRight = splitR,
                         backgroundArgb = bg,
                         fitMode = fit,
                     ),
                     null as Bitmap?,
                 )
             } else {
-                val curPair = comicPairedVisualPages(currentPages, rtl)!!
-                val nxtPair = comicPairedVisualPages(targetPages, rtl)!!
-                val curIdx = if (peelForward) curPair.second else curPair.first
-                val nxtIdx = if (peelForward) nxtPair.second else nxtPair.first
-                val backIdx = if (peelForward) nxtPair.first else nxtPair.second
                 Triple(
-                    renderComicPageBitmap(snapshot[curIdx], w, h, bg, fit),
-                    renderComicPageBitmap(snapshot[nxtIdx], w, h, bg, fit),
-                    renderComicPageBitmap(snapshot[backIdx], w, h, bg, fit),
+                    renderComicPageBitmap(snapshot[ids.current], w, h, bg, fit),
+                    renderComicPageBitmap(ids.next?.let { snapshot[it] }, w, h, bg, fit),
+                    renderComicPageBitmap(ids.back?.let { snapshot[it] }, w, h, bg, fit),
                 )
             }
         }
-        recyclePeelBitmaps()
-        peelCurrentBmp = triple.first
-        peelNextBmp = triple.second
-        peelBackBmp = triple.third
+        adoptPeelBitmaps(
+            current = triple.first,
+            next = triple.second,
+            back = triple.third,
+            currentFit = null,
+            nextFit = null,
+            backFit = null,
+            owns = true,
+        )
         return true
     }
 
@@ -484,9 +639,9 @@ fun ComicReaderScreen(
                 peelGeneration = gen
                 val currentPages = spreadIndex.pagesOf(state.pageIndex)
                 val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
-                val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
+                val (dualLeaves, leaves) = lockPeelLeaves(currentPages, targetPages)
+                val (left, right) = leaves
                 val peelFwd = comicPeelForward(forward, rtl)
-                val (left, right) = currentPeelLeaves(dualLeaves)
                 val leaf = activePeelLeaf(peelFwd, left, right)
                 val tap = lastTapOffset
                 val contentLocal = if (tap != null) {
@@ -499,19 +654,18 @@ fun ComicReaderScreen(
                 }
                 val local = screenToLeafLocal(contentLocal, leaf)
                 val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
+                val opposite = peelOppositeWidth(corner, leaf, left, right)
                 peelTarget = target
                 if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
-                    peelTarget = null
+                    finishPeel()
                     viewModel.goToPage(target, countRead = true)
                     return@launch
                 }
                 if (peelGeneration != gen) return@launch
-                peel.autoPlay(peelFwd, corner, leaf)
+                peel.autoPlay(peelFwd, corner, leaf, opposite)
                 if (peelGeneration != gen) return@launch
                 viewModel.goToPage(target, countRead = true)
-                peel.reset()
-                peelTarget = null
-                recyclePeelBitmaps()
+                finishPeel()
                 return@launch
             }
             animPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
@@ -536,21 +690,22 @@ fun ComicReaderScreen(
             } ?: return@launch
             val currentPages = spreadIndex.pagesOf(state.pageIndex)
             val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
-            val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
-            val (left, right) = currentPeelLeaves(dualLeaves)
+            val (dualLeaves, leaves) = lockPeelLeaves(currentPages, targetPages)
+            val (left, right) = leaves
             val leaf = activePeelLeaf(peelFwd, left, right)
             val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
             val local = screenToLeafLocal(contentLocal, leaf)
             val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
+            val opposite = peelOppositeWidth(corner, leaf, left, right)
             val gen = peelGeneration + 1
             peelGeneration = gen
             peelTarget = target
             if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
-                peelTarget = null
+                finishPeel()
                 return@launch
             }
             if (peelGeneration != gen) return@launch
-            peel.beginDrag(peelFwd, corner, leaf, local)
+            peel.beginDrag(peelFwd, corner, leaf, local, opposite)
         }
     }
     val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
@@ -792,7 +947,6 @@ fun ComicReaderScreen(
                             dragged += delta
                             tracker?.addPosition(change.uptimeMillis, change.position)
                             if (!started) {
-                                if (abs(dragged) < 8f) return@detectHorizontalDragGestures
                                 started = true
                                 peelFwd = dragged < 0f
                                 latestBeginPeelDrag(peelFwd, change.position)
@@ -812,14 +966,12 @@ fun ComicReaderScreen(
                                     return@launch
                                 }
                                 val gen = peelGeneration
-                                val committed = peel.endDrag(vx, vy)
+                                val committed = peel.endDrag(vx, vy, distanceThreshold)
                                 if (peelGeneration != gen) return@launch
                                 if (committed) {
                                     peelTarget?.let { viewModel.goToPage(it, countRead = true) }
                                 }
-                                peel.reset()
-                                peelTarget = null
-                                recyclePeelBitmaps()
+                                finishPeel()
                                 started = false
                             }
                         },
@@ -831,9 +983,7 @@ fun ComicReaderScreen(
                                 if (peel.phase == PeelPhase.Drag) {
                                     peel.endDrag(0f, 0f)
                                 }
-                                peel.reset()
-                                peelTarget = null
-                                recyclePeelBitmaps()
+                                finishPeel()
                             }
                         },
                     )
@@ -922,7 +1072,7 @@ fun ComicReaderScreen(
                         pages = currentPages,
                         viewModel = viewModel,
                         background = colors.background,
-                        dual = dual,
+                        dual = dual && uiState.dual,
                         rtl = rtl,
                         fitMode = prefs.comicFitMode,
                         splitLeftPx = splitLeftPx,
@@ -936,7 +1086,7 @@ fun ComicReaderScreen(
                             pages = sliding,
                             viewModel = viewModel,
                             background = colors.background,
-                            dual = dual,
+                            dual = dual && uiState.dual,
                             rtl = rtl,
                             fitMode = prefs.comicFitMode,
                             splitLeftPx = splitLeftPx,
@@ -957,14 +1107,11 @@ fun ComicReaderScreen(
                     val nxtBmp = peelNextBmp
                     val backBmp = peelBackBmp
                     if (peelFrameNow != null &&
-                        curBmp != null && nxtBmp != null &&
-                        !curBmp.isRecycled && !nxtBmp.isRecycled
+                        curBmp != null &&
+                        !curBmp.isRecycled &&
+                        (nxtBmp == null || !nxtBmp.isRecycled)
                     ) {
-                        val currentPages = viewModel.currentPages()
-                        val targetPages = peelTarget?.let { spreadIndex.pagesOfSpread(spreadIndex.spreadOf(it)) }
-                            ?: emptyList()
-                        val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
-                        val (leftLeaf, rightLeaf) = currentPeelLeaves(dualLeaves)
+                        val (leftLeaf, rightLeaf) = peelLeafSession ?: (peel.leaf to null)
                         val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
                         PeelOverlay(
                             frame = peelFrameNow,
@@ -975,6 +1122,9 @@ fun ComicReaderScreen(
                             back = backBmp?.takeUnless { it.isRecycled },
                             extendLeft = extL,
                             extendRight = extR,
+                            currentFit = peelCurrentFit,
+                            nextFit = peelNextFit,
+                            backFit = peelBackFit,
                         )
                     }
                 }

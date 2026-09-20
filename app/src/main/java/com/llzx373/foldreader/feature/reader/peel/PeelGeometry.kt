@@ -57,8 +57,14 @@ data class PeelFrame(
 /** 自动翻页轨迹在 [0, 0.7] 走双圆附着；之后只钉装订边，页角翻到对页。 */
 const val PEEL_ATTACHED_UNTIL = 0.7f
 
-/** |AF| / 对角线 超过此值视为翻过去。 */
-const val PEEL_COMPLETE_RATIO = 0.22f
+/**
+ * |AF| / 叶短边 超过此值视为翻过去。
+ *
+ * 按短边而不是对角线：横屏双页对角线很长，0.22 对角线要拖四百多像素才过线，
+ * 和已经改掉的「屏宽 15%」覆盖翻页是同一类手感问题。短边的 0.15 大约就是一次自然滑动；
+ * 阅读器还会再用横滑判定距离（默认 40dp）封顶，两者取较短。
+ */
+const val PEEL_COMPLETE_RATIO = 0.15f
 
 /** 离开页角方向的甩速（px·s⁻¹）过线也翻。 */
 const val PEEL_FLING_PX_PER_SEC = 800f
@@ -123,17 +129,61 @@ fun mirrorFromBottomRight(p: Offset, corner: PeelCorner, width: Float, height: F
     return Offset(x, y)
 }
 
-fun autoPlayPathPoints(corner: PeelCorner, width: Float, height: Float): Triple<Offset, Offset, Offset> =
-    Triple(
-        mirrorFromBottomRight(PEEL_PATH_P0, corner, width, height),
-        mirrorFromBottomRight(PEEL_PATH_P1, corner, width, height),
-        mirrorFromBottomRight(PEEL_PATH_P2, corner, width, height),
-    )
+fun autoPlayPathPoints(
+    corner: PeelCorner,
+    width: Float,
+    height: Float,
+    oppositeWidth: Float = 0f,
+): Triple<Offset, Offset, Offset> = Triple(
+    mirrorFromBottomRight(PEEL_PATH_P0, corner, width, height),
+    mirrorFromBottomRight(PEEL_PATH_P1, corner, width, height),
+    if (oppositeWidth > 1f) {
+        dualCoverPoint(corner, width, height, oppositeWidth)
+    } else {
+        mirrorFromBottomRight(PEEL_PATH_P2, corner, width, height)
+    },
+)
+
+/**
+ * 双页终帧：被抓住的页角横着落到对页同一侧的角，纸背才能整叶盖住。
+ * 右下 → 对页左下，右上 → 对页左上；不是走对角线去对页另一角。
+ */
+fun dualCoverPoint(
+    corner: PeelCorner,
+    width: Float,
+    height: Float,
+    oppositeWidth: Float,
+): Offset {
+    val far = oppositeWidth.coerceAtLeast(1f)
+    return when (corner) {
+        PeelCorner.TOP_LEFT -> Offset(width + far, 0f)
+        PeelCorner.TOP_RIGHT -> Offset(-far, 0f)
+        PeelCorner.BOTTOM_LEFT -> Offset(width + far, height)
+        PeelCorner.BOTTOM_RIGHT -> Offset(-far, height)
+    }
+}
+
+/** 后半段绕书脊盖住对页时，装订圆半径要够到对页同侧远角。 */
+fun peelBindingRadius(
+    width: Float,
+    height: Float,
+    oppositeWidth: Float,
+    bindingOnly: Boolean,
+): Float {
+    if (!bindingOnly || oppositeWidth <= 1f) return width
+    return maxOf(width, oppositeWidth)
+}
 
 /** 自动播放触点。t∈[0,1]；与说明书第 3 节同一条 smoothstep 折线。 */
-fun autoPlayTouch(progress: Float, corner: PeelCorner, width: Float, height: Float): Offset {
+fun autoPlayTouch(
+    progress: Float,
+    corner: PeelCorner,
+    width: Float,
+    height: Float,
+    oppositeWidth: Float = 0f,
+): Offset {
     val t = progress.coerceIn(0f, 1f)
-    val (p0, p1, p2) = autoPlayPathPoints(corner, width, height)
+    val (p0, p1, p2) = autoPlayPathPoints(corner, width, height, oppositeWidth)
     return if (t <= PEEL_ATTACHED_UNTIL) {
         val u = smoothstep((t / PEEL_ATTACHED_UNTIL).coerceIn(0f, 1f))
         lerpOffset(p0, p1, u)
@@ -158,10 +208,15 @@ fun clampPeelTouch(
     width: Float,
     height: Float,
     bindingOnly: Boolean = false,
+    oppositeWidth: Float = 0f,
 ): Offset {
     val f = peelCornerPoint(corner, width, height)
     val bindingCenter = Offset(if (corner.isRight) 0f else width, f.y)
-    val pinned = clampToCircle(touch, bindingCenter, width)
+    val pinned = clampToCircle(
+        touch,
+        bindingCenter,
+        peelBindingRadius(width, height, oppositeWidth, bindingOnly),
+    )
     if (bindingOnly) return pinned
     val vertCenter = Offset(f.x, if (corner.isBottom) 0f else height)
     return clampToCircle(pinned, vertCenter, height)
@@ -204,10 +259,18 @@ fun peelFrame(
     width: Float,
     height: Float,
     bindingOnly: Boolean = false,
+    oppositeWidth: Float = 0f,
 ): PeelFrame? {
     if (width < 8f || height < 8f) return null
     val f = peelCornerPoint(corner, width, height)
-    val a0 = clampPeelTouch(touchLocal, corner, width, height, bindingOnly = bindingOnly)
+    val a0 = clampPeelTouch(
+        touchLocal,
+        corner,
+        width,
+        height,
+        bindingOnly = bindingOnly,
+        oppositeWidth = oppositeWidth,
+    )
     val dist = hypot(a0.x - f.x, a0.y - f.y)
     if (dist < PEEL_MIN_DRAG) return null
     val g = Offset((a0.x + f.x) / 2f, (a0.y + f.y) / 2f)
@@ -283,8 +346,8 @@ fun peelProgressRatio(touchToCorner: Float, width: Float, height: Float): Float 
 }
 
 /**
- * 抬手是否翻过去：位移过对角线的 [PEEL_COMPLETE_RATIO]，或沿离开页角方向甩得够快。
- * [velocityX]/[velocityY] 为叶内坐标的速度（与触点同空间）。
+ * 抬手是否翻过去：|AF| 过叶短边的 [PEEL_COMPLETE_RATIO]（可被 [completeDistancePx] 再缩短），
+ * 或沿离开页角方向甩得够快。[velocityX]/[velocityY] 为叶内坐标的速度。
  */
 fun shouldCompletePeel(
     frame: PeelFrame,
@@ -292,8 +355,12 @@ fun shouldCompletePeel(
     height: Float,
     velocityX: Float,
     velocityY: Float,
+    completeDistancePx: Float = 0f,
 ): Boolean {
-    if (peelProgressRatio(frame.touchToCorner, width, height) > PEEL_COMPLETE_RATIO) return true
+    val span = minOf(width, height).coerceAtLeast(1f)
+    var limit = span * PEEL_COMPLETE_RATIO
+    if (completeDistancePx > 1f) limit = minOf(limit, completeDistancePx)
+    if (frame.touchToCorner > limit) return true
     val nx0 = frame.touch.x - frame.cornerPoint.x
     val ny0 = frame.touch.y - frame.cornerPoint.y
     val len = hypot(nx0, ny0)
@@ -347,6 +414,17 @@ fun peelFlapExtend(
     val extendLeft = if (corner.isRight) (leaf.originX - left.originX).coerceAtLeast(0f) else 0f
     val extendRight = if (!corner.isRight) (right.right - leaf.right).coerceAtLeast(0f) else 0f
     return extendLeft to extendRight
+}
+
+/** 对页在本叶局部坐标里要跨越的宽度；单页为 0。 */
+fun peelOppositeWidth(
+    corner: PeelCorner,
+    leaf: PeelLeaf,
+    left: PeelLeaf,
+    right: PeelLeaf?,
+): Float {
+    val (extL, extR) = peelFlapExtend(corner, leaf, left, right)
+    return if (corner.isRight) extL else extR
 }
 
 internal fun triangleArea(a: Offset, b: Offset, c: Offset): Float =

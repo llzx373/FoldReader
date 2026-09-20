@@ -7,10 +7,22 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Shader
 import androidx.compose.ui.geometry.Offset
 import kotlin.math.hypot
 import kotlin.math.max
+
+/**
+ * 源图在叶内的落位。为 null 时把整张位图拉满叶（电子书离屏页与叶同尺寸）。
+ * 漫画静图直接引用解码缓存时，用这一矩形做 contain / letterbox，避免再拷一份叶尺寸位图。
+ */
+data class PeelBitmapFit(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
 
 /**
  * 把一帧仿真翻页画到 [canvas]（叶内局部坐标，原点在叶的左上）。
@@ -26,12 +38,15 @@ object PeelRenderer {
         leafWidth: Float,
         leafHeight: Float,
         current: Bitmap,
-        next: Bitmap,
+        next: Bitmap?,
         backgroundArgb: Int,
         density: Float = 3f,
         back: Bitmap? = null,
         extendLeft: Float = 0f,
         extendRight: Float = 0f,
+        currentFit: PeelBitmapFit? = null,
+        nextFit: PeelBitmapFit? = null,
+        backFit: PeelBitmapFit? = null,
     ) {
         val w = leafWidth
         val h = leafHeight
@@ -46,9 +61,9 @@ object PeelRenderer {
         val reflected = reflectedPagePath(frame, w, h)
         val flap = intersectOrFallback(reflected, aSide, frame)
 
-        drawUnder(canvas, next, w, h, fSide, flap)
-        drawFront(canvas, current, w, h, aSide, flap)
-        drawBack(canvas, current, back, frame, w, h, reflected, aSide, backgroundArgb)
+        drawUnder(canvas, next, w, h, fSide, flap, backgroundArgb, nextFit)
+        drawFront(canvas, current, w, h, aSide, flap, backgroundArgb, currentFit)
+        drawBack(canvas, back, frame, w, h, reflected, aSide, backgroundArgb, backFit)
         drawShadows(canvas, frame, w, h, fSide, flap, density)
 
         canvas.restore()
@@ -74,17 +89,19 @@ object PeelRenderer {
 
     private fun drawUnder(
         canvas: Canvas,
-        next: Bitmap,
+        next: Bitmap?,
         w: Float,
         h: Float,
         fSide: Path,
         flap: Path,
+        backgroundArgb: Int,
+        fit: PeelBitmapFit?,
     ) {
         canvas.save()
         canvas.clipRect(0f, 0f, w, h)
         canvas.clipPath(fSide)
         canvas.clipOutPath(flap)
-        drawBitmapFitted(canvas, next, w, h)
+        drawPageInLeaf(canvas, next, w, h, backgroundArgb, fit)
         canvas.restore()
     }
 
@@ -95,18 +112,23 @@ object PeelRenderer {
         h: Float,
         aSide: Path,
         flap: Path,
+        backgroundArgb: Int,
+        fit: PeelBitmapFit?,
     ) {
         canvas.save()
         canvas.clipRect(0f, 0f, w, h)
         canvas.clipPath(aSide)
         canvas.clipOutPath(flap)
-        drawBitmapFitted(canvas, current, w, h)
+        drawPageInLeaf(canvas, current, w, h, backgroundArgb, fit)
         canvas.restore()
     }
 
+    /**
+     * 纸背。双页有对侧叶位图（下一开的左页 / 上一开的右页）；单页只留纸色，
+     * 不把当前页镜像画上去——单面印刷，掀起来不该看到反字。
+     */
     private fun drawBack(
         canvas: Canvas,
-        current: Bitmap,
         back: Bitmap?,
         frame: PeelFrame,
         w: Float,
@@ -114,22 +136,27 @@ object PeelRenderer {
         reflected: Path,
         aSide: Path,
         backgroundArgb: Int,
+        fit: PeelBitmapFit?,
     ) {
         canvas.save()
         canvas.clipPath(reflected)
         canvas.clipPath(aSide)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = backgroundArgb }
         canvas.drawRect(-w, -h, w * 2f, h * 2f, fill)
-        canvas.save()
-        canvas.concat(Matrix().apply { setValues(peelReflectionMatrixValues(frame)) })
-        val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         if (back != null && !back.isRecycled) {
+            canvas.save()
+            canvas.concat(Matrix().apply { setValues(peelReflectionMatrixValues(frame)) })
             canvas.scale(-1f, 1f, w / 2f, 0f)
-            drawBitmapFitted(canvas, back, w, h, pagePaint)
-        } else {
-            drawBitmapFitted(canvas, current, w, h, pagePaint)
+            drawBitmapAt(
+                canvas,
+                back,
+                w,
+                h,
+                fit,
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+            )
+            canvas.restore()
         }
-        canvas.restore()
         val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 frame.mid.x,
@@ -281,18 +308,37 @@ object PeelRenderer {
         }
     }
 
-    private fun drawBitmapFitted(
+    private fun drawPageInLeaf(
         canvas: Canvas,
-        bitmap: Bitmap,
+        bitmap: Bitmap?,
         w: Float,
         h: Float,
+        backgroundArgb: Int,
+        fit: PeelBitmapFit?,
+    ) {
+        if (bitmap == null || bitmap.isRecycled || fit != null) {
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = backgroundArgb }
+            canvas.drawRect(0f, 0f, w, h, fill)
+        }
+        drawBitmapAt(canvas, bitmap, w, h, fit)
+    }
+
+    private fun drawBitmapAt(
+        canvas: Canvas,
+        bitmap: Bitmap?,
+        w: Float,
+        h: Float,
+        fit: PeelBitmapFit?,
         paint: Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
     ) {
-        if (bitmap.isRecycled) return
+        if (bitmap == null || bitmap.isRecycled) return
         val src = Rect(0, 0, bitmap.width, bitmap.height)
-        val dw = max(1, w.toInt())
-        val dh = max(1, h.toInt())
-        val dst = android.graphics.RectF(0f, 0f, dw.toFloat(), dh.toFloat())
+        val dst = if (fit != null) {
+            RectF(fit.left, fit.top, fit.right, fit.bottom)
+        } else {
+            RectF(0f, 0f, max(1, w.toInt()).toFloat(), max(1, h.toInt()).toFloat())
+        }
+        if (dst.width() <= 0f || dst.height() <= 0f) return
         canvas.drawBitmap(bitmap, src, dst, paint)
     }
 }

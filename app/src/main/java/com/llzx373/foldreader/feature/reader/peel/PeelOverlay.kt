@@ -16,19 +16,23 @@ import kotlin.math.roundToInt
 
 /**
  * 盖在被掀那一叶上。后半段画布向对页伸出，纸背可以盖住另一叶。
- * 位图与叶同尺寸；[frame] 为叶内局部坐标。
+ * 电子书位图与叶同尺寸；漫画静图可以是解码缓存的引用，用 [currentFit] 等落位。
+ * [next] 为空时下层只留纸色（落单缺栏）。[frame] 为叶内局部坐标。
  */
 @Composable
 fun PeelOverlay(
     frame: PeelFrame,
     leaf: PeelLeaf,
     current: Bitmap,
-    next: Bitmap,
+    next: Bitmap?,
     background: Color,
     modifier: Modifier = Modifier,
     back: Bitmap? = null,
     extendLeft: Float = 0f,
     extendRight: Float = 0f,
+    currentFit: PeelBitmapFit? = null,
+    nextFit: PeelBitmapFit? = null,
+    backFit: PeelBitmapFit? = null,
 ) {
     val density = LocalDensity.current
     val totalW = (extendLeft + leaf.width + extendRight).coerceAtLeast(1f)
@@ -61,6 +65,9 @@ fun PeelOverlay(
                 back = back,
                 extendLeft = extendLeft,
                 extendRight = extendRight,
+                currentFit = currentFit,
+                nextFit = nextFit,
+                backFit = backFit,
             )
             native.restore()
         }

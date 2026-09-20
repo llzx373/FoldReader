@@ -124,6 +124,7 @@ import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
 import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
 import com.llzx373.foldreader.feature.reader.peel.peelLeaves
+import com.llzx373.foldreader.feature.reader.peel.peelOppositeWidth
 import com.llzx373.foldreader.feature.reader.peel.renderPageBitmap
 import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
@@ -480,6 +481,7 @@ fun ReaderScreen(
                 }
                 val local = screenToLeafLocal(contentLocal, leaf)
                 val corner = peelCornerFor(local, leaf.width, leaf.height, forward)
+                val opposite = peelOppositeWidth(corner, leaf, left, right)
                 peelTarget = target
                 if (!preparePeelBitmaps(forward, target, leaf)) {
                     peelTarget = null
@@ -487,7 +489,7 @@ fun ReaderScreen(
                     return@launch
                 }
                 if (peelGeneration != gen) return@launch
-                peel.autoPlay(forward, corner, leaf)
+                peel.autoPlay(forward, corner, leaf, opposite)
                 if (peelGeneration != gen) return@launch
                 viewModel.showSpread(target, countCharsRead = true)
                 peel.reset()
@@ -523,6 +525,7 @@ fun ReaderScreen(
             val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
             val local = screenToLeafLocal(contentLocal, leaf)
             val corner = peelCornerFor(local, leaf.width, leaf.height, dragForward)
+            val opposite = peelOppositeWidth(corner, leaf, left, right)
             val gen = peelGeneration + 1
             peelGeneration = gen
             peelTarget = target
@@ -531,7 +534,7 @@ fun ReaderScreen(
                 return@launch
             }
             if (peelGeneration != gen) return@launch
-            peel.beginDrag(dragForward, corner, leaf, local)
+            peel.beginDrag(dragForward, corner, leaf, local, opposite)
         }
     }
     val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
@@ -1015,7 +1018,6 @@ fun ReaderScreen(
                             dragged += delta
                             tracker?.addPosition(change.uptimeMillis, change.position)
                             if (!started) {
-                                if (abs(dragged) < 8f) return@detectHorizontalDragGestures
                                 started = true
                                 dragForward = dragged < 0f
                                 latestBeginPeelDrag(dragForward, change.position)
@@ -1035,7 +1037,7 @@ fun ReaderScreen(
                                     return@launch
                                 }
                                 val gen = peelGeneration
-                                val committed = peel.endDrag(vx, vy)
+                                val committed = peel.endDrag(vx, vy, distanceThreshold)
                                 if (peelGeneration != gen) return@launch
                                 if (committed) {
                                     peelTarget?.let { viewModel.showSpread(it, countCharsRead = true) }
@@ -1221,6 +1223,17 @@ fun ReaderScreen(
                         } else {
                             null
                         }
+                        if (spreadDual) {
+                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
+                            SpineOverlay(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(SPINE_OVERLAY_WIDTH)
+                                    .offset {
+                                        IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
+                                    },
+                            )
+                        }
                         val curBmp = peelCurrentBmp
                         val nxtBmp = peelNextBmp
                         val backBmp = peelBackBmp
@@ -1239,17 +1252,6 @@ fun ReaderScreen(
                                 back = backBmp?.takeUnless { it.isRecycled },
                                 extendLeft = extL,
                                 extendRight = extR,
-                            )
-                        }
-                        if (spreadDual) {
-                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
-                            SpineOverlay(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(SPINE_OVERLAY_WIDTH)
-                                    .offset {
-                                        IntOffset((spineCenter - spineOverlayPx / 2f).roundToInt(), 0)
-                                    },
                             )
                         }
                     }

@@ -32,6 +32,9 @@ class PeelController {
         private set
     var dragTouch: Offset? by mutableStateOf(null)
         private set
+    /** 对页宽度：后半段装订圆放大，终帧才能盖住另一叶。单页为 0。 */
+    var oppositeWidth: Float by mutableStateOf(0f)
+        private set
 
     val progress = Animatable(0f)
     val touchX = Animatable(0f)
@@ -44,7 +47,7 @@ class PeelController {
         val (touch, bindingOnly) = when (p) {
             PeelPhase.AutoPlay -> {
                 val t = progress.value
-                autoPlayTouch(t, corner, leaf.width, leaf.height) to autoPlayBindingOnly(t)
+                autoPlayTouch(t, corner, leaf.width, leaf.height, oppositeWidth) to autoPlayBindingOnly(t)
             }
             PeelPhase.Drag -> {
                 val local = dragTouch ?: return null
@@ -60,12 +63,14 @@ class PeelController {
             width = leaf.width,
             height = leaf.height,
             bindingOnly = bindingOnly,
+            oppositeWidth = oppositeWidth,
         )
     }
 
     fun reset() {
         phase = null
         dragTouch = null
+        oppositeWidth = 0f
     }
 
     fun beginDrag(
@@ -73,10 +78,12 @@ class PeelController {
         corner: PeelCorner,
         leaf: PeelLeaf,
         local: Offset,
+        oppositeWidth: Float = 0f,
     ) {
         this.forward = forward
         this.corner = corner
         this.leaf = leaf
+        this.oppositeWidth = oppositeWidth.coerceAtLeast(0f)
         this.phase = PeelPhase.Drag
         this.dragTouch = local
     }
@@ -90,7 +97,11 @@ class PeelController {
      * 抬手：过线或甩得够快则飞向 P2 并返回 true（调用方随后 showSpread）；
      * 否则退回 P0 并返回 false。
      */
-    suspend fun endDrag(velocityX: Float, velocityY: Float): Boolean {
+    suspend fun endDrag(
+        velocityX: Float,
+        velocityY: Float,
+        completeDistancePx: Float = 0f,
+    ): Boolean {
         if (phase != PeelPhase.Drag) {
             reset()
             return false
@@ -105,6 +116,7 @@ class PeelController {
             width = leaf.width,
             height = leaf.height,
             bindingOnly = false,
+            oppositeWidth = oppositeWidth,
         )
         val complete = frame != null && shouldCompletePeel(
             frame = frame,
@@ -112,8 +124,9 @@ class PeelController {
             height = leaf.height,
             velocityX = velocityX,
             velocityY = velocityY,
+            completeDistancePx = completeDistancePx,
         )
-        val (p0, _, p2) = autoPlayPathPoints(corner, leaf.width, leaf.height)
+        val (p0, _, p2) = autoPlayPathPoints(corner, leaf.width, leaf.height, oppositeWidth)
         touchX.snapTo(current.x)
         touchY.snapTo(current.y)
         dragTouch = null
@@ -129,11 +142,17 @@ class PeelController {
         }
     }
 
-    suspend fun autoPlay(forward: Boolean, corner: PeelCorner, leaf: PeelLeaf) {
+    suspend fun autoPlay(
+        forward: Boolean,
+        corner: PeelCorner,
+        leaf: PeelLeaf,
+        oppositeWidth: Float = 0f,
+    ) {
         progress.stop()
         this.forward = forward
         this.corner = corner
         this.leaf = leaf
+        this.oppositeWidth = oppositeWidth.coerceAtLeast(0f)
         this.phase = PeelPhase.AutoPlay
         progress.snapTo(0f)
         progress.animateTo(1f, tween(PEEL_AUTO_MS, easing = FastOutSlowInEasing))
@@ -157,7 +176,8 @@ fun peelEndShouldComplete(
     height: Float,
     velocityX: Float,
     velocityY: Float,
+    completeDistancePx: Float = 0f,
 ): Boolean {
     val frame = peelFrame(touchLocal, corner, width, height, bindingOnly = false) ?: return false
-    return shouldCompletePeel(frame, width, height, velocityX, velocityY)
+    return shouldCompletePeel(frame, width, height, velocityX, velocityY, completeDistancePx)
 }

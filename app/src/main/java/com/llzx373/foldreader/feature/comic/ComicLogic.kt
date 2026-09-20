@@ -82,9 +82,79 @@ fun comicPairedVisualPages(pages: List<Int>, rtl: Boolean): Pair<Int, Int>? {
     return left to right
 }
 
-/** 当前与目标都是成对双页时才按左右叶掀；否则整块内容区当一张叶。 */
-fun comicPeelUsesDualLeaves(currentPages: List<Int>, targetPages: List<Int>): Boolean =
-    currentPages.size >= 2 && targetPages.size >= 2
+/**
+ * 当前跨页已经是左右两叶，且下一开不是独占整宽的跨页大图时，按双叶掀。
+ * 下一开落单（封面/末页）仍掀一叶——与电子书双页一致，不退回整幅单页。
+ */
+fun comicPeelUsesDualLeaves(currentPages: List<Int>, targetWide: Boolean = false): Boolean =
+    currentPages.size >= 2 && !targetWide
+
+/**
+ * 双叶仿真要烘的三页：被掀的当前叶、口袋里露出的那一叶、纸背。
+ * 当前不成对时返回 null（改走整跨页位图）。下一开落单时缺的那一叶为 null（空白纸）。
+ */
+data class ComicPeelPageIds(val current: Int, val next: Int?, val back: Int?)
+
+fun comicPeelPageIds(
+    peelForward: Boolean,
+    currentPages: List<Int>,
+    targetPages: List<Int>,
+    rtl: Boolean,
+): ComicPeelPageIds? {
+    val curPair = comicPairedVisualPages(currentPages, rtl) ?: return null
+    val current = if (peelForward) curPair.second else curPair.first
+    val nxtPair = comicPairedVisualPages(targetPages, rtl)
+    if (nxtPair != null) {
+        return ComicPeelPageIds(
+            current = current,
+            next = if (peelForward) nxtPair.second else nxtPair.first,
+            back = if (peelForward) nxtPair.first else nxtPair.second,
+        )
+    }
+    val lone = targetPages.singleOrNull()
+    val loneOnRight = rtl
+    return if (peelForward) {
+        ComicPeelPageIds(
+            current = current,
+            next = if (loneOnRight) lone else null,
+            back = if (loneOnRight) null else lone,
+        )
+    } else {
+        ComicPeelPageIds(
+            current = current,
+            next = if (loneOnRight) null else lone,
+            back = if (loneOnRight) lone else null,
+        )
+    }
+}
+
+/**
+ * 仿真翻页预取半径：当前可见页再往前 / 往后这么多张。
+ *
+ * 双页一次两张，向前掀需要「下一开左（纸背）+ 下一开右（口袋）」，
+ * 所以可见跨页的再往后两页正好覆盖一次翻页；往后翻对称。
+ */
+const val COMIC_PREFETCH_RADIUS = 2
+
+/**
+ * 解码顺序：先可见，再往后（下一次向前掀），再往前。
+ */
+fun comicPrefetchPages(
+    visible: List<Int>,
+    pageCount: Int,
+    radius: Int = COMIC_PREFETCH_RADIUS,
+): List<Int> {
+    if (pageCount <= 0) return emptyList()
+    val vis = visible.filter { it in 0 until pageCount }.distinct()
+    if (vis.isEmpty()) return emptyList()
+    val lo = vis.min()
+    val hi = vis.max()
+    val from = (lo - radius).coerceAtLeast(0)
+    val to = (hi + radius).coerceAtMost(pageCount - 1)
+    val forward = (hi + 1..to).toList()
+    val backward = (lo - 1 downTo from).toList()
+    return vis + forward + backward
+}
 
 /**
  * 跨页配对索引。

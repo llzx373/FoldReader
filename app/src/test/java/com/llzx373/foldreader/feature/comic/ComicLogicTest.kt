@@ -277,9 +277,44 @@ class ComicLogicTest {
         assertEquals(1 to 0, comicPairedVisualPages(listOf(0, 1), rtl = true))
         assertNull(comicPairedVisualPages(listOf(0), rtl = false))
         assertNull(comicPairedVisualPages(emptyList(), rtl = true))
-        assertTrue(comicPeelUsesDualLeaves(listOf(0, 1), listOf(2, 3)))
-        assertFalse(comicPeelUsesDualLeaves(listOf(0), listOf(1, 2)))
-        assertFalse(comicPeelUsesDualLeaves(listOf(0, 1), listOf(2)))
+        assertTrue(comicPeelUsesDualLeaves(listOf(0, 1)))
+        assertTrue(comicPeelUsesDualLeaves(listOf(0, 1), targetWide = false))
+        assertFalse(comicPeelUsesDualLeaves(listOf(0), targetWide = false))
+        assertFalse(comicPeelUsesDualLeaves(listOf(0, 1), targetWide = true))
+        // 下一开落单仍按双叶掀，不退回整幅
+        assertEquals(
+            ComicPeelPageIds(current = 1, next = null, back = 2),
+            comicPeelPageIds(peelForward = true, currentPages = listOf(0, 1), targetPages = listOf(2), rtl = false),
+        )
+        assertEquals(
+            ComicPeelPageIds(current = 3, next = 5, back = 4),
+            comicPeelPageIds(peelForward = true, currentPages = listOf(2, 3), targetPages = listOf(4, 5), rtl = false),
+        )
+        assertEquals(
+            ComicPeelPageIds(current = 3, next = 5, back = 4),
+            comicPeelPageIds(peelForward = false, currentPages = listOf(2, 3), targetPages = listOf(4, 5), rtl = true),
+        )
+        assertEquals(
+            ComicPeelPageIds(current = 0, next = 2, back = null),
+            comicPeelPageIds(peelForward = true, currentPages = listOf(0, 1), targetPages = listOf(2), rtl = true),
+        )
+    }
+
+    @Test
+    fun `预取当前跨页再前后各两页且先解往后`() {
+        assertEquals(
+            listOf(10, 11, 12, 13, 9, 8),
+            comicPrefetchPages(visible = listOf(10, 11), pageCount = 40),
+        )
+        assertEquals(
+            listOf(0, 1, 2),
+            comicPrefetchPages(visible = listOf(0), pageCount = 10),
+        )
+        assertEquals(
+            listOf(8, 9, 7, 6),
+            comicPrefetchPages(visible = listOf(8, 9), pageCount = 10),
+        )
+        assertEquals(emptyList<Int>(), comicPrefetchPages(visible = emptyList(), pageCount = 10))
     }
 
     @Test
