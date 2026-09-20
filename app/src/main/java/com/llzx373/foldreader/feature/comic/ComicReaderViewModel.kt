@@ -72,8 +72,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -143,13 +143,15 @@ class ComicReaderViewModel(
     /** 缩略图（网格跳转面板用）。小图单独一张表，不占正文页的内存预算。 */
     val thumbnails: SnapshotStateMap<Int, ImageBitmap> = mutableStateMapOf()
 
-    val preferences: StateFlow<ReadingPreferences> = bookPrefsRepository.observe(bookId)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ReadingPreferences())
-
     private val _preferencesLoaded = MutableStateFlow(false)
 
     /** 首帧前偏好未就绪时不要按默认值渲染，避免闪一下错误的背景色/翻页方式。 */
     val preferencesLoaded: StateFlow<Boolean> = _preferencesLoaded.asStateFlow()
+
+    // 就绪标记挂在上游的首次真实发射上：stateIn 之后 first() 只会立刻拿到默认值
+    val preferences: StateFlow<ReadingPreferences> = bookPrefsRepository.observe(bookId)
+        .onEach { _preferencesLoaded.value = true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ReadingPreferences())
 
     private var source: PagedImageSource? = null
     private var contentHash: String? = null
@@ -452,8 +454,6 @@ class ComicReaderViewModel(
     init {
         viewModelScope.launch {
             runCatching { bookPrefsRepository.ensureInitialized(bookId) }
-            preferences.first()
-            _preferencesLoaded.value = true
         }
         viewModelScope.launch {
             pendingSave.filterNotNull().debounce(PROGRESS_SAVE_DEBOUNCE_MS).collect { page ->

@@ -168,6 +168,7 @@ fun ComicReaderScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.preferences.collectAsState()
+    val prefsLoaded by viewModel.preferencesLoaded.collectAsState()
     val position by viewModel.readingPosition.collectAsState()
     val spreadIndex by viewModel.spreadIndex.collectAsState()
     val features by viewModel.features.collectAsState()
@@ -270,7 +271,10 @@ fun ComicReaderScreen(
         if (dual) maxOf(splitLeftPx, size.width - splitRightPx) else contentRect.width
         ).roundToInt()
     val decodeTargetH = contentRect.height.roundToInt()
-    LaunchedEffect(dual) { viewModel.setDualPage(dual) }
+    // 偏好就绪前不回填 dual：否则按默认值推一版给 ViewModel，真实偏好落地时又翻回来
+    LaunchedEffect(dual, prefsLoaded) {
+        if (prefsLoaded) viewModel.setDualPage(dual)
+    }
     LaunchedEffect(decodeTargetW, decodeTargetH) {
         if (decodeTargetW < 64 || decodeTargetH < 64) return@LaunchedEffect
         viewModel.setDecodeTarget(decodeTargetW, decodeTargetH)
@@ -835,6 +839,10 @@ fun ComicReaderScreen(
             .background(colors.background)
             .onSizeChanged { size = it }
             .onGloballyPositioned {
+                // 进出书滑移期间整页在窗口里逐帧平移，偏移每帧都在变；双页的铰链局部坐标
+                // （和解码目标宽度）由它推导，跟着漂移会反复触发 setDecodeTarget 清表重解码，
+                // 表现为打开时的闪烁抖动。阅读页静止时铺满窗口、偏移即 (0,0)，转场期间冻结即可
+                if (!readerSettled) return@onGloballyPositioned
                 val bounds = it.boundsInWindow()
                 windowOffsetX = bounds.left
                 windowOffsetY = bounds.top
@@ -1048,6 +1056,9 @@ fun ComicReaderScreen(
             )
 
             else -> {
+                // 偏好就绪前不渲内容：滚动/双页/方向/适配方式都依赖偏好，
+                // 先按默认值渲一版再跳变就是打开时那一闪
+                if (!prefsLoaded) return@Box
                 if (scrollMode) {
                     ComicScrollContent(
                         pageCount = uiState.pageCount,
