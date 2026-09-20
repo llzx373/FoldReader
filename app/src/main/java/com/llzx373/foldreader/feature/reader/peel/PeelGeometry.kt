@@ -54,7 +54,7 @@ data class PeelFrame(
     val bindingOnly: Boolean,
 )
 
-/** 自动翻页轨迹在 [0, 0.7] 走双圆附着；之后只钉装订边，页角翻到对页。 */
+/** 自动翻页轨迹在 [0, 0.7] 走双圆附着；之后只钉装订边：双页页角翻到对页，单页纸背退出叶外。 */
 const val PEEL_ATTACHED_UNTIL = 0.7f
 
 /**
@@ -75,6 +75,9 @@ const val PEEL_CANCEL_MS = 250
 /** 小于此距离视为还没卷起来，避免除零。 */
 const val PEEL_MIN_DRAG = 6f
 
+/** 尾段渐隐窗口：触点距终点不足轨迹全长的这一比例时，阴影开始退场。 */
+const val PEEL_SHADOW_FADE_TAIL = 0.1f
+
 /** |dy| 大于此倍数的 |dx| 时不接管，把竖滑留给亮度。 */
 const val PEEL_VERTICAL_DOMINANCE = 1.6f
 
@@ -84,11 +87,8 @@ private const val SPEC_H = 2340f
 /** 说明书 1080×2340 右下角轨迹的归一化控制点。 */
 internal val PEEL_PATH_P0 = Offset(1044f / SPEC_W, 2292f / SPEC_H)
 internal val PEEL_PATH_P1 = Offset(420f / SPEC_W, 1680f / SPEC_H)
-/** 装订圆上 135°：左下角钉住，触点落到对页。 */
-internal val PEEL_PATH_P2 = Offset(
-    (-SPEC_W * 0.70710677f) / SPEC_W,
-    (SPEC_H - SPEC_W * 0.70710677f) / SPEC_H,
-)
+/** 装订圆上 180°：左下角钉住，纸背完全退出叶外，终帧就是干净的下一页。 */
+internal val PEEL_PATH_P2 = Offset(-1f, 1f)
 
 fun peelCornerPoint(corner: PeelCorner, width: Float, height: Float): Offset = when (corner) {
     PeelCorner.TOP_LEFT -> Offset(0f, 0f)
@@ -161,6 +161,25 @@ fun dualCoverPoint(
         PeelCorner.BOTTOM_LEFT -> Offset(width + far, height)
         PeelCorner.BOTTOM_RIGHT -> Offset(-far, height)
     }
+}
+
+/**
+ * 尾段阴影渐隐系数：触点离终点还远为 1（满强度），抵达终点为 0。
+ *
+ * 终帧整叶满幅灰（下层投影 + 纸背压暗）若与撤覆盖层同帧硬切会闪灰；
+ * 末段把阴影淡出后，撤层前后两帧画面一致。纯函数，拖动回退时系数自然回升。
+ */
+fun peelShadowFade(
+    touchLocal: Offset,
+    corner: PeelCorner,
+    width: Float,
+    height: Float,
+    oppositeWidth: Float = 0f,
+): Float {
+    val (p0, _, p2) = autoPlayPathPoints(corner, width, height, oppositeWidth)
+    val total = hypot(p2.x - p0.x, p2.y - p0.y).coerceAtLeast(1f)
+    val remain = hypot(touchLocal.x - p2.x, touchLocal.y - p2.y)
+    return smoothstep((remain / (total * PEEL_SHADOW_FADE_TAIL)).coerceIn(0f, 1f))
 }
 
 /** 后半段绕书脊盖住对页时，装订圆半径要够到对页同侧远角。 */

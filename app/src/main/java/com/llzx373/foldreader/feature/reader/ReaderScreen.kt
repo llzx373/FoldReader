@@ -127,6 +127,7 @@ import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
 import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
 import com.llzx373.foldreader.feature.reader.peel.peelLeaves
 import com.llzx373.foldreader.feature.reader.peel.peelOppositeWidth
+import com.llzx373.foldreader.feature.reader.peel.peelShadowFade
 import com.llzx373.foldreader.feature.reader.peel.renderPageBitmap
 import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
@@ -494,6 +495,8 @@ fun ReaderScreen(
                 peel.autoPlay(forward, corner, leaf, opposite)
                 if (peelGeneration != gen) return@launch
                 viewModel.showSpread(target, countCharsRead = true)
+                // showSpread 走 StateFlow 是异步的，等下一帧新跨页上屏后再撤覆盖层，避免闪回旧页
+                withFrameNanos { }
                 peel.reset()
                 peelTarget = null
                 peelCurrentBmp = null
@@ -1043,6 +1046,7 @@ fun ReaderScreen(
                                 if (peelGeneration != gen) return@launch
                                 if (committed) {
                                     peelTarget?.let { viewModel.showSpread(it, countCharsRead = true) }
+                                    withFrameNanos { }
                                 }
                                 peel.reset()
                                 peelTarget = null
@@ -1263,6 +1267,30 @@ fun ReaderScreen(
                                     .offset { IntOffset(spineLeft, 0) },
                                 clipOut = spineClip,
                             )
+                            val frameNow = peelFrameNow
+                            if (spineClip != null && frameNow != null) {
+                                // 被纸背盖住的那截阴影随尾段渐升画回纸背上，
+                                // 撤层前后两帧一致，阴影不再突兀蹦出
+                                val (leftLeaf, rightLeaf) = currentPeelLeaves()
+                                val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
+                                val ramp = 1f - peelShadowFade(
+                                    touchLocal = frameNow.touch,
+                                    corner = peel.corner,
+                                    width = peel.leaf.width,
+                                    height = peel.leaf.height,
+                                    oppositeWidth = if (peel.corner.isRight) extL else extR,
+                                )
+                                if (ramp > 0f) {
+                                    SpineOverlay(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .width(SPINE_OVERLAY_WIDTH)
+                                            .offset { IntOffset(spineLeft, 0) },
+                                        clipIn = spineClip,
+                                        alpha = ramp,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

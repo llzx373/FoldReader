@@ -50,14 +50,18 @@ class PeelGeometryTest {
     }
 
     @Test
-    fun `终点钉在装订边且触点落到对页`() {
+    fun `单页终点钉在装订边且纸背完全退出叶外`() {
         val a = autoPlayTouch(1f, br, w, h)
-        near(Offset(-764f, 1576f), a, eps = 3f)
+        near(Offset(-w, h), a, eps = 3f)
         val frame = peelFrame(a, br, w, h, bindingOnly = true)!!
         assertTrue(frame.touch.x < 0f)
         assertTrue(hypot(frame.touch.x, frame.touch.y - h) <= w + 1.5f)
         assertTrue(hypot(frame.touch.x - w, frame.touch.y) > 1f)
-        assertTrue(peelBackArea(frame) / (w * h) > 0.12f)
+        // 反射后的页矩形整体落到左缘外，终帧不再残留纸背带
+        for (p in listOf(Offset(0f, 0f), Offset(w, 0f), Offset(0f, h), Offset(w, h))) {
+            val r = peelReflected(p, frame)
+            assertTrue("reflected $p should exit the leaf, was $r", r.x <= 1f)
+        }
     }
 
     @Test
@@ -225,5 +229,20 @@ class PeelGeometryTest {
     fun `页角选择上半用顶角`() {
         assertEquals(PeelCorner.TOP_RIGHT, peelCornerFor(Offset(1000f, 200f), w, h, forward = true))
         assertEquals(PeelCorner.BOTTOM_LEFT, peelCornerFor(Offset(80f, 2000f), w, h, forward = false))
+    }
+
+    @Test
+    fun `阴影尾段渐隐到终点归零`() {
+        val pageW = 960f
+        val pageH = 1600f
+        val opp = 960f
+        val (p0, _, p2) = autoPlayPathPoints(br, pageW, pageH, opp)
+        assertEquals(1f, peelShadowFade(p0, br, pageW, pageH, opp), 1e-4f)
+        assertEquals(0f, peelShadowFade(p2, br, pageW, pageH, opp), 1e-4f)
+        val midTail = lerpOffset(p2, p0, PEEL_SHADOW_FADE_TAIL / 2f)
+        val fade = peelShadowFade(midTail, br, pageW, pageH, opp)
+        assertTrue("tail mid fade in (0, 1), was $fade", fade in 0.01f..0.99f)
+        val (_, _, singleP2) = autoPlayPathPoints(br, w, h)
+        assertEquals(0f, peelShadowFade(singleP2, br, w, h), 1e-4f)
     }
 }

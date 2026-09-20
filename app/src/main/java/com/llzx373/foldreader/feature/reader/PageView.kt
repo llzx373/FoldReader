@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -123,15 +124,21 @@ fun ReaderFooter(
 /**
  * 双页中缝阴影。仿真翻页时叠在掀纸上面，用 [clipOut] 扣掉翻起的那片，
  * 这样左右两半都还在，只是被纸背盖住的那一块看不见。
+ * [clipIn] 相反，只保留纸背盖住的那块：尾段把被盖住的阴影渐升画回纸背上，
+ * 撤层前后两帧一致，阴影不会突兀蹦出。
  */
 @Composable
 fun SpineOverlay(
     modifier: Modifier = Modifier,
     clipOut: Path? = null,
+    clipIn: Path? = null,
+    alpha: Float = 1f,
 ) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.graphicsLayer { this.alpha = alpha }) {
         if (clipOut != null) {
             clipPath(clipOut, ClipOp.Difference) { drawSpineGradient() }
+        } else if (clipIn != null) {
+            clipPath(clipIn, ClipOp.Intersect) { drawSpineGradient() }
         } else {
             drawSpineGradient()
         }

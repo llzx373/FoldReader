@@ -60,11 +60,18 @@ object PeelRenderer {
         val fSide = halfPlanePath(frame.mid, -n.x, -n.y, extent)
         val reflected = reflectedPagePath(frame, w, h)
         val flap = intersectOrFallback(reflected, aSide, frame)
+        val shadowFade = peelShadowFade(
+            touchLocal = frame.touch,
+            corner = frame.corner,
+            width = w,
+            height = h,
+            oppositeWidth = if (frame.corner.isRight) extendLeft else extendRight,
+        )
 
         drawUnder(canvas, next, w, h, fSide, flap, backgroundArgb, nextFit)
         drawFront(canvas, current, w, h, aSide, flap, backgroundArgb, currentFit)
-        drawBack(canvas, back, frame, w, h, reflected, aSide, backgroundArgb, backFit)
-        drawShadows(canvas, frame, w, h, fSide, flap, density)
+        drawBack(canvas, back, frame, w, h, reflected, aSide, backgroundArgb, backFit, shadowFade)
+        drawShadows(canvas, frame, w, h, fSide, flap, density, shadowFade)
 
         canvas.restore()
     }
@@ -144,6 +151,7 @@ object PeelRenderer {
         aSide: Path,
         backgroundArgb: Int,
         fit: PeelBitmapFit?,
+        fade: Float,
     ) {
         canvas.save()
         canvas.clipPath(reflected)
@@ -164,22 +172,24 @@ object PeelRenderer {
             )
             canvas.restore()
         }
-        val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                frame.mid.x,
-                frame.mid.y,
-                frame.touch.x,
-                frame.touch.y,
-                intArrayOf(
-                    PEEL_BACK_DIM_CREASE_ALPHA shl 24,
-                    PEEL_BACK_DIM_EDGE_ALPHA shl 24,
-                    0x00000000,
-                ),
-                floatArrayOf(0f, 0.55f, 1f),
-                Shader.TileMode.CLAMP,
-            )
+        if (fade > 0f) {
+            val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    frame.mid.x,
+                    frame.mid.y,
+                    frame.touch.x,
+                    frame.touch.y,
+                    intArrayOf(
+                        shadowAlpha(PEEL_BACK_DIM_CREASE_ALPHA, fade),
+                        shadowAlpha(PEEL_BACK_DIM_EDGE_ALPHA, fade),
+                        0x00000000,
+                    ),
+                    floatArrayOf(0f, 0.55f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(-w, -h, w * 2f, h * 2f, dim)
         }
-        canvas.drawRect(-w, -h, w * 2f, h * 2f, dim)
         canvas.restore()
     }
 
@@ -191,7 +201,9 @@ object PeelRenderer {
         fSide: Path,
         flap: Path,
         density: Float,
+        fade: Float,
     ) {
+        if (fade <= 0f) return
         val d = density.coerceAtLeast(0.5f)
         val unit = d / 3f
         val c1 = frame.bezierControl1
@@ -207,7 +219,11 @@ object PeelRenderer {
                 frame.mid.y,
                 frame.cornerPoint.x,
                 frame.cornerPoint.y,
-                intArrayOf(PEEL_CAST_SHADOW_ALPHA shl 24, 0x12000000, 0x00000000),
+                intArrayOf(
+                    shadowAlpha(PEEL_CAST_SHADOW_ALPHA, fade),
+                    shadowAlpha(0x12, fade),
+                    0x00000000,
+                ),
                 floatArrayOf(0f, 0.5f, 1f),
                 Shader.TileMode.CLAMP,
             )
@@ -224,7 +240,7 @@ object PeelRenderer {
             crease,
             unit,
             widths = floatArrayOf(36f, 22f, 12f, 5f),
-            alphas = intArrayOf(0x08, 0x0E, 0x16, PEEL_CREASE_CONTACT_ALPHA),
+            alphas = intArrayOf(0x08, 0x0E, 0x16, PEEL_CREASE_CONTACT_ALPHA).fadeBy(fade),
         )
 
         canvas.save()
@@ -235,7 +251,7 @@ object PeelRenderer {
                 frame.mid.y,
                 frame.touch.x,
                 frame.touch.y,
-                intArrayOf(0x1C000000, 0x0A000000, 0x00000000),
+                intArrayOf(shadowAlpha(0x1C, fade), shadowAlpha(0x0A, fade), 0x00000000),
                 floatArrayOf(0f, 0.45f, 1f),
                 Shader.TileMode.CLAMP,
             )
@@ -250,13 +266,13 @@ object PeelRenderer {
             flap,
             unit,
             widths = floatArrayOf(42f, 26f, 14f, 6f),
-            alphas = intArrayOf(0x06, 0x0A, 0x0E, PEEL_FLAP_EDGE_ALPHA),
+            alphas = intArrayOf(0x06, 0x0A, 0x0E, PEEL_FLAP_EDGE_ALPHA).fadeBy(fade),
         )
         canvas.restore()
 
         val edge = PEEL_EDGE_SHADOW_PX * unit
         val highlight = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = (PEEL_EDGE_HIGHLIGHT_ALPHA shl 24) or 0x00FFFFFF
+            color = shadowAlpha(PEEL_EDGE_HIGHLIGHT_ALPHA, fade) or 0x00FFFFFF
             style = Paint.Style.STROKE
             strokeWidth = edge
             strokeCap = Paint.Cap.ROUND
@@ -264,6 +280,12 @@ object PeelRenderer {
         canvas.drawLine(frame.touch.x, frame.touch.y, c1.x, c1.y, highlight)
         canvas.drawLine(frame.touch.x, frame.touch.y, c2.x, c2.y, highlight)
     }
+
+    /** 尾段渐隐：把 0x00–0xFF 的 alpha 按比例收缩后放回高字节。 */
+    private fun shadowAlpha(alpha: Int, fade: Float): Int = (alpha * fade).toInt() shl 24
+
+    private fun IntArray.fadeBy(fade: Float): IntArray =
+        IntArray(size) { i -> (this[i] * fade).toInt() }
 
     private fun strokeSoft(
         canvas: Canvas,

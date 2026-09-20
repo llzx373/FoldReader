@@ -221,10 +221,17 @@ class PeelFrameRenderTest {
         midDual.recycle()
 
         val endSingle = BitmapFactory.decodeFile(singleFiles[8].absolutePath)
+        // 尾段阴影渐隐后，终帧不再罩灰：下层页区域必须是干净的新页色，
+        // 否则 finishPeel 撤层瞬间会闪一次灰。取侧边与右下两处无文字区采样。
         val pin = endSingle.getPixel(8, singleH - 8)
         assertTrue(
-            "single bottom-left should stay pinned, was ${Integer.toHexString(pin)}",
-            !colorNear(pin, nextBg, slop = 40),
+            "single end frame bottom-left should show clean next page, was ${Integer.toHexString(pin)}",
+            colorNear(pin, nextBg, slop = 40),
+        )
+        val lowerRight = endSingle.getPixel(singleW - 80, singleH - 120)
+        assertTrue(
+            "single end frame should carry no cast shadow, was ${Integer.toHexString(lowerRight)}",
+            colorNear(lowerRight, nextBg, slop = 40),
         )
         endSingle.recycle()
 

@@ -669,6 +669,8 @@ fun ComicReaderScreen(
                 peel.autoPlay(peelFwd, corner, leaf, opposite)
                 if (peelGeneration != gen) return@launch
                 viewModel.goToPage(target, countRead = true)
+                // goToPage 走 StateFlow 是异步的，等下一帧新跨页上屏后再撤覆盖层，避免闪回旧页
+                withFrameNanos { }
                 finishPeel()
                 return@launch
             }
@@ -978,6 +980,7 @@ fun ComicReaderScreen(
                                 if (peelGeneration != gen) return@launch
                                 if (committed) {
                                     peelTarget?.let { viewModel.goToPage(it, countRead = true) }
+                                    withFrameNanos { }
                                 }
                                 finishPeel()
                                 started = false
