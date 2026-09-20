@@ -55,9 +55,14 @@ import com.llzx373.foldreader.feature.reader.autoPageSpeedLabel
 import com.llzx373.foldreader.feature.reader.formatPercent
 
 /**
- * 漫画可用的翻页方式：覆盖/无动画为左右翻页，滚动为纵向连续（条漫）。
+ * 漫画可用的翻页方式：覆盖/仿真/无动画为左右翻页，滚动为纵向连续（条漫）。
  */
-private val COMIC_PAGE_TURN_MODES = listOf(PageTurnMode.COVER, PageTurnMode.NONE, PageTurnMode.SCROLL)
+private val COMIC_PAGE_TURN_MODES = listOf(
+    PageTurnMode.COVER,
+    PageTurnMode.SIMULATION,
+    PageTurnMode.NONE,
+    PageTurnMode.SCROLL,
+)
 
 /** 纵向连续滚动的页间距档位（dp）；0 = 无缝，长条漫拼接时用。 */
 private val COMIC_SCROLL_GAPS = listOf(0, 8, 24)
@@ -86,6 +91,7 @@ private fun comicFitLabel(mode: ComicFitMode): String = when (mode) {
 
 private fun comicPageTurnLabel(mode: PageTurnMode): String = when (mode) {
     PageTurnMode.COVER -> "覆盖"
+    PageTurnMode.SIMULATION -> "仿真"
     PageTurnMode.NONE -> "无动画"
     PageTurnMode.SCROLL -> "滚动"
 }

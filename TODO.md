@@ -1,6 +1,6 @@
 # FoldReader 开发任务清单（TODO）
 
-> 依据《docs/需求与设计说明书.md》v1.2 拆解。
+> 依据《docs/需求与设计说明书.md》v1.3 拆解。
 > 执行规则：按里程碑顺序推进；每个任务完成即勾选 `[x]`；每完成一个里程碑必须达到对应"验收标准"并编译通过（`./gradlew :app:assembleDebug`）后再进入下一个。
 > 设计语言：Material Design 3 Expressive（material3 1.5.0+，`MaterialExpressiveTheme` 已就位）。
 > 目标设备：大折叠 + 阔折叠实测优先；直板/竖折 Flip 仅验证优雅降级。
@@ -445,6 +445,22 @@
 - [x] `BackupCodec` 导出/导入同步去掉该键
 - [x] 删 `ReaderLogic.effectivePageTurnMode`，`ReaderScreen` 直接用 `prefs.pageTurnMode`
 - [x] 测试同步（`ReadingPreferencesTest` / `BookPrefsRepositoryTest` / `BackupCodecTest` / `ReaderLogicTest`）
+
+---
+
+## M5.15 2.5D 仿真翻页（折痕反射，进行中）
+
+> 详见 `docs/需求与设计说明书.md` 附录「v2.4 2.5D 仿真翻页」。
+> **不恢复** M5.13 已删除的圆柱/铰链代码。几何换成垂直平分线 + Householder 等距镜像。
+> 默认翻页方式仍是 COVER。
+
+- [x] `PeelGeometry`：圆约束（装订圆始终、对边圆前半段）、贝塞尔、反射矩阵、四角镜像、P0→P1→P2 自动轨迹（t>0.7 只钉装订边）
+- [x] `PeelRenderer` / `PeelShadows` / `PeelOverlay`：纸背 = 反射页 ∩ A 侧半平面；双页后半段伸到对页
+- [x] `PeelController`：跟手 / 完成 / 取消 / 自动 400ms
+- [x] 电子书 `ReaderScreen` + 菜单/设置 `PageTurnMode.SIMULATION`
+- [x] 漫画 / 页式 PDF `ComicReaderScreen` 同一套 overlay；`comicPeelForward` 与 RTL 同口径
+- [x] 说明书 5.1 / 5.2 / 附录 v2.4、README、CHANGELOG
+- [ ] 真机：单页/双页、向前/向后、日漫、封面落单与跨页大图、漫画与 PDF 页式
 
 ---
 

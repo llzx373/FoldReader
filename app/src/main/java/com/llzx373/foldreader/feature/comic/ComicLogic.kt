@@ -19,8 +19,8 @@ fun isWidePage(width: Int, height: Int): Boolean =
     width > 0 && height > 0 && width.toFloat() / height >= COMIC_WIDE_ASPECT
 
 /*
- * 阅读方向（日漫 RTL）对四类输入的翻译：**热区 → 逻辑前后**、**横滑 → 逻辑前后**、
- * **滚轮 → 逻辑前后**、**逻辑前后 → 动画滑入侧**。
+ * 阅读方向（日漫 RTL）对带方向输入的翻译：**热区 → 逻辑前后**、**横滑 → 逻辑前后**、
+ * **滚轮 → 逻辑前后**、**逻辑前后 → 覆盖滑入侧**、**逻辑前后 → 仿真掀页方向**。
  *
  * 它们必须同一口径。这块逻辑翻过两次车（先几处全镜像，再改成横滑与动画一律不镜像），
  * 两次都是某一处被单独留下，结果同一个「下一页」在不同输入上给出互相矛盾的方向。
@@ -32,8 +32,8 @@ fun isWidePage(width: Int, height: Int): Boolean =
  * 口诀（物理翻书，LTR 为准）：
  * - 下一页时那张纸向左翻、新页从右边露出 → **点右侧=下一页，左滑=下一页，动画从右滑入**；
  * - 横滑与点击方向天然相反：点击是「往前进方向点」，横滑是「把内容往哪边拖」；
- * - 动画永远跟横滑同向：下一页从拖动方向的反侧进来；
- * - 日漫（RTL）整体镜像（滚轮随之上下镜像）：点左=下一页、右滑=下一页、上滚=下一页、下一页从左滑入。
+ * - 动画永远跟横滑同向：下一页从拖动方向的反侧进来；覆盖是滑入侧，仿真是掀哪一叶；
+ * - 日漫（RTL）整体镜像（滚轮随之上下镜像）：点左=下一页、右滑=下一页、上滚=下一页、下一页从左滑入、下一页掀左叶。
  */
 
 /** 左右热区的逻辑方向：true = 下一页。日漫（rtl）下左右镜像。中间区不翻页，返回 null。 */
@@ -63,6 +63,28 @@ fun comicWheelForward(deltaY: Float, rtl: Boolean): Boolean = (deltaY > 0f) != r
 
 /** 覆盖动画的滑入侧：true = 新跨页从右侧外滑入。与 [comicSwipeForward] 同口径。 */
 fun comicSlideFromRight(forward: Boolean, rtl: Boolean): Boolean = forward != rtl
+
+/**
+ * 仿真翻页的物理方向：true = 掀右侧页角（纸往左翻）。
+ *
+ * 左滑永远掀右叶，与覆盖「下一页从拖动反侧进来」同一条物理轴。
+ * 日漫下逻辑前进因此对应掀左叶。
+ */
+fun comicPeelForward(logicalForward: Boolean, rtl: Boolean): Boolean = logicalForward != rtl
+
+/**
+ * 成对双页的视觉左/右页序号。页数不足 2 时（单页、封面落单、跨页大图）返回 null。
+ */
+fun comicPairedVisualPages(pages: List<Int>, rtl: Boolean): Pair<Int, Int>? {
+    if (pages.size < 2) return null
+    val left = if (rtl) pages[1] else pages[0]
+    val right = if (rtl) pages[0] else pages[1]
+    return left to right
+}
+
+/** 当前与目标都是成对双页时才按左右叶掀；否则整块内容区当一张叶。 */
+fun comicPeelUsesDualLeaves(currentPages: List<Int>, targetPages: List<Int>): Boolean =
+    currentPages.size >= 2 && targetPages.size >= 2
 
 /**
  * 跨页配对索引。

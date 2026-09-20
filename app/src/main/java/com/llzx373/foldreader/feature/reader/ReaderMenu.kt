@@ -582,6 +582,7 @@ private const val CHAPTER_INDENT_DP = 14
 
 val pageTurnModes: List<PageTurnMode> = listOf(
     PageTurnMode.COVER,
+    PageTurnMode.SIMULATION,
     PageTurnMode.NONE,
     PageTurnMode.SCROLL,
 )
@@ -640,12 +641,14 @@ private fun PageTurnModeSplitButton(
 
 fun pageTurnModeLabel(mode: PageTurnMode): String = when (mode) {
     PageTurnMode.COVER -> "覆盖"
+    PageTurnMode.SIMULATION -> "仿真"
     PageTurnMode.NONE -> "无动画"
     PageTurnMode.SCROLL -> "上下滚动"
 }
 
 fun nextPageTurnMode(mode: PageTurnMode): PageTurnMode = when (mode) {
-    PageTurnMode.COVER -> PageTurnMode.NONE
+    PageTurnMode.COVER -> PageTurnMode.SIMULATION
+    PageTurnMode.SIMULATION -> PageTurnMode.NONE
     PageTurnMode.NONE -> PageTurnMode.SCROLL
     PageTurnMode.SCROLL -> PageTurnMode.COVER
 }

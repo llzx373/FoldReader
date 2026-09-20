@@ -670,6 +670,24 @@ class ComicReaderViewModel(
     }
 
     /**
+     * 等到某一页解码完成（或失败/超时）。仿真翻页要把现成位图烘进离屏缓存，
+     * 预取窗口通常已经覆盖相邻跨页，这里只是补上竞态。
+     */
+    suspend fun awaitPage(index: Int, timeoutMs: Long = 600L): PagedPageImage? {
+        if (index !in 0 until _uiState.value.pageCount) return null
+        images[index]?.let { return it }
+        if (failedPages[index] == true) return null
+        ensurePage(index)
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            images[index]?.let { return it }
+            if (failedPages[index] == true) return null
+            delay(16)
+        }
+        return images[index]
+    }
+
+    /**
      * 解码失败标记 / 清除。滚动模式下每个可见条目一个 IO 协程、翻页预取又是另一条，
      * 它们会同时改这张快照表，所以与 [putImage] 共用 [decodeMutex] 串行化。
      */

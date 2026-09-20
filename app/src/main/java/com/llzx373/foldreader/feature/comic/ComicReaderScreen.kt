@@ -2,6 +2,7 @@ package com.llzx373.foldreader.feature.comic
 
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -46,6 +47,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -114,13 +116,24 @@ import com.llzx373.foldreader.feature.reader.resolveTabletopLayout
 import com.llzx373.foldreader.feature.reader.supportsTapAction
 import com.llzx373.foldreader.feature.reader.tapZoneOf
 import com.llzx373.foldreader.feature.reader.volumeKeyDispatch
+import com.llzx373.foldreader.feature.reader.peel.PeelController
+import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
+import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
+import com.llzx373.foldreader.feature.reader.peel.PeelPhase
+import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
+import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
+import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
+import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private val ANIM_MS = 220
 
@@ -347,22 +360,158 @@ fun ComicReaderScreen(
     // 覆盖滑动：正在滑入的页组，底下仍画当前页
     val animX = remember { Animatable(0f) }
     var animPages by remember { mutableStateOf<List<Int>?>(null) }
+    val peel = remember { PeelController() }
+    var peelTarget by remember { mutableStateOf<Int?>(null) }
+    var peelCurrentBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelNextBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelBackBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelGeneration by remember { mutableLongStateOf(0L) }
+    var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
+
+    fun recyclePeelBitmaps() {
+        peelCurrentBmp?.recycle()
+        peelNextBmp?.recycle()
+        peelBackBmp?.recycle()
+        peelCurrentBmp = null
+        peelNextBmp = null
+        peelBackBmp = null
+    }
+
+    LaunchedEffect(dual, contentRect, splitLeftPx, splitRightPx) {
+        animPages = null
+        peelGeneration += 1
+        peel.reset()
+        peelTarget = null
+        recyclePeelBitmaps()
+    }
+
+    fun currentPeelLeaves(dualLeaves: Boolean): Pair<PeelLeaf, PeelLeaf?> = comicPeelLeaves(
+        dualLeaves = dualLeaves,
+        contentWidth = contentRect.width,
+        contentHeight = contentRect.height,
+        splitLeft = splitLeftPx,
+        splitRight = splitRightPx,
+    )
+
+    suspend fun preparePeelBitmaps(
+        peelForward: Boolean,
+        currentPages: List<Int>,
+        targetPages: List<Int>,
+        leaf: PeelLeaf,
+        dualLeaves: Boolean,
+    ): Boolean {
+        val needed = (currentPages + targetPages).distinct()
+        for (index in needed) viewModel.awaitPage(index)
+        val snapshot = needed.mapNotNull { idx -> viewModel.images[idx]?.let { idx to it } }.toMap()
+        if (currentPages.isNotEmpty() && currentPages.none { snapshot.containsKey(it) }) return false
+        val w = leaf.width.roundToInt().coerceAtLeast(1)
+        val h = leaf.height.roundToInt().coerceAtLeast(1)
+        val bg = colors.background.toArgb()
+        val fit = prefs.comicFitMode
+        val currentWide = currentPages.singleOrNull()?.let { viewModel.isWideSpan(it) } == true
+        val targetWide = targetPages.singleOrNull()?.let { viewModel.isWideSpan(it) } == true
+        val triple = withContext(Dispatchers.Default) {
+            if (!dualLeaves) {
+                Triple(
+                    renderComicSpreadBitmap(
+                        pages = currentPages,
+                        images = snapshot,
+                        dual = dual,
+                        rtl = rtl,
+                        wideSpan = currentWide,
+                        widthPx = w,
+                        heightPx = h,
+                        splitLeft = splitLeftPx,
+                        splitRight = splitRightPx,
+                        backgroundArgb = bg,
+                        fitMode = fit,
+                    ),
+                    renderComicSpreadBitmap(
+                        pages = targetPages,
+                        images = snapshot,
+                        dual = dual,
+                        rtl = rtl,
+                        wideSpan = targetWide,
+                        widthPx = w,
+                        heightPx = h,
+                        splitLeft = splitLeftPx,
+                        splitRight = splitRightPx,
+                        backgroundArgb = bg,
+                        fitMode = fit,
+                    ),
+                    null as Bitmap?,
+                )
+            } else {
+                val curPair = comicPairedVisualPages(currentPages, rtl)!!
+                val nxtPair = comicPairedVisualPages(targetPages, rtl)!!
+                val curIdx = if (peelForward) curPair.second else curPair.first
+                val nxtIdx = if (peelForward) nxtPair.second else nxtPair.first
+                val backIdx = if (peelForward) nxtPair.first else nxtPair.second
+                Triple(
+                    renderComicPageBitmap(snapshot[curIdx], w, h, bg, fit),
+                    renderComicPageBitmap(snapshot[nxtIdx], w, h, bg, fit),
+                    renderComicPageBitmap(snapshot[backIdx], w, h, bg, fit),
+                )
+            }
+        }
+        recyclePeelBitmaps()
+        peelCurrentBmp = triple.first
+        peelNextBmp = triple.second
+        peelBackBmp = triple.third
+        return true
+    }
 
     /**
      * 翻页。[slideFromRight] 只决定覆盖动画的滑入侧（true = 新跨页从右侧外滑入、画面左移）。
      *
      * 滑入侧跟阅读方向镜像：LTR 的「下一页」从右滑入，日漫（RTL）从左滑入。这不是可有可无的
      * 观感——横滑翻页与动画必须同向，否则滑动手势会把下一页从手指的反方向推进来。
+     * 仿真掀页走同一条物理轴：左滑永远掀右叶，日漫下逻辑前进因此掀左叶。
      */
     fun turn(forward: Boolean, slideFromRight: Boolean = comicSlideFromRight(forward, rtl)) {
         scope.launch {
-            if (animPages != null) return@launch
+            if (animPages != null || peel.busy) return@launch
             val state = uiState
             val target = if (forward) spreadIndex.next(state.pageIndex)
             else spreadIndex.previous(state.pageIndex)
             if (target == null) return@launch
             if (prefs.pageTurnMode == PageTurnMode.NONE || size.width <= 0) {
                 viewModel.goToPage(target, countRead = true)
+                return@launch
+            }
+            if (prefs.pageTurnMode == PageTurnMode.SIMULATION) {
+                val gen = peelGeneration + 1
+                peelGeneration = gen
+                val currentPages = spreadIndex.pagesOf(state.pageIndex)
+                val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
+                val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
+                val peelFwd = comicPeelForward(forward, rtl)
+                val (left, right) = currentPeelLeaves(dualLeaves)
+                val leaf = activePeelLeaf(peelFwd, left, right)
+                val tap = lastTapOffset
+                val contentLocal = if (tap != null) {
+                    Offset(tap.x - contentRect.left, tap.y - contentRect.top)
+                } else {
+                    Offset(
+                        leaf.originX + if (peelFwd) leaf.width * 0.92f else leaf.width * 0.08f,
+                        leaf.originY + leaf.height * 0.85f,
+                    )
+                }
+                val local = screenToLeafLocal(contentLocal, leaf)
+                val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
+                peelTarget = target
+                if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
+                    peelTarget = null
+                    viewModel.goToPage(target, countRead = true)
+                    return@launch
+                }
+                if (peelGeneration != gen) return@launch
+                peel.autoPlay(peelFwd, corner, leaf)
+                if (peelGeneration != gen) return@launch
+                viewModel.goToPage(target, countRead = true)
+                peel.reset()
+                peelTarget = null
+                recyclePeelBitmaps()
                 return@launch
             }
             animPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
@@ -462,6 +611,7 @@ fun ComicReaderScreen(
      */
     val handleTap: (Offset, Boolean) -> Unit = { offset, isDouble ->
         viewModel.noteManualInteraction()
+        lastTapOffset = offset
         if (pageSelection != null) {
             // 有选区时点一下先收起选区，与文本阅读器的「点一下退选」一致
             pageSelection = null
@@ -581,18 +731,107 @@ fun ComicReaderScreen(
                 prefs.swipeGestureEnabled,
                 prefs.swipeDistanceDp,
                 prefs.swipeFlingVelocityDpPerSec,
+                prefs.pageTurnMode,
                 rtl,
                 scrollMode,
                 density.density,
             ) {
                 if (!prefs.swipeGestureEnabled || scrollMode) return@pointerInput
-                // 位移阈值是固定 dp（原为屏宽 15%，展开态约 110–130dp，拇指滑不到），
-                // 并补一条甩速判据：短促轻甩也能翻页，填掉「过了触摸 slop、没到阈值」的死区。
-                // 两个阈值都可在设置里调，故一并列进 pointerInput 的 key。
                 val distanceThreshold = prefs.swipeDistanceDp * density.density
                 val flingThreshold = prefs.swipeFlingVelocityDpPerSec * density.density
                 var dragged = 0f
                 var tracker: VelocityTracker? = null
+                if (prefs.pageTurnMode == PageTurnMode.SIMULATION) {
+                    var started = false
+                    var peelFwd = true
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            dragged = 0f
+                            tracker = VelocityTracker()
+                            started = false
+                        },
+                        onHorizontalDrag = { change, delta ->
+                            dragged += delta
+                            tracker?.addPosition(change.uptimeMillis, change.position)
+                            if (!started) {
+                                if (abs(dragged) < 8f) return@detectHorizontalDragGestures
+                                started = true
+                                peelFwd = dragged < 0f
+                                val logicalFwd = peelFwd != rtl
+                                val pos = change.position
+                                scope.launch {
+                                    if (peel.busy || animPages != null) return@launch
+                                    val state = uiState
+                                    val target = if (logicalFwd) {
+                                        spreadIndex.next(state.pageIndex)
+                                    } else {
+                                        spreadIndex.previous(state.pageIndex)
+                                    } ?: return@launch
+                                    val currentPages = spreadIndex.pagesOf(state.pageIndex)
+                                    val targetPages = spreadIndex.pagesOfSpread(spreadIndex.spreadOf(target))
+                                    val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
+                                    val (left, right) = currentPeelLeaves(dualLeaves)
+                                    val leaf = activePeelLeaf(peelFwd, left, right)
+                                    val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
+                                    val local = screenToLeafLocal(contentLocal, leaf)
+                                    val corner = peelCornerFor(local, leaf.width, leaf.height, peelFwd)
+                                    val gen = peelGeneration + 1
+                                    peelGeneration = gen
+                                    peelTarget = target
+                                    if (!preparePeelBitmaps(peelFwd, currentPages, targetPages, leaf, dualLeaves)) {
+                                        peelTarget = null
+                                        return@launch
+                                    }
+                                    if (peelGeneration != gen) return@launch
+                                    peel.beginDrag(peelFwd, corner, leaf, local)
+                                }
+                            } else if (peel.phase == PeelPhase.Drag) {
+                                val contentLocal = Offset(
+                                    change.position.x - contentRect.left,
+                                    change.position.y - contentRect.top,
+                                )
+                                peel.updateDrag(screenToLeafLocal(contentLocal, peel.leaf))
+                            }
+                        },
+                        onDragEnd = {
+                            val vx = tracker?.calculateVelocity()?.x ?: 0f
+                            val vy = tracker?.calculateVelocity()?.y ?: 0f
+                            tracker = null
+                            dragged = 0f
+                            viewModel.noteManualInteraction()
+                            scope.launch {
+                                if (peel.phase != PeelPhase.Drag) {
+                                    started = false
+                                    return@launch
+                                }
+                                val gen = peelGeneration
+                                val committed = peel.endDrag(vx, vy)
+                                if (peelGeneration != gen) return@launch
+                                if (committed) {
+                                    peelTarget?.let { viewModel.goToPage(it, countRead = true) }
+                                }
+                                peel.reset()
+                                peelTarget = null
+                                recyclePeelBitmaps()
+                                started = false
+                            }
+                        },
+                        onDragCancel = {
+                            dragged = 0f
+                            tracker = null
+                            started = false
+                            scope.launch {
+                                if (peel.phase == PeelPhase.Drag) {
+                                    peel.endDrag(0f, 0f)
+                                }
+                                peel.reset()
+                                peelTarget = null
+                                recyclePeelBitmaps()
+                            }
+                        },
+                    )
+                    return@pointerInput
+                }
                 detectHorizontalDragGestures(
                     onDragStart = {
                         dragged = 0f
@@ -604,8 +843,6 @@ fun ComicReaderScreen(
                         tracker?.addPosition(change.uptimeMillis, change.position)
                     },
                     onDragEnd = {
-                        // 跟手：横滑是「把内容往哪边拖」，与「下一页」相反——LTR 左滑前进、
-                        // 日漫镜像成右滑前进。方向翻译收在 comicSwipeForward，与动画滑入侧同一口径。
                         comicSwipeForward(
                             draggedPx = dragged,
                             velocityXPxPerSec = tracker?.calculateVelocity()?.x ?: 0f,
@@ -700,6 +937,37 @@ fun ComicReaderScreen(
                             windowWidthPx = contentRect.width,
                             host = anchorHost,
                             modifier = Modifier.graphicsLayer { translationX = animX.value },
+                        )
+                    }
+                    val peelTick = peel.progress.value + peel.touchX.value + peel.touchY.value
+                    val peelFrameNow = if (peel.busy) {
+                        peelTick
+                        peel.frame()
+                    } else {
+                        null
+                    }
+                    val curBmp = peelCurrentBmp
+                    val nxtBmp = peelNextBmp
+                    val backBmp = peelBackBmp
+                    if (peelFrameNow != null &&
+                        curBmp != null && nxtBmp != null &&
+                        !curBmp.isRecycled && !nxtBmp.isRecycled
+                    ) {
+                        val currentPages = viewModel.currentPages()
+                        val targetPages = peelTarget?.let { spreadIndex.pagesOfSpread(spreadIndex.spreadOf(it)) }
+                            ?: emptyList()
+                        val dualLeaves = dual && comicPeelUsesDualLeaves(currentPages, targetPages)
+                        val (leftLeaf, rightLeaf) = currentPeelLeaves(dualLeaves)
+                        val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
+                        PeelOverlay(
+                            frame = peelFrameNow,
+                            leaf = peel.leaf,
+                            current = curBmp,
+                            next = nxtBmp,
+                            background = colors.background,
+                            back = backBmp?.takeUnless { it.isRecycled },
+                            extendLeft = extL,
+                            extendRight = extR,
                         )
                     }
                 }

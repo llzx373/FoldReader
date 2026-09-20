@@ -243,17 +243,19 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             SwitchSetting("规避摄像头位置（双页自动检测）", prefs.avoidCameraCutout, viewModel::updateAvoidCameraCutout)
             SegmentedSetting(
                 label = "翻页方式",
-                options = listOf("覆盖", "无动画", "上下滚动"),
+                options = listOf("覆盖", "仿真", "无动画", "上下滚动"),
                 selectedIndex = when (prefs.pageTurnMode) {
                     PageTurnMode.COVER -> 0
-                    PageTurnMode.NONE -> 1
-                    PageTurnMode.SCROLL -> 2
+                    PageTurnMode.SIMULATION -> 1
+                    PageTurnMode.NONE -> 2
+                    PageTurnMode.SCROLL -> 3
                 },
                 onSelect = { index ->
                     viewModel.updatePageTurnMode(
                         when (index) {
-                            1 -> PageTurnMode.NONE
-                            2 -> PageTurnMode.SCROLL
+                            1 -> PageTurnMode.SIMULATION
+                            2 -> PageTurnMode.NONE
+                            3 -> PageTurnMode.SCROLL
                             else -> PageTurnMode.COVER
                         },
                     )

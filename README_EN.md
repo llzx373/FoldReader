@@ -22,7 +22,7 @@ English | [简体中文](README.md)
 - **Typesetting engine** — `StaticLayout`-based pagination, Chinese kinsoku (line-break prohibition rules), justification, first-line indent, 18–40 characters per line, adjustable everywhere. Two-layer page-boundary cache (memory LRU + disk).
 - **Huge files** — 100 MB+ TXT books are read through windowed byte offsets, never loaded fully into memory. Chapter indexing and prewarming run on a background queue.
 - **Encoding detection** — UTF-8 (with or without BOM), UTF-16 LE/BE, GBK, GB18030, Big5, plus manual override.
-- **Reading tools** — hierarchical TOC, bookmarks, multi-colour highlights and notes, full-text search grouped by chapter, auto page-turn, reading stats, 5 built-in themes (green / parchment / grey-white / night / AMOLED) plus custom colours, in-app brightness.
+- **Reading tools** — hierarchical TOC, bookmarks, multi-colour highlights and notes, full-text search grouped by chapter, auto page-turn, optional **simulated 2.5D page-peel** (off by default; e-books, comics and paged PDFs), reading stats, 5 built-in themes (green / parchment / grey-white / night / AMOLED) plus custom colours, in-app brightness.
 - **In-page anchors** — bookmarks and annotations can point at a page position (point or rectangle), for reflowable text, comics and PDFs alike. The middle tap zone is configurable: single and double tap each bind to a chosen action.
 - **Library** — grid/list shelf, groups, auto-generated covers, batch import, built-in file browser, and automatic **same-series previous/next volume switching**.
 - **Smart cleanup for downloaded novels** — an offline, deterministic rule engine that fixes what scraped TXT files usually suffer from: mangled whitespace, trailing spaces, blank lines inside paragraphs, paragraphs broken by hard wrapping, chapter titles buried mid-line or named inconsistently, quotes split by spaces/newlines, asterisk-masked words, site promos and forum leftovers. Three presets plus 14 individual switches, a change-report preview before you commit, and "smart tidy" for books already in the library. No model, no network.
@@ -70,7 +70,7 @@ Single Gradle module (`:app`), Kotlin + Jetpack Compose. Three ideas run through
 
 - **The database is upgrade-safe.** Every release since `v1.0.0` can upgrade in place: a schema change must bump `version` and add a migration in `core/data/db/DatabaseMigrations.kt`, and every exported schema snapshot under `app/schemas/` is kept. Destructive fallback is deliberately not enabled — a missing migration fails loudly instead of wiping data. Exporting an in-app backup before a major upgrade is still recommended.
 - **No OCR** — scanned PDFs are read as image pages only.
-- **Simulated page-turn was removed** and is not planned to return. COVER, NONE and SCROLL page-turn modes remain.
+- **Simulated page-turn is optional** (COVER / SIMULATION / NONE / SCROLL); the default remains COVER. The old 3D curl/hinge path stays deleted; the current model is a 2.5D crease reflection (see the design spec appendix v2.4).
 - Not published on any app store; distributed via GitHub Releases only.
 
 ## Documentation

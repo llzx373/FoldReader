@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
+import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
@@ -115,13 +116,26 @@ import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.feature.bookshelf.BookCover
+import com.llzx373.foldreader.feature.reader.peel.PeelController
+import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
+import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
+import com.llzx373.foldreader.feature.reader.peel.PeelPhase
+import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
+import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
+import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
+import com.llzx373.foldreader.feature.reader.peel.peelLeaves
+import com.llzx373.foldreader.feature.reader.peel.renderPageBitmap
+import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
 import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val INNER_SPINE_PAD = 12.dp
 private val SPINE_OVERLAY_WIDTH = 32.dp
@@ -325,6 +339,13 @@ fun ReaderScreen(
 
     var animSpread by remember { mutableStateOf<PageSpread?>(null) }
     val animX = remember { Animatable(0f) }
+    val peel = remember { PeelController() }
+    var peelTarget by remember { mutableStateOf<PageSpread?>(null) }
+    var peelCurrentBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelNextBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelBackBmp by remember { mutableStateOf<Bitmap?>(null) }
+    var peelGeneration by remember { mutableLongStateOf(0L) }
+    var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
 
     val battery by rememberBatteryPercent()
     val time by rememberClock()
@@ -339,18 +360,141 @@ fun ReaderScreen(
 
     var autoScrollY by remember { mutableStateOf(0f) }
 
-    // 版式几何变化：进行中的覆盖滑动动画作废，防止新旧版式叠画
+    // 版式几何变化：进行中的覆盖/仿真动画作废，防止新旧版式叠画
     LaunchedEffect(currentGeom) {
         animSpread = null
+        peelGeneration += 1
+        peel.reset()
+        peelTarget = null
+        peelCurrentBmp = null
+        peelNextBmp = null
+        peelBackBmp = null
+    }
+
+    fun currentPeelLeaves() = peelLeaves(
+        dual = spreadDual,
+        contentWidth = contentRect.width,
+        contentHeight = contentRect.height,
+        pageWidth = spreadPageWidthPx,
+        splitLeft = splitLeftPx - contentRect.left,
+        splitRight = splitRightPx - contentRect.left,
+    )
+
+    suspend fun preparePeelBitmaps(forward: Boolean, target: PageSpread, leaf: PeelLeaf): Boolean {
+        val current = uiState.spread ?: return false
+        val currentPage = when {
+            !spreadDual -> current.left
+            forward -> current.right ?: current.left
+            else -> current.left
+        }
+        val nextPage = when {
+            !spreadDual -> target.left
+            forward -> target.right ?: target.left
+            else -> target.left
+        }
+        val backPage = when {
+            !spreadDual -> null
+            forward -> target.left
+            else -> target.right
+        }
+        val innerOnRight = !spreadDual || !forward
+        val extraTop = if (spreadDual && forward) rightTopPadPx else 0f
+        val inner = if (spreadDual) with(density) { INNER_SPINE_PAD.toPx() } else 0f
+        val d = density.density
+        val sd = d * density.fontScale
+        val cfg = uiState.layoutConfig
+        val w = leaf.width.roundToInt().coerceAtLeast(1)
+        val h = leaf.height.roundToInt().coerceAtLeast(1)
+        val triple = withContext(Dispatchers.Default) {
+            val cur = renderPageBitmap(
+                page = currentPage,
+                config = cfg,
+                colors = colors,
+                widthPx = w,
+                heightPx = h,
+                density = d,
+                scaledDensity = sd,
+                innerPaddingPx = inner,
+                innerOnRight = innerOnRight,
+                extraTopPadPx = extraTop,
+                imageProvider = viewModel.imageProvider,
+            )
+            val nxt = renderPageBitmap(
+                page = nextPage,
+                config = cfg,
+                colors = colors,
+                widthPx = w,
+                heightPx = h,
+                density = d,
+                scaledDensity = sd,
+                innerPaddingPx = inner,
+                innerOnRight = innerOnRight,
+                extraTopPadPx = extraTop,
+                imageProvider = viewModel.imageProvider,
+            )
+            val backBmp = backPage?.let { page ->
+                renderPageBitmap(
+                    page = page,
+                    config = cfg,
+                    colors = colors,
+                    widthPx = w,
+                    heightPx = h,
+                    density = d,
+                    scaledDensity = sd,
+                    innerPaddingPx = inner,
+                    innerOnRight = forward,
+                    extraTopPadPx = if (spreadDual && !forward) rightTopPadPx else 0f,
+                    imageProvider = viewModel.imageProvider,
+                )
+            }
+            Triple(cur, nxt, backBmp)
+        }
+        peelCurrentBmp?.recycle()
+        peelNextBmp?.recycle()
+        peelBackBmp?.recycle()
+        peelCurrentBmp = triple.first
+        peelNextBmp = triple.second
+        peelBackBmp = triple.third
+        return true
     }
 
     fun turn(forward: Boolean) {
         clearSelection()
         scope.launch {
-            if (animSpread != null) return@launch
+            if (animSpread != null || peel.busy) return@launch
             val target = viewModel.adjacentSpread(forward) ?: return@launch
             if (rawMode == PageTurnMode.NONE || size.width <= 0) {
                 viewModel.showSpread(target, countCharsRead = true)
+                return@launch
+            }
+            if (rawMode == PageTurnMode.SIMULATION) {
+                val gen = peelGeneration + 1
+                peelGeneration = gen
+                val (left, right) = currentPeelLeaves()
+                val leaf = activePeelLeaf(forward, left, right)
+                val tap = lastTapOffset
+                val contentLocal = if (tap != null) {
+                    Offset(tap.x - contentRect.left, tap.y - contentRect.top)
+                } else {
+                    Offset(if (forward) leaf.width * 0.92f else leaf.width * 0.08f, leaf.height * 0.85f)
+                }
+                val local = screenToLeafLocal(contentLocal, leaf)
+                val corner = peelCornerFor(local, leaf.width, leaf.height, forward)
+                peelTarget = target
+                if (!preparePeelBitmaps(forward, target, leaf)) {
+                    peelTarget = null
+                    viewModel.showSpread(target, countCharsRead = true)
+                    return@launch
+                }
+                if (peelGeneration != gen) return@launch
+                peel.autoPlay(forward, corner, leaf)
+                if (peelGeneration != gen) return@launch
+                viewModel.showSpread(target, countCharsRead = true)
+                peel.reset()
+                peelTarget = null
+                peelCurrentBmp = null
+                peelNextBmp = null
+                peelBackBmp = null
                 return@launch
             }
             animSpread = target
@@ -418,12 +562,12 @@ fun ReaderScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error, selection != null) {
+    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error, selection != null, peel.busy) {
         viewModel.setReadingActive(
             foreground && !menuVisible && !uiState.loading && uiState.error == null,
         )
         viewModel.setAutoPageUiPaused(
-            !foreground || menuVisible || selection != null || uiState.loading || uiState.error != null,
+            !foreground || menuVisible || selection != null || uiState.loading || uiState.error != null || peel.busy,
         )
     }
 
@@ -434,7 +578,7 @@ fun ReaderScreen(
     // 定时自动翻页：到点事件走正常翻页动画；菜单/选择/动画进行中丢弃该次事件
     LaunchedEffect(Unit) {
         viewModel.autoPageTurns.collect { forward ->
-            if (!menuVisible && selection == null && animSpread == null) {
+            if (!menuVisible && selection == null && animSpread == null && !peel.busy) {
                 latestTurn(forward)
             }
         }
@@ -697,6 +841,7 @@ fun ReaderScreen(
      */
     val handleTap: (Offset, Boolean) -> Unit = tap@{ offset, isDouble ->
         viewModel.noteManualInteraction()
+        lastTapOffset = offset
         if (selection != null) {
             clearSelection()
             return@tap
@@ -814,6 +959,7 @@ fun ReaderScreen(
             }
             .pointerInput(
                 scrollMode,
+                rawMode,
                 prefs.swipeGestureEnabled,
                 prefs.swipeDistanceDp,
                 prefs.swipeFlingVelocityDpPerSec,
@@ -821,13 +967,96 @@ fun ReaderScreen(
                 density.density,
             ) {
                 if (scrollMode || !prefs.swipeGestureEnabled || selection != null) return@pointerInput
-                // 位移阈值是固定 dp（原为屏宽 15%，展开态约 110–130dp，拇指滑不到），
-                // 并补一条甩速判据：短促轻甩也能翻页，填掉「过了触摸 slop、没到阈值」的死区。
-                // 两个阈值都可在设置里调，故一并列进 pointerInput 的 key。
                 val distanceThreshold = prefs.swipeDistanceDp * density.density
                 val flingThreshold = prefs.swipeFlingVelocityDpPerSec * density.density
                 var dragged = 0f
                 var tracker: VelocityTracker? = null
+                if (rawMode == PageTurnMode.SIMULATION) {
+                    var started = false
+                    var dragForward = true
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            dragged = 0f
+                            tracker = VelocityTracker()
+                            started = false
+                        },
+                        onHorizontalDrag = { change, delta ->
+                            dragged += delta
+                            tracker?.addPosition(change.uptimeMillis, change.position)
+                            if (!started) {
+                                if (abs(dragged) < 8f) return@detectHorizontalDragGestures
+                                started = true
+                                dragForward = dragged < 0f
+                                val pos = change.position
+                                scope.launch {
+                                    if (peel.busy || animSpread != null) return@launch
+                                    val target = viewModel.adjacentSpread(dragForward) ?: return@launch
+                                    val (left, right) = currentPeelLeaves()
+                                    val leaf = activePeelLeaf(dragForward, left, right)
+                                    val contentLocal = Offset(pos.x - contentRect.left, pos.y - contentRect.top)
+                                    val local = screenToLeafLocal(contentLocal, leaf)
+                                    val corner = peelCornerFor(local, leaf.width, leaf.height, dragForward)
+                                    val gen = peelGeneration + 1
+                                    peelGeneration = gen
+                                    peelTarget = target
+                                    if (!preparePeelBitmaps(dragForward, target, leaf)) {
+                                        peelTarget = null
+                                        return@launch
+                                    }
+                                    if (peelGeneration != gen) return@launch
+                                    peel.beginDrag(dragForward, corner, leaf, local)
+                                }
+                            } else if (peel.phase == PeelPhase.Drag) {
+                                val contentLocal = Offset(
+                                    change.position.x - contentRect.left,
+                                    change.position.y - contentRect.top,
+                                )
+                                peel.updateDrag(screenToLeafLocal(contentLocal, peel.leaf))
+                            }
+                        },
+                        onDragEnd = {
+                            val vx = tracker?.calculateVelocity()?.x ?: 0f
+                            val vy = tracker?.calculateVelocity()?.y ?: 0f
+                            tracker = null
+                            dragged = 0f
+                            viewModel.noteManualInteraction()
+                            scope.launch {
+                                if (peel.phase != PeelPhase.Drag) {
+                                    started = false
+                                    return@launch
+                                }
+                                val gen = peelGeneration
+                                val committed = peel.endDrag(vx, vy)
+                                if (peelGeneration != gen) return@launch
+                                if (committed) {
+                                    peelTarget?.let { viewModel.showSpread(it, countCharsRead = true) }
+                                }
+                                peel.reset()
+                                peelTarget = null
+                                peelCurrentBmp = null
+                                peelNextBmp = null
+                                peelBackBmp = null
+                                started = false
+                            }
+                        },
+                        onDragCancel = {
+                            dragged = 0f
+                            tracker = null
+                            started = false
+                            scope.launch {
+                                if (peel.phase == PeelPhase.Drag) {
+                                    peel.endDrag(0f, 0f)
+                                }
+                                peel.reset()
+                                peelTarget = null
+                                peelCurrentBmp = null
+                                peelNextBmp = null
+                                peelBackBmp = null
+                            }
+                        },
+                    )
+                    return@pointerInput
+                }
                 detectHorizontalDragGestures(
                     onDragStart = {
                         dragged = 0f
@@ -974,6 +1203,33 @@ fun ReaderScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer { translationX = animX.value },
+                            )
+                        }
+                        val peelTick = peel.progress.value + peel.touchX.value + peel.touchY.value
+                        val peelFrameNow = if (peel.busy) {
+                            peelTick
+                            peel.frame()
+                        } else {
+                            null
+                        }
+                        val curBmp = peelCurrentBmp
+                        val nxtBmp = peelNextBmp
+                        val backBmp = peelBackBmp
+                        if (peelFrameNow != null &&
+                            curBmp != null && nxtBmp != null &&
+                            !curBmp.isRecycled && !nxtBmp.isRecycled
+                        ) {
+                            val (leftLeaf, rightLeaf) = currentPeelLeaves()
+                            val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
+                            PeelOverlay(
+                                frame = peelFrameNow,
+                                leaf = peel.leaf,
+                                current = curBmp,
+                                next = nxtBmp,
+                                background = colors.background,
+                                back = backBmp?.takeUnless { it.isRecycled },
+                                extendLeft = extL,
+                                extendRight = extR,
                             )
                         }
                         if (spreadDual) {

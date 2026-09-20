@@ -314,8 +314,9 @@ class ReaderLogicTest {
     }
 
     @Test
-    fun `page turn mode cycling covers all three modes`() {
-        assertEquals(PageTurnMode.NONE, nextPageTurnMode(PageTurnMode.COVER))
+    fun `page turn mode cycling covers all four modes`() {
+        assertEquals(PageTurnMode.SIMULATION, nextPageTurnMode(PageTurnMode.COVER))
+        assertEquals(PageTurnMode.NONE, nextPageTurnMode(PageTurnMode.SIMULATION))
         assertEquals(PageTurnMode.SCROLL, nextPageTurnMode(PageTurnMode.NONE))
         assertEquals(PageTurnMode.COVER, nextPageTurnMode(PageTurnMode.SCROLL))
     }

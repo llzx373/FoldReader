@@ -11,6 +11,7 @@ class ReadingPreferencesTest {
     fun `枚举名有效时解析为对应枚举`() {
         assertEquals(ReadingTheme.NIGHT, enumOrDefault("NIGHT", ReadingTheme.GREEN))
         assertEquals(PageTurnMode.SCROLL, enumOrDefault("SCROLL", PageTurnMode.COVER))
+        assertEquals(PageTurnMode.SIMULATION, enumOrDefault("SIMULATION", PageTurnMode.COVER))
     }
 
     @Test

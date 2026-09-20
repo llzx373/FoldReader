@@ -244,6 +244,42 @@ class ComicLogicTest {
             comicSlideFromRight(forward = true, rtl = false),
             comicSlideFromRight(forward = true, rtl = true),
         )
+        // 下一页掀哪一叶：LTR 掀右 → 日漫 掀左
+        assertNotEquals(
+            comicPeelForward(logicalForward = true, rtl = false),
+            comicPeelForward(logicalForward = true, rtl = true),
+        )
+    }
+
+    @Test
+    fun `仿真掀页方向跟阅读方向镜像`() {
+        assertTrue(comicPeelForward(logicalForward = true, rtl = false))
+        assertFalse(comicPeelForward(logicalForward = false, rtl = false))
+        assertFalse(comicPeelForward(logicalForward = true, rtl = true))
+        assertTrue(comicPeelForward(logicalForward = false, rtl = true))
+    }
+
+    @Test
+    fun `左滑永远掀右叶`() {
+        val threshold = 100f
+        val fling = 800f
+        for (rtl in listOf(false, true)) {
+            val logical = comicSwipeForward(-200f, 0f, threshold, fling, rtl)!!
+            assertTrue("rtl=$rtl 左滑应掀右叶", comicPeelForward(logical, rtl))
+            val logicalRight = comicSwipeForward(200f, 0f, threshold, fling, rtl)!!
+            assertFalse("rtl=$rtl 右滑应掀左叶", comicPeelForward(logicalRight, rtl))
+        }
+    }
+
+    @Test
+    fun `成对双页的视觉左右随日漫对调`() {
+        assertEquals(0 to 1, comicPairedVisualPages(listOf(0, 1), rtl = false))
+        assertEquals(1 to 0, comicPairedVisualPages(listOf(0, 1), rtl = true))
+        assertNull(comicPairedVisualPages(listOf(0), rtl = false))
+        assertNull(comicPairedVisualPages(emptyList(), rtl = true))
+        assertTrue(comicPeelUsesDualLeaves(listOf(0, 1), listOf(2, 3)))
+        assertFalse(comicPeelUsesDualLeaves(listOf(0), listOf(1, 2)))
+        assertFalse(comicPeelUsesDualLeaves(listOf(0, 1), listOf(2)))
     }
 
     @Test

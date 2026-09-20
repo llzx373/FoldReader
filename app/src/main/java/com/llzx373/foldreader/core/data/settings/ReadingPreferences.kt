@@ -5,7 +5,7 @@ import com.llzx373.foldreader.core.format.clean.CleanToggles
 
 enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, AMOLED, CUSTOM }
 
-enum class PageTurnMode { COVER, NONE, SCROLL }
+enum class PageTurnMode { COVER, SIMULATION, NONE, SCROLL }
 
 enum class DarkThemeOption { SYSTEM, LIGHT, DARK }
 
