@@ -9,7 +9,9 @@ lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
 kotlin = "2.4.20"
 composeBom = "2026.09.00"
-# M3 Expressive API（MaterialExpressiveTheme/MotionScheme 等）自 1.5.0 起公开，需覆盖 BOM 版本
+# M3 Expressive API（MaterialExpressiveTheme/MotionScheme 等）自 1.5.0 起公开，需覆盖 BOM 版本。
+# compose-bom 2026.09.00 也只给到 1.4.0，而 1.5.0 尚无稳定版（最新即 alpha28），
+# 所以这行必须继续钉住；等 1.5.0 稳定版发布后可删掉它，改由 BOM 管理。
 material3 = "1.5.0-alpha28"
 # 折叠屏感知与自适应布局
 window = "1.5.0"
