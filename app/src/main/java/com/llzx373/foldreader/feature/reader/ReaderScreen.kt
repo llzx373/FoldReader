@@ -15,10 +15,15 @@ import android.view.WindowManager
 import android.widget.Toast
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -137,12 +142,18 @@ import java.util.Date
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private val INNER_SPINE_PAD = 12.dp
 private val SPINE_OVERLAY_WIDTH = 32.dp
+
+/** 顶栏 / 底部菜单的进出时长，与漫画阅读器的 ANIM_MS 同值，保证同一种交互节奏一致。 */
+private const val MENU_ANIM_MS = 220
 
 @OptIn(
     androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
@@ -179,6 +190,9 @@ fun ReaderScreen(
     val shiftedAnnotationIds by viewModel.shiftedAnnotationIds.collectAsState()
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     val scope = rememberCoroutineScope()
+    // 翻页串行化：动画进行中到来的点击在锁上排队，等前一次翻完按序执行。
+    // 之前的写法是"动画在跑就直接 return"，等于把用户连点的那几页丢掉了。
+    val turnMutex = remember { Mutex() }
     val clipboard = LocalClipboardManager.current
 
     var menuVisible by remember { mutableStateOf(false) }
@@ -465,50 +479,54 @@ fun ReaderScreen(
     fun turn(forward: Boolean) {
         clearSelection()
         scope.launch {
-            if (animSpread != null || peel.busy) return@launch
-            val target = viewModel.adjacentSpread(forward) ?: return@launch
-            if (rawMode == PageTurnMode.NONE || size.width <= 0) {
-                viewModel.showSpread(target, countCharsRead = true)
-                return@launch
-            }
-            if (rawMode == PageTurnMode.SIMULATION) {
-                val gen = peelGeneration + 1
-                peelGeneration = gen
-                val (left, right) = currentPeelLeaves()
-                val leaf = activePeelLeaf(forward, left, right)
-                val tap = lastTapOffset
-                val contentLocal = if (tap != null) {
-                    Offset(tap.x - contentRect.left, tap.y - contentRect.top)
-                } else {
-                    Offset(if (forward) leaf.width * 0.92f else leaf.width * 0.08f, leaf.height * 0.85f)
-                }
-                val local = screenToLeafLocal(contentLocal, leaf)
-                val corner = peelCornerFor(local, leaf.width, leaf.height, forward)
-                val opposite = peelOppositeWidth(corner, leaf, left, right)
-                peelTarget = target
-                if (!preparePeelBitmaps(forward, target, leaf)) {
-                    peelTarget = null
+            // 整段翻页体在锁内串行执行：动画进行中到来的点击会排队，而不是被丢弃。
+            // target 也必须在锁内计算——排队中的点击要读到上一次 showSpread 之后的状态，
+            // 否则连点 N 次会各自基于同一份旧页号，只前进 1 页。
+            turnMutex.withLock {
+                val target = viewModel.adjacentSpread(forward) ?: return@withLock
+                if (rawMode == PageTurnMode.NONE || size.width <= 0) {
                     viewModel.showSpread(target, countCharsRead = true)
-                    return@launch
+                    return@withLock
                 }
-                if (peelGeneration != gen) return@launch
-                peel.autoPlay(forward, corner, leaf, opposite)
-                if (peelGeneration != gen) return@launch
+                if (rawMode == PageTurnMode.SIMULATION) {
+                    val gen = peelGeneration + 1
+                    peelGeneration = gen
+                    val (left, right) = currentPeelLeaves()
+                    val leaf = activePeelLeaf(forward, left, right)
+                    val tap = lastTapOffset
+                    val contentLocal = if (tap != null) {
+                        Offset(tap.x - contentRect.left, tap.y - contentRect.top)
+                    } else {
+                        Offset(if (forward) leaf.width * 0.92f else leaf.width * 0.08f, leaf.height * 0.85f)
+                    }
+                    val local = screenToLeafLocal(contentLocal, leaf)
+                    val corner = peelCornerFor(local, leaf.width, leaf.height, forward)
+                    val opposite = peelOppositeWidth(corner, leaf, left, right)
+                    peelTarget = target
+                    if (!preparePeelBitmaps(forward, target, leaf)) {
+                        peelTarget = null
+                        viewModel.showSpread(target, countCharsRead = true)
+                        return@withLock
+                    }
+                    if (peelGeneration != gen) return@withLock
+                    peel.autoPlay(forward, corner, leaf, opposite)
+                    if (peelGeneration != gen) return@withLock
+                    viewModel.showSpread(target, countCharsRead = true)
+                    // showSpread 走 StateFlow 是异步的，等下一帧新跨页上屏后再撤覆盖层，避免闪回旧页
+                    withFrameNanos { }
+                    peel.reset()
+                    peelTarget = null
+                    peelCurrentBmp = null
+                    peelNextBmp = null
+                    peelBackBmp = null
+                    return@withLock
+                }
+                animSpread = target
+                animX.snapTo(if (forward) size.width.toFloat() else -size.width.toFloat())
+                animX.animateTo(0f, tween(220))
                 viewModel.showSpread(target, countCharsRead = true)
-                // showSpread 走 StateFlow 是异步的，等下一帧新跨页上屏后再撤覆盖层，避免闪回旧页
-                withFrameNanos { }
-                peel.reset()
-                peelTarget = null
-                peelCurrentBmp = null
-                peelNextBmp = null
-                peelBackBmp = null
-                return@launch
+                animSpread = null
             }
-            animSpread = target
-            animX.snapTo(if (forward) size.width.toFloat() else -size.width.toFloat())
-            animX.animateTo(0f, tween(220))
-            viewModel.showSpread(target, countCharsRead = true)
-            animSpread = null
         }
     }
 
@@ -521,7 +539,11 @@ fun ReaderScreen(
     // pointerInput 的 lambda 不会随重组更新。点击走 latestTurn，拖动必须同样读到
     // 最新的双页叶矩形——否则开书后第一帧还是单页时就把整屏当成一叶抓死，
     // 表现为「点按双页掀一叶、拖动却整幅单页翻」。
-    val latestBeginPeelDrag by rememberUpdatedState<(Boolean, Offset) -> Unit> { dragForward, pos ->
+    //
+    // 返回 Job 而不是 Unit：起步要先备好位图（Dispatchers.Default 渲染），是异步的。
+    // 抬手若早于它落地，endDrag 会看到 phase 还不是 Drag 而直接放弃——那一次翻页被丢掉，
+    // 且掀页会永久卡在半掀（再没人调 endDrag）。调用方拿这个 Job 让"抬手"等"起步"。
+    val latestBeginPeelDrag by rememberUpdatedState<(Boolean, Offset) -> Job> { dragForward, pos ->
         scope.launch {
             if (peel.busy || animSpread != null) return@launch
             val target = viewModel.adjacentSpread(dragForward) ?: return@launch
@@ -936,6 +958,13 @@ fun ReaderScreen(
         }
     }
 
+    // 竖向滑动（不在亮度热区内）等价于"在起手那一列点一下"：直接复用 handleTap，
+    // 点击区/中间动作/链接/划线的优先级与真点击一字不差，不会出现两套口径。
+    // 走 rememberUpdatedState 是因为 pointerInput 的 lambda 不随重组更新。
+    val latestVerticalSwipeTap by rememberUpdatedState<(Offset) -> Unit> { start ->
+        handleTap(start, false)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1013,11 +1042,14 @@ fun ReaderScreen(
                 if (rawMode == PageTurnMode.SIMULATION) {
                     var started = false
                     var dragForward = true
+                    // 本次手势的起步协程；抬手/取消都要等它落地再判定，见 latestBeginPeelDrag
+                    var beginJob: Job? = null
                     detectHorizontalDragGestures(
                         onDragStart = {
                             dragged = 0f
                             tracker = VelocityTracker()
                             started = false
+                            beginJob = null
                         },
                         onHorizontalDrag = { change, delta ->
                             dragged += delta
@@ -1025,7 +1057,7 @@ fun ReaderScreen(
                             if (!started) {
                                 started = true
                                 dragForward = dragged < 0f
-                                latestBeginPeelDrag(dragForward, change.position)
+                                beginJob = latestBeginPeelDrag(dragForward, change.position)
                             } else if (peel.phase == PeelPhase.Drag) {
                                 peel.updateDrag(latestPeelDragLocal(change.position))
                             }
@@ -1036,7 +1068,12 @@ fun ReaderScreen(
                             tracker = null
                             dragged = 0f
                             viewModel.noteManualInteraction()
+                            // 先把 Job 抓在本地再置空：新一次手势会覆盖 beginJob，
+                            // 这一次的收尾必须等的是自己那次起步
+                            val job = beginJob
+                            beginJob = null
                             scope.launch {
+                                job?.join()
                                 if (peel.phase != PeelPhase.Drag) {
                                     started = false
                                     return@launch
@@ -1060,7 +1097,11 @@ fun ReaderScreen(
                             dragged = 0f
                             tracker = null
                             started = false
+                            val job = beginJob
+                            beginJob = null
                             scope.launch {
+                                // 同样必须等起步落地：先 reset 再等它 beginDrag 会把掀页卡死
+                                job?.join()
                                 if (peel.phase == PeelPhase.Drag) {
                                     peel.endDrag(0f, 0f)
                                 }
@@ -1102,15 +1143,21 @@ fun ReaderScreen(
                     },
                 )
             }
-            .pointerInput(scrollMode, prefs.brightnessGestureEnabled, selection != null) {
-                if (scrollMode || !prefs.brightnessGestureEnabled || selection != null) {
-                    return@pointerInput
-                }
+            // 竖向手势：最左侧一条内起手 = 调亮度；其余位置起手 = 等价于在起手处点一下
+            // （左区上一页 / 右区下一页 / 中间区走中间点击动作）。这样竖向滑动不再是死区。
+            // 注意这里不再以 brightnessGestureEnabled 为门槛早退：关掉亮度手势时，
+            // 竖向滑动仍要能做点击区动作。
+            .pointerInput(scrollMode, prefs.brightnessGestureEnabled, menuVisible, selection != null) {
+                if (scrollMode || selection != null) return@pointerInput
                 var active = false
                 var current = 0.5f
+                var startOffset = Offset.Zero
                 detectVerticalDragGestures(
                     onDragStart = { offset ->
-                        active = !menuVisible && offset.x <= size.width / 3f
+                        startOffset = offset
+                        active = !menuVisible &&
+                            prefs.brightnessGestureEnabled &&
+                            offset.x <= size.width * BRIGHTNESS_EDGE_FRACTION
                         current = if (prefs.readerBrightness >= 0f) prefs.readerBrightness else 0.5f
                     },
                     onVerticalDrag = { change, dragAmount ->
@@ -1126,6 +1173,8 @@ fun ReaderScreen(
                                 delay(600L)
                                 brightnessHint = null
                             }
+                        } else {
+                            latestVerticalSwipeTap(startOffset)
                         }
                         active = false
                     },
@@ -1510,7 +1559,16 @@ fun ReaderScreen(
             )
         }
 
-        if (menuVisible) {
+        // 顶栏 / 底部菜单：进出与漫画阅读器同构（淡入 + 从各自边缘滑入），
+        // 不再用裸 if 直接挂载/卸载——那会让整块 chrome 瞬现瞬隐。
+        // readingPosition 的订阅刻意留在内容 lambda 内：它在阅读器顶层订阅会让整棵树
+        // 每翻一页都重组，只有菜单可见时才值得付这个代价。
+        AnimatedVisibility(
+            visible = menuVisible,
+            enter = fadeIn(tween(MENU_ANIM_MS)) + slideInVertically { -it / 3 },
+            exit = fadeOut(tween(MENU_ANIM_MS)) + slideOutVertically { -it / 3 },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             val position by viewModel.readingPosition.collectAsState()
             ReaderTopBar(
                 bookTitle = uiState.bookTitle,
@@ -1524,8 +1582,17 @@ fun ReaderScreen(
                 onToggleBookmark = viewModel::toggleBookmark,
                 onOpenBookmarks = { bookmarksVisible = true },
                 onOpenSearch = { searchVisible = true },
-                modifier = Modifier.align(Alignment.TopCenter),
             )
+        }
+        AnimatedVisibility(
+            visible = menuVisible,
+            enter = fadeIn(tween(MENU_ANIM_MS)) + slideInVertically { it / 3 },
+            exit = fadeOut(tween(MENU_ANIM_MS)) + slideOutVertically { it / 3 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        ) {
+            val position by viewModel.readingPosition.collectAsState()
             ReaderMenuPanel(
                 prefs = prefs,
                 progressFraction = position.progressFraction,
@@ -1582,9 +1649,6 @@ fun ReaderScreen(
                     }
                 },
                 onOpenSettings = { exit.leaveTo(onOpenSettings) },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding(),
             )
         }
 

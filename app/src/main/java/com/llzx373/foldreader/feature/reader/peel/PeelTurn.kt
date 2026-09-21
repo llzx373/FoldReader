@@ -2,6 +2,9 @@ package com.llzx373.foldreader.feature.reader.peel
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -12,6 +15,22 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 enum class PeelPhase { Drag, Complete, Cancel, AutoPlay }
+
+/**
+ * 甩出后的收敛：临界阻尼弹簧（不回弹），初始速度由抬手速度提供。
+ *
+ * 为什么必须用弹簧而不是 tween：Compose 的 [tween] 是固定时长，会**忽略**
+ * `animateTo` 的 initialVelocity——只有弹簧会消费它。用它才能把手指离手那一刻的
+ * 速度接上，让"轻甩"和"慢拖"的尾段真的不同，且离手瞬间不出现速度突变（"缝"）。
+ */
+private val peelSettleSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+/** 取消回缩：固定 [PEEL_CANCEL_MS] 快速复位，不继承速度（系统纠正用户的动作应当干脆）。 */
+private val peelCancelSpec: FiniteAnimationSpec<Float> =
+    tween(PEEL_CANCEL_MS, easing = FastOutSlowInEasing)
 
 /**
  * 仿真翻页状态机：跟手拖动、抬手完成/取消、点击自动播放。
@@ -132,11 +151,13 @@ class PeelController {
         dragTouch = null
         return if (complete) {
             phase = PeelPhase.Complete
-            animateTouch(p2, PEEL_AUTO_MS)
+            // 完成：把抬手速度交给弹簧，让这一甩继续"飞"出去，而不是从零速重新起步
+            animateTouch(p2, peelSettleSpring, Offset(velocityX, velocityY))
             true
         } else {
             phase = PeelPhase.Cancel
-            animateTouch(p0, PEEL_CANCEL_MS)
+            // 取消：快速回缩，不继承速度。取消时速度通常指向外侧，继承会让纸角先外窜再回弹
+            animateTouch(p0, peelCancelSpec, Offset.Zero)
             reset()
             false
         }
@@ -159,11 +180,18 @@ class PeelController {
         // 停在 t=1，等调用方 showSpread 后再 reset，避免中间闪回旧页
     }
 
-    private suspend fun animateTouch(target: Offset, durationMs: Int) {
-        val spec = tween<Float>(durationMs, easing = FastOutSlowInEasing)
+    /**
+     * 抬手后驱动触点。[velocity] 为叶内局部坐标的抬手速度（px/s），与 [touchX]/[touchY]
+     * 同一坐标系，直接交给 `animateTo` 作为初始速度——只有弹簧 spec 会真正消费它。
+     */
+    private suspend fun animateTouch(
+        target: Offset,
+        spec: FiniteAnimationSpec<Float>,
+        velocity: Offset = Offset.Zero,
+    ) {
         coroutineScope {
-            launch { touchX.animateTo(target.x, spec) }
-            launch { touchY.animateTo(target.y, spec) }
+            launch { touchX.animateTo(target.x, spec, velocity.x) }
+            launch { touchY.animateTo(target.y, spec, velocity.y) }
         }
     }
 }
