@@ -161,6 +161,21 @@ fun BookshelfScreen(
     var importRequest by remember { mutableStateOf<Pair<Uri, Boolean>?>(null) }
     /** 外部一次可能送来多个文件（分享多选），排在这里逐个确认；只排不消费。 */
     val importQueue = remember { mutableStateListOf<Uri>() }
+    /** 正在判定格式（决定弹不弹清洗选项）时为 true，避免队列连发对话框。 */
+    var importDetecting by remember { mutableStateOf(false) }
+    /**
+     * 请求导入一个文件：非 TXT 格式没有文本可整理，跳过清洗选项直接导入；
+     * TXT（或识别不出）才弹导入选项对话框。
+     */
+    val requestImport: (Uri, Boolean) -> Unit = { uri, openAfter ->
+        scope.launch {
+            importDetecting = true
+            val direct = runCatching { viewModel.importNonTxtDirectly(uri, openAfter) }
+                .getOrDefault(false)
+            importDetecting = false
+            if (!direct) importRequest = uri to openAfter
+        }
+    }
     // null = 全部；"" = 未分组；其余为分组名
     var groupFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val selectionMode = selectedIds.isNotEmpty()
@@ -186,7 +201,7 @@ fun BookshelfScreen(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
-            importRequest = uri to false
+            requestImport(uri, false)
         }
     }
     val openTreeLauncher = rememberLauncherForActivityResult(
@@ -240,10 +255,10 @@ fun BookshelfScreen(
 
     // 队列里有文件、当前既没有对话框也不在导入中就取一个出来；确认或取消后这里会再跑一次，
     // 接着问下一个。等导入结束再问，是为了不让下一个对话框盖在"正在导入"的遮罩上。
-    LaunchedEffect(importQueue.size, importRequest, importState) {
-        val busy = importState is ImportUiState.Importing
+    LaunchedEffect(importQueue.size, importRequest, importState, importDetecting) {
+        val busy = importState is ImportUiState.Importing || importDetecting
         if (!busy && importRequest == null && importQueue.isNotEmpty()) {
-            importRequest = importQueue.removeAt(0) to true
+            requestImport(importQueue.removeAt(0), true)
         }
     }
 

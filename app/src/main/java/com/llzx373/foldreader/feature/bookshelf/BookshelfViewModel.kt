@@ -8,12 +8,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.EncodingDetector
+import com.llzx373.foldreader.core.format.FormatDetector
 import com.llzx373.foldreader.core.format.OffsetIndexStore
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanProfile
@@ -174,6 +176,28 @@ class BookshelfViewModel(
 
     fun consumeImportState() {
         _importState.value = ImportUiState.Idle
+    }
+
+    /**
+     * 非 TXT 格式（PDF/EPUB/漫画…）没有文本可「整理」，跳过清洗选项对话框直接导入。
+     *
+     * 返回 true 表示已按原样直接导入；false 表示是 TXT（或识别不出），调用方照常弹导入选项。
+     */
+    suspend fun importNonTxtDirectly(uri: Uri, openAfterImport: Boolean): Boolean {
+        val format = withContext(Dispatchers.IO) {
+            runCatching {
+                UriChannels.open(appContext, uri).use { channel ->
+                    FormatDetector.detect(
+                        displayName = UriChannels.displayName(appContext, uri),
+                        mimeType = appContext.contentResolver.getType(uri),
+                        head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE),
+                    )
+                }
+            }.getOrNull()
+        }
+        if (format == null || format == BookFormat.TXT) return false
+        import(uri, openAfterImport, cleanLevel = null, convertTraditional = false)
+        return true
     }
 
     /** 清洗预览状态：[report] 为 null 且 [loading] 为真时表示正在采样。 */
