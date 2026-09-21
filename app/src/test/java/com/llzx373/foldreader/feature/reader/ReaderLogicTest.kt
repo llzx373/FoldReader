@@ -185,6 +185,38 @@ class ReaderLogicTest {
         assertNull(horizontalSwipeDirection(-99f, -799f, distance, fling))
     }
 
+    /**
+     * 亮度热区必须**窄于**左翻页区。两者若完全重叠（原先都是左 1/3），左区竖向滑动就永远
+     * 只能调亮度——竖向滑动在左半边等于死区，用户的感觉是"翻页坏了"。
+     *
+     * 0.25 屏宽落在默认 30% 的左翻页区内，这里必须是"不是亮度手势"。
+     */
+    @Test
+    fun `左翻页区内必须留出非亮度的一段`() {
+        val width = 1080f
+        // 默认 pageTurnHotspotRatio = 0.3
+        assertTrue("0.25 屏宽应仍在左翻页区内", width * 0.25f < width * 0.3f)
+        assertFalse(
+            "左翻页区不能全被亮度吃掉，否则左区竖滑翻不回上一页",
+            isBrightnessGesture(width * 0.25f, width, enabled = true),
+        )
+
+        // 最左侧那一条仍然可以调亮度，边界取到等号
+        assertTrue(isBrightnessGesture(0f, width, enabled = true))
+        assertTrue(isBrightnessGesture(width * BRIGHTNESS_EDGE_FRACTION, width, enabled = true))
+        assertFalse(isBrightnessGesture(width * BRIGHTNESS_EDGE_FRACTION + 1f, width, enabled = true))
+    }
+
+    @Test
+    fun `亮度手势关掉后竖向滑动不再算亮度`() {
+        // 关掉开关时竖向手势仍要整段挂上（否则"竖向滑动=点击区动作"也一起没了），
+        // 只是不再有哪一次算亮度
+        assertFalse(isBrightnessGesture(0f, 1080f, enabled = false))
+        assertFalse(isBrightnessGesture(500f, 1080f, enabled = false))
+        // 尺寸未就绪时不认
+        assertFalse(isBrightnessGesture(0f, 0f, enabled = true))
+    }
+
     @Test
     fun `double tap needs both time and position within limits`() {
         val timeout = 300L

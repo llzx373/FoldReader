@@ -108,6 +108,7 @@ import com.llzx373.foldreader.feature.reader.VolumeKeyDispatch
 import com.llzx373.foldreader.feature.reader.annotationColorPalette
 import com.llzx373.foldreader.feature.reader.contentRectFor
 import com.llzx373.foldreader.feature.reader.dualSplit
+import com.llzx373.foldreader.feature.reader.isBrightnessGesture
 import com.llzx373.foldreader.feature.reader.pageLabelOf
 import com.llzx373.foldreader.feature.reader.readerColors
 import com.llzx373.foldreader.feature.reader.rememberReaderExit
@@ -1073,8 +1074,7 @@ fun ComicReaderScreen(
                         // 滚动模式里竖向就是滚动：既不调亮度，也不做点击区动作，更不能消费事件
                         active = !scrollMode &&
                             !menuVisible &&
-                            prefs.brightnessGestureEnabled &&
-                            offset.x <= size.width * BRIGHTNESS_EDGE_FRACTION
+                            isBrightnessGesture(offset.x, size.width.toFloat(), prefs.brightnessGestureEnabled)
                         current = prefs.readerBrightness
                         if (active) brightnessHint = current
                     },

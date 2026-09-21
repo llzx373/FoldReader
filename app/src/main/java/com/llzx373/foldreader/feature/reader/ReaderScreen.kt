@@ -1156,8 +1156,7 @@ fun ReaderScreen(
                     onDragStart = { offset ->
                         startOffset = offset
                         active = !menuVisible &&
-                            prefs.brightnessGestureEnabled &&
-                            offset.x <= size.width * BRIGHTNESS_EDGE_FRACTION
+                            isBrightnessGesture(offset.x, size.width.toFloat(), prefs.brightnessGestureEnabled)
                         current = if (prefs.readerBrightness >= 0f) prefs.readerBrightness else 0.5f
                     },
                     onVerticalDrag = { change, dragAmount ->

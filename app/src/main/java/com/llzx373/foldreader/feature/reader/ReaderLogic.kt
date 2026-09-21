@@ -28,6 +28,18 @@ enum class TapZone { PREVIOUS, MIDDLE, NEXT }
 const val BRIGHTNESS_EDGE_FRACTION = 1f / 6f
 
 /**
+ * 这次竖向手势是否算亮度手势：只看**起手点**与开关。
+ *
+ * 必须在起手时一次定死（而不是每帧看当前 x），否则抬手时无法回答"这次到底算不算调亮度"，
+ * 也就没法把"非亮度"的竖向滑动交给点击区动作。两个阅读器共用同一份判定，避免各有各的边界。
+ */
+fun isBrightnessGesture(
+    startX: Float,
+    widthPx: Float,
+    enabled: Boolean,
+): Boolean = enabled && widthPx > 0f && startX <= widthPx * BRIGHTNESS_EDGE_FRACTION
+
+/**
  * 某阅读器能否执行该动作。
  *
  * 用途不只是禁用菜单项：中间区只要配了双击动作就得挂一层点击层，而点击层会让**单击**
