@@ -20,7 +20,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 漫画登记：只把「源位置 + 容器 + 页数 + 封面」写进 books 表，**不复制原始内容**。
+ * 漫画登记：把「源位置 + 容器 + 页数 + 封面」写进 books 表。
+ *
+ * 容器漫画（zip/rar/tar/7z）的源位置按授权分两类：
+ * - 书架 SAF 导入的有**持久授权**，直接引用外部 URI——「前后卷切换」要靠原始位置发现
+ *   同目录里还没导入的卷，复制进来反而会弄丢这个能力；
+ * - 外部「打开方式」送进来的只有**临时授权**，登记时把源文件复制进私有目录，
+ *   否则授权失效后这本书就打不开。目录漫画没有单一文件可复制，依赖 SAF 树授权的持久化。
  *
  * 页数按容器分档处理：
  * - zip 读中央目录、目录漫画列目录，导入即知；
@@ -33,6 +39,10 @@ class ComicImportUseCase(
     private val extractionStore: ComicExtractionStore,
     private val openChannel: (String) -> SeekableByteChannel,
     private val displayNameOf: (String) -> String?,
+    /** 源文件副本目录（filesDir/source），与 TXT/EPUB/FB2/PDF 共用。 */
+    private val sourceDir: File,
+    /** 该 URI 是否持有持久化读授权（SAF 导入）；false 时容器漫画登记会复制源文件。 */
+    private val hasPersistedRead: (String) -> Boolean = { false },
     /** 封面目录（filesDir/covers）；null 时跳过封面提取。 */
     private val coversDir: File? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -90,6 +100,7 @@ class ComicImportUseCase(
         bookshelfRepository.findByContentHash(contentHash)
             ?.let { return Outcome.Duplicate(it.id, it.title, sameUri = false) }
 
+        val displayName = displayNameOf(uriKey)
         val pageCount = when (container) {
             ComicContainer.FOLDER -> folderPaths!!.size
             // zip 读中央目录很便宜；读不出来说明它根本不是漫画容器（损坏 / 里面没有图片），
@@ -101,18 +112,34 @@ class ComicImportUseCase(
             }
             ComicContainer.RAR, ComicContainer.TAR, ComicContainer.SEVEN_ZIP -> null
         }
-        val title = displayNameOf(uriKey)
+        val title = displayName
             ?.substringBeforeLast('.')
             ?.takeIf { it.isNotBlank() }
             ?: DEFAULT_TITLE
         val coverPath = extractCoverPath(uri, container, contentHash)
+        // 容器漫画在没有持久授权时（外部「打开方式」的临时 content://）把源文件复制进私有目录，
+        // 否则授权失效后这本书就打不开；SAF 导入的有持久授权，直接引用以保住「同目录找卷」。
+        // 复制放在页数/封面之后，容器读不出来时不留孤儿副本。目录漫画没有单一文件可复制。
+        val contentFileUri = if (container == ComicContainer.FOLDER || hasPersistedRead(uriKey)) {
+            uriKey
+        } else {
+            openChannel(uriKey).use { channel ->
+                copySourceToPrivateDir(
+                    sourceDir = sourceDir,
+                    channel = channel,
+                    sourceHash = contentHash,
+                    format = BookFormat.COMIC,
+                    extension = displayName?.substringAfterLast('.', ""),
+                )
+            }
+        }
         onProgress(1f)
 
         val bookId = bookshelfRepository.upsertBook(
             BookEntity(
                 title = title,
                 author = null,
-                fileUri = uriKey,
+                fileUri = contentFileUri,
                 contentHash = contentHash,
                 format = BookFormat.COMIC,
                 totalChars = 0,
@@ -157,8 +184,9 @@ class ComicImportUseCase(
     }
 
     /**
-     * 「复制到本地」：把内容解包进应用私有目录，此后不再依赖外部授权
-     * （源被移动/删除也能读）。返回页目录路径。
+     * 「复制到本地」：把内容解包成逐页文件存进应用私有目录。容器漫画的源文件在登记时已经
+     * 复制进来了，这一步主要是给目录漫画一个脱离 SAF 授权的持久副本，同时让逐页读取不再
+     * 依赖容器结构。返回页目录路径。
      */
     suspend fun copyLocal(bookId: Long): String {
         val book = bookshelfRepository.getBook(bookId) ?: throw IOException("书籍不存在")
@@ -170,7 +198,7 @@ class ComicImportUseCase(
         return pagesDir.orEmpty()
     }
 
-    /** 删除本地副本，回到引用外部源（源仍然需要可读）。 */
+    /** 删除解包出来的本地页副本，回到读登记的源（私有副本或 SAF 目录）。 */
     suspend fun removeLocalCopy(bookId: Long) {
         val book = bookshelfRepository.getBook(bookId) ?: return
         extractionStore.deleteLocalCopy(book.contentHash)

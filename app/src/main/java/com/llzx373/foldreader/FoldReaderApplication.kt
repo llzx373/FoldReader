@@ -252,6 +252,12 @@ class AppContainer(context: Context) {
         extractionStore = comicExtractionStore,
         openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
+        sourceDir = File(context.filesDir, "source"),
+        hasPersistedRead = { key ->
+            context.contentResolver.persistedUriPermissions.any {
+                it.uri.toString() == key && it.isReadPermission
+            }
+        },
         coversDir = coversDir,
     )
     /**
@@ -266,7 +272,12 @@ class AppContainer(context: Context) {
         book: com.llzx373.foldreader.core.data.db.BookEntity,
     ): List<com.llzx373.foldreader.core.comic.ComicSeriesCandidate> {
         val current = com.llzx373.foldreader.core.comic.ComicSeriesCandidate(
-            name = UriChannels.displayName(appContext, Uri.parse(book.fileUri)) ?: book.title,
+            // 私有副本的文件名是内容哈希，参与不了系列主干匹配；书名留着原文件名信息
+            name = if (book.fileUri.startsWith("file://")) {
+                book.title
+            } else {
+                UriChannels.displayName(appContext, Uri.parse(book.fileUri)) ?: book.title
+            },
             uri = book.fileUri,
             bookId = book.id,
             isDirectory = book.comicContainer == ComicContainer.FOLDER,
@@ -445,6 +456,7 @@ class AppContainer(context: Context) {
         bookshelfRepository = bookshelfRepository,
         openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
+        sourceDir = File(context.filesDir, "source"),
         enqueuePrewarm = { bookId, uriKey, format -> bookPrewarmQueue.enqueue(bookId, uriKey, format) },
     )
     val importBookUseCase = ImportBookUseCase(
