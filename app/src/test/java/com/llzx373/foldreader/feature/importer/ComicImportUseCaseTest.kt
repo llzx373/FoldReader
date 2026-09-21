@@ -73,6 +73,7 @@ class ComicImportUseCaseTest {
         coversDir: File? = temp.newFolder("covers"),
         tree: Map<String, List<ComicDirChild>> = emptyMap(),
         docs: Map<String, ByteArray> = emptyMap(),
+        hasPersistedRead: (String) -> Boolean = { false },
     ) = ComicImportUseCase(
         bookshelfRepository = repository,
         archiveFactory = ComicArchiveFactory(
@@ -84,6 +85,8 @@ class ComicImportUseCaseTest {
         extractionStore = ComicExtractionStore(temp.newFolder("comics-cache")),
         openChannel = { key -> openChannelFor(key) },
         displayNameOf = { key -> displayNameOf(key) },
+        sourceDir = temp.newFolder("source"),
+        hasPersistedRead = hasPersistedRead,
         coversDir = coversDir,
     )
 
@@ -111,6 +114,9 @@ class ComicImportUseCaseTest {
         assertEquals(BookSource.IMPORT, book.source)
         assertNotNull(book.coverPath)
         assertTrue(File(book.coverPath!!).isFile)
+        // 容器漫画登记时把源文件复制进私有目录，fileUri 指向副本而不是外部 Uri
+        assertTrue(book.fileUri.startsWith("file://"))
+        assertTrue(File(book.fileUri.removePrefix("file://")).isFile)
         // zip 导入即知页数，不需要预热
         assertTrue(prewarmCalls.isEmpty())
     }
@@ -132,8 +138,21 @@ class ComicImportUseCaseTest {
 
         val outcome = useCase.register(uriOf(file), ComicContainer.ZIP, BookSource.IMPORT)
 
-        assertEquals(true, (outcome as ComicImportUseCase.Outcome.Duplicate).sameUri)
+        // 库里 fileUri 存的是私有副本而非外部 Uri，同一文件再来时按内容哈希判重
+        assertEquals(false, (outcome as ComicImportUseCase.Outcome.Duplicate).sameUri)
         assertEquals(1, repository.books.value.size)
+    }
+
+    @Test
+    fun `有持久授权的容器漫画直接引用外部源不复制`() = runBlocking {
+        val file = cbz("saf.cbz")
+        val useCase = useCase(hasPersistedRead = { true })
+
+        val outcome = useCase.register(uriOf(file), ComicContainer.ZIP, BookSource.IMPORT)
+
+        assertTrue("outcome=$outcome", outcome is ComicImportUseCase.Outcome.Registered)
+        // SAF 导入持有持久授权：fileUri 保持外部 Uri，「同目录找卷」依赖这个原始位置
+        assertEquals(uriOf(file).toString(), repository.books.value.single().fileUri)
     }
 
     @Test
@@ -199,6 +218,8 @@ class ComicImportUseCaseTest {
         assertEquals("第01卷", book.title)
         assertEquals(2, book.comicPageCount)
         assertEquals(ComicContainer.FOLDER, book.comicContainer)
+        // 目录漫画没有单一文件可复制，fileUri 保持 SAF 树 Uri 不变
+        assertEquals(root.toString(), book.fileUri)
         assertNotNull(book.coverPath)
         assertTrue(prewarmCalls.isEmpty())
     }
