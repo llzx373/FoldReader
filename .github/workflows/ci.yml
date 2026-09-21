@@ -36,6 +36,11 @@ jobs:
       - name: 单元测试
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
+      # tools/cleaner 复用 app 的清理引擎源码，但不在 :app 的构建图里。
+      # 不单独跑的话，它坏了 CI 也不会红（例如 Kotlin 升级波及 Compose Multiplatform）。
+      - name: 桌面清理工具测试
+        run: ./gradlew :tools:cleaner:test --stacktrace
+
       - name: 构建 Debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
