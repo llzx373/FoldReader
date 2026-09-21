@@ -22,7 +22,7 @@ navigationCompose = "2.10.1"
 coroutines = "1.11.0"
 # 本地存储
 datastore = "1.2.0"
-json = "20250517"
+json = "20260814"
 room = "2.8.5"
 ksp = "2.3.12"
 # 漫画容器读取：commons-compress 覆盖 zip/tar/7z，junrar 覆盖 rar
