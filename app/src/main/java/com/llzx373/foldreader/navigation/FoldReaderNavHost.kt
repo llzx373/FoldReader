@@ -4,6 +4,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -45,12 +46,19 @@ fun FoldReaderNavHost(
     ) {
         composable(
             route = Routes.BOOKSHELF,
-            // 书架退场：缩放淡出；返回时反向
+            // 顶层 Tab 之间是平级切换，进入用弹簧淡入即可；滑动会暗示"前后层级"，反而不对
+            enterTransition = { fadeIn(fadeSpring) },
+            // 书架退场：缩放淡出；返回时用 scaleIn + fadeIn 严格反向镜像（幅度、曲线、时长一致）
             exitTransition = {
                 scaleOut(targetScale = 0.94f, animationSpec = fadeSpring) +
                     fadeOut(fadeSpring)
             },
-            popEnterTransition = { fadeIn(fadeSpring) },
+            popEnterTransition = {
+                // 必须显式给 initialScale：scaleIn() 默认从 0 缩放进场（凭空出现）
+                scaleIn(initialScale = 0.94f, animationSpec = fadeSpring) +
+                    fadeIn(fadeSpring)
+            },
+            popExitTransition = { fadeOut(fadeSpring) },
         ) {
             BookshelfScreen(
                 foldableUiState = foldableUiState,
@@ -84,6 +92,9 @@ fun FoldReaderNavHost(
                 slideInVertically(initialOffsetY = { it / 12 }, animationSpec = offsetSpring) +
                     fadeIn(fadeSpring)
             },
+            // 切去别的 Tab 是平级移动，淡出即可；滑动会与目标页的进入方向打架
+            exitTransition = { fadeOut(fadeSpring) },
+            popEnterTransition = { fadeIn(fadeSpring) },
             popExitTransition = {
                 slideOutVertically(targetOffsetY = { it / 12 }, animationSpec = offsetSpring) +
                     fadeOut(fadeSpring)
@@ -97,6 +108,8 @@ fun FoldReaderNavHost(
                 slideInVertically(initialOffsetY = { it / 12 }, animationSpec = offsetSpring) +
                     fadeIn(fadeSpring)
             },
+            exitTransition = { fadeOut(fadeSpring) },
+            popEnterTransition = { fadeIn(fadeSpring) },
             popExitTransition = {
                 slideOutVertically(targetOffsetY = { it / 12 }, animationSpec = offsetSpring) +
                     fadeOut(fadeSpring)

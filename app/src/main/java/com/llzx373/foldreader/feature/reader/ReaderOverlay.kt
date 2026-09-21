@@ -57,10 +57,10 @@ fun ReaderOverlay(
         modifier = modifier.fillMaxSize(),
         transitionSpec = {
             if (targetState != null) {
-                // 进书：自右滑入 + 淡入（书架的 scaleOut/fadeOut 退场由 NavHost 侧负责）
+                // 进书：纯淡入（封面共享元素负责空间关系；书架退场由 NavHost 侧负责）
                 readerEnterTransition.togetherWith(fadeOut(fadeSpring))
             } else {
-                // 退书：向右滑出 + 淡出（书架随 popEnter 正常淡入）
+                // 退书：纯淡出（书架随 popEnter 正常淡入）
                 fadeIn(fadeSpring).togetherWith(readerExitTransition)
             }
         },
