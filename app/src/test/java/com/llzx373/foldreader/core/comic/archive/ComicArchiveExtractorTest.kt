@@ -2,6 +2,7 @@ package com.llzx373.foldreader.core.comic.archive
 
 import com.llzx373.foldreader.core.comic.ComicExtractionStore
 import com.llzx373.foldreader.core.comic.ComicTestImages
+import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractRar
 import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractSevenZip
 import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractTar
 import java.io.File
@@ -63,6 +64,13 @@ class ComicArchiveExtractorTest {
         return file
     }
 
+    /** 样本是 WinRAR 打出来的真实 RAR5 归档，说明见 src/test/resources/comic/README.md。 */
+    private fun comicRar(): File {
+        val url = javaClass.getResource("/comic/pages.cbr")
+        if (url != null && url.protocol == "file") return File(url.toURI())
+        return File("src/test/resources/comic/pages.cbr")
+    }
+
     @Test
     fun `tar 解压按自然序成页并过滤噪音`() {
         val store = ComicExtractionStore(temp.newFolder("comics"))
@@ -116,5 +124,35 @@ class ComicArchiveExtractorTest {
         val byName = extracted.associateBy({ it.first }, { it.second.readBytes() })
         assertArrayEquals(page1, byName["2.png"])
         assertArrayEquals(page2, byName["10.png"])
+    }
+
+    @Test
+    fun `rar 解压按自然序成页并过滤噪音`() {
+        val store = ComicExtractionStore(temp.newFolder("comics"))
+
+        val ordered = store.ensureExtracted("rar-hash") { dir ->
+            comicRar().inputStream().use { extractRar(it, dir) }
+        }
+
+        assertEquals(
+            listOf("000000_1.png", "000001_2.png", "000002_10.png"),
+            ordered.map { it.name },
+        )
+        // 每个条目的内容是它自己的名字，索引必须跟内容对上
+        assertEquals("1.png", ordered[0].readText())
+        assertEquals("2.png", ordered[1].readText())
+        assertEquals("10.png", ordered[2].readText())
+    }
+
+    @Test
+    fun `rar 跳过不取的条目后仍能正确推进`() {
+        val target = temp.newFolder("rar-skip")
+
+        val extracted = comicRar().inputStream().use { extractRar(it, target) }
+
+        // readme.txt / Thumbs.db / __MACOSX/._1.png 与 __MACOSX 目录条目都在被跳过之列，
+        // 跳过顺序错位的话后面的页内容会对不上
+        assertEquals(listOf("1.png", "10.png", "2.png"), extracted.map { it.first })
+        assertEquals("10.png", extracted[1].second.readText())
     }
 }

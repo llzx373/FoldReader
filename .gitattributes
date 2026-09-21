@@ -15,3 +15,6 @@
 *.aab binary
 *.jks binary
 *.keystore binary
+# 漫画容器样本（单测用），行尾转换会把归档结构改坏
+*.cbr binary
+*.rar binary
