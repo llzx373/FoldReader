@@ -18,6 +18,9 @@ updates:
       kotlin:
         patterns:
           - "org.jetbrains.kotlin*"
+          # Compose Multiplatform 的 Gradle 插件与 Kotlin 编译器版本强绑定，
+          # 必须同一批提，否则会出现「Kotlin 升了、CMP 没升」的错配。
+          - "org.jetbrains.compose*"
       archive:
         patterns:
           - "org.apache.commons:*"
