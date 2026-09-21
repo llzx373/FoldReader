@@ -105,9 +105,8 @@ internal class Fb2Flattener(
                                 sink.blockBoundary()
                             } else if (name in BLOCK_TAGS || name == "empty-line") {
                                 // 标题内多个 <p> 拼接时空格分隔
-                                titleCapture?.let { buf ->
-                                    if (buf.isNotEmpty() && buf.last() != ' ') buf.append(' ')
-                                }
+                                val buf = titleCapture
+                                if (buf.isNotEmpty() && buf.last() != ' ') buf.append(' ')
                                 sink.blockBoundary()
                             }
                         }
