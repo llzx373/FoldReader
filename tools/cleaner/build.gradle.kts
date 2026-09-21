@@ -51,7 +51,8 @@ sourceSets.main {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
+    // compose.material3 访问器自 CMP 1.12.0 起弃用（且它冻结在 1.9.0），改用显式坐标
+    implementation(libs.compose.material3)
     testImplementation(libs.junit)
 }
 

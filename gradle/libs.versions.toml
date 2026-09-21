@@ -39,6 +39,11 @@ pdfboxAndroid = "2.0.27.0"
 robolectric = "4.17"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
+# tools/cleaner 的 material3。CMP 1.12.0 弃用了 compose.material3 访问器，
+# 要求直接声明依赖；而 org.jetbrains.compose.material3:material3 自 1.9.0 之后
+# 只有 alpha 版（1.10/1.11/1.12 全是 alpha），访问器本身也冻结在 1.9.0。
+# 这里显式钉住同一版本，行为与弃用前一致；等它有新稳定版再跟 composeMultiplatform 一起升。
+composeMaterial3 = "1.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -83,6 +88,8 @@ androidx-pdf-document-service = { group = "androidx.pdf", name = "pdf-document-s
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+# 桌面清理工具（tools/cleaner）
+compose-material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "composeMaterial3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
