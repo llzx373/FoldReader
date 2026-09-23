@@ -7,14 +7,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
@@ -184,6 +188,20 @@ fun ReaderScreen(
     val autoPageStatus by viewModel.autoPageStatus.collectAsState()
     val ttsState by viewModel.ttsState.collectAsState()
     val ttsPlaying = ttsState.playing && ttsState.bookId == bookId
+    val ttsPaused = ttsPlaying && ttsState.paused
+    // API 33+ 通知运行时权限：首次点朗读入口时申请；拒绝不挡朗读
+    // （前台服务照常运行、通知不进抽屉，MediaSession 控制不受影响）
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkedOffsets = remember(bookmarks) { bookmarks.map { it.charOffset }.toSet() }
     val annotations by viewModel.annotations.collectAsState()
@@ -1671,8 +1689,18 @@ fun ReaderScreen(
                 },
                 onOpenSettings = { exit.leaveTo(onOpenSettings) },
                 ttsPlaying = ttsPlaying,
-                onSpeakFromHere = { scope.launch { viewModel.speakFromHere() } },
-                onSpeakChapter = { scope.launch { viewModel.speakChapter() } },
+                ttsPaused = ttsPaused,
+                onSpeakFromHere = {
+                    ensureNotificationPermission()
+                    scope.launch { viewModel.speakFromHere() }
+                },
+                onSpeakChapter = {
+                    ensureNotificationPermission()
+                    scope.launch { viewModel.speakChapter() }
+                },
+                onToggleSpeakPause = {
+                    if (ttsPaused) viewModel.resumeSpeaking() else viewModel.pauseSpeaking()
+                },
                 onStopSpeaking = viewModel::stopSpeaking,
             )
         }

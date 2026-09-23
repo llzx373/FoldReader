@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.update
 
 /**
  * TTS 听书引擎控制器（M13.1）。进程级单例，由 AppContainer 持有，
- * [TtsPlaybackService] 只是保活壳（步骤 9 在此之上加前台/MediaSession，引擎不动）。
+ * [TtsPlaybackService] 只是前台/MediaSession 壳（引擎与状态都在这里，不进 Composable/Activity）。
  *
  * 线程模型：公开方法一律经主线程 Handler 归位后操作引擎与状态，
  * UtteranceProgressListener 回调（binder 线程）也先 post 回主线程再处理，
@@ -38,32 +38,73 @@ class ReaderTtsController(context: Context) {
     /** 播放代次：stop/重新 speak 都会 +1，迟到回调凭 utteranceId 里的代次丢弃。 */
     private var generation = 0
     private var segments: List<TtsSegment> = emptyList()
+    /** 正在朗读（或暂停断点）的 segment 下标；onDone 推进，pause/resume 据此续播。 */
+    private var currentIndex = 0
     /** 引擎异步初始化期间到达的播放请求，初始化完成后补放。 */
     private var pendingLaunch: (() -> Unit)? = null
 
-    /** 从 [segments] 第一句开始整段朗读（QUEUE_ADD 逐句排队）。 */
-    fun speak(bookId: Long, segments: List<TtsSegment>) {
+    /** 从 [segments] 第一句开始整段朗读（QUEUE_ADD 逐句排队）。标题只用于通知/MediaSession。 */
+    fun speak(
+        bookId: Long,
+        segments: List<TtsSegment>,
+        bookTitle: String = "",
+        chapterTitle: String = "",
+    ) {
         main.post {
             if (segments.isEmpty()) return@post
             this.segments = segments
+            currentIndex = 0
             generation++
             _state.value = TtsState(
                 bookId = bookId,
                 charOffset = segments.first().charOffset,
                 playing = true,
+                bookTitle = bookTitle,
+                chapterTitle = chapterTitle,
             )
-            // 保活壳：朗读期间进程持有 started service；播完/停止由服务观察 state 后 stopSelf
+            // 前台壳：朗读期间进程持有前台 service；播完/停止由服务观察 state 后退出前台并 stopSelf
             runCatching { appContext.startService(Intent(appContext, TtsPlaybackService::class.java)) }
             val tts = ensureEngine()
             if (tts == null) {
                 if (engineFailed) {
                     failNow(engineFailMessage)
                 } else {
-                    pendingLaunch = { startQueue() }
+                    pendingLaunch = { startQueueFrom(0) }
                 }
                 return@post
             }
-            startQueue()
+            startQueueFrom(0)
+        }
+    }
+
+    /**
+     * 暂停。TextToSpeech 没有真暂停：记录当前 segment 下标后停掉引擎队列，
+     * [resume] 时从断点重新入队（该句会从头重读，是 TTS 引擎能力内的可行口径）。
+     */
+    fun pause() {
+        main.post {
+            if (!_state.value.playing || _state.value.paused) return@post
+            generation++
+            pendingLaunch = null
+            engine?.stop()
+            _state.update { it.copy(paused = true) }
+        }
+    }
+
+    /** 从 pause 记录的断点重新入队续播。 */
+    fun resume() {
+        main.post {
+            val state = _state.value
+            if (!state.playing || !state.paused || segments.isEmpty()) return@post
+            generation++
+            val from = currentIndex.coerceIn(0, segments.lastIndex)
+            _state.update { it.copy(paused = false, charOffset = segments[from].charOffset) }
+            val tts = ensureEngine()
+            if (tts == null) {
+                if (engineFailed) failNow(engineFailMessage) else pendingLaunch = { startQueueFrom(from) }
+                return@post
+            }
+            startQueueFrom(from)
         }
     }
 
@@ -114,12 +155,13 @@ class ReaderTtsController(context: Context) {
         return null
     }
 
-    private fun startQueue() {
+    private fun startQueueFrom(index: Int) {
         val tts = engine ?: return
         tts.stop()
+        currentIndex = index
         val gen = generation
-        segments.forEachIndexed { index, segment ->
-            tts.speak(segment.text, TextToSpeech.QUEUE_ADD, null, utteranceId(gen, index))
+        for (i in index until segments.size) {
+            tts.speak(segments[i].text, TextToSpeech.QUEUE_ADD, null, utteranceId(gen, i))
         }
     }
 
@@ -135,13 +177,14 @@ class ReaderTtsController(context: Context) {
         override fun onDone(utteranceId: String) {
             main.post {
                 val (gen, index) = parseUtteranceId(utteranceId) ?: return@post
-                if (gen != generation || !_state.value.playing) return@post
+                if (gen != generation || !_state.value.playing || _state.value.paused) return@post
                 val next = index + 1
                 if (next < segments.size) {
                     // 推进到下一句起点，阅读器据此做翻页联动
+                    currentIndex = next
                     _state.update { it.copy(charOffset = segments[next].charOffset) }
                 } else {
-                    _state.update { it.copy(playing = false) }
+                    _state.update { it.copy(playing = false, paused = false) }
                 }
             }
         }

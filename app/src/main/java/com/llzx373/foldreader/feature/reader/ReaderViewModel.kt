@@ -563,7 +563,8 @@ class ReaderViewModel(
      */
     private suspend fun followTtsPlayback() {
         ttsController.state.collect { state ->
-            if (!state.playing || state.bookId != bookId) return@collect
+            // paused 时不触发翻页联动：会话还在但朗读进度冻结
+            if (!state.playing || state.paused || state.bookId != bookId) return@collect
             if (preferences.value.pageTurnMode == PageTurnMode.SCROLL) return@collect
             val spread = _uiState.value.spread ?: return@collect
             val spreadEnd = spread.right?.charEnd ?: spread.left.charEnd
@@ -604,8 +605,17 @@ class ReaderViewModel(
         if (end <= start) return
         val text = runCatching { source.read(start until end) }.getOrNull() ?: return
         val segments = TtsSentenceSplitter.split(text, start)
-        ttsController.speak(bookId, segments)
+        ttsController.speak(
+            bookId = bookId,
+            segments = segments,
+            bookTitle = _uiState.value.bookTitle,
+            chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, start))?.title.orEmpty(),
+        )
     }
+
+    fun pauseSpeaking() = ttsController.pause()
+
+    fun resumeSpeaking() = ttsController.resume()
 
     /**
      * 重开正文：编码变了（换解码方式）或清洗副本换了（智能整理/撤销清理）时调用。

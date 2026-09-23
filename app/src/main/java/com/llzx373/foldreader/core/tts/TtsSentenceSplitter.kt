@@ -11,7 +11,13 @@ data class TtsState(
     val bookId: Long? = null,
     /** 当前朗读到的字符偏移（下一句的起点；播完保持最后一句的起点）。 */
     val charOffset: Long = 0L,
+    /** 是否持有朗读会话（含暂停中）；false 时服务退出前台并 stopSelf。 */
     val playing: Boolean = false,
+    /** 暂停中（playing=true 且 paused=true）：引擎队列已停，记录断点可续播。 */
+    val paused: Boolean = false,
+    /** 通知/MediaSession 元数据；书名取不到时 UI 用「FoldReader 朗读」兜底。 */
+    val bookTitle: String = "",
+    val chapterTitle: String = "",
     /** 一次性错误文案（引擎不可用/不支持中文等）；下次 speak/stop 清空。 */
     val error: String? = null,
 )

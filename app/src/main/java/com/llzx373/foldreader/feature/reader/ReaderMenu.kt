@@ -244,10 +244,12 @@ fun ReaderMenuPanel(
     onCycleAutoPageMode: () -> Unit,
     onCycleAutoPageSpeed: () -> Unit,
     onOpenSettings: () -> Unit,
-    /** TTS 听书（M13.1）：朗读中操作区只留「停止朗读」。 */
+    /** TTS 听书（M13.1）：朗读中操作区显示「暂停/继续朗读」+「停止朗读」。 */
     ttsPlaying: Boolean,
+    ttsPaused: Boolean = false,
     onSpeakFromHere: () -> Unit,
     onSpeakChapter: () -> Unit,
+    onToggleSpeakPause: () -> Unit = {},
     onStopSpeaking: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -489,6 +491,10 @@ fun ReaderMenuPanel(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (ttsPlaying) {
+                    clickableItem(
+                        onClick = onToggleSpeakPause,
+                        label = if (ttsPaused) "继续朗读" else "暂停朗读",
+                        weight = 1f)
                     clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
                 } else {
                     clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)

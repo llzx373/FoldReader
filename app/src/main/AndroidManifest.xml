@@ -4,6 +4,10 @@
 
     <!-- AI 功能联网：服务商端点由用户在「设置 → AI 服务」自行配置（v2.6 网络策略例外），未配置时不产生任何网络请求 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- TTS 听书（M13.1）：前台媒体播放服务 + 通知（POST_NOTIFICATIONS 在首次点朗读入口时运行时申请） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".FoldReaderApplication"
@@ -117,10 +121,15 @@
             </intent-filter>
         </activity>
 
-        <!-- TTS 听书保活壳（M13.1）：引擎在 AppContainer 的 ReaderTtsController，这里只托进程 -->
+        <!--
+            TTS 听书前台服务（M13.1）：引擎在 AppContainer 的 ReaderTtsController，这里托进程 +
+            MediaSession（耳机按键/锁屏控制）。minSdk 33 下 SystemUI 媒体控制直接认活动会话，
+            不需要 MediaBrowserService intent-filter（那是给 Android Auto/旧锁屏发现用的）。
+        -->
         <service
             android:name=".core.tts.android.TtsPlaybackService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- 诊断日志分享（设置 → 诊断 → 分享日志文件）：仅暴露 cacheDir/diagnostics -->
         <provider
