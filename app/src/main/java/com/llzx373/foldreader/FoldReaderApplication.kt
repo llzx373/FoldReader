@@ -305,6 +305,14 @@ class AppContainer(context: Context) {
         ),
     )
     val fontManager = com.llzx373.foldreader.core.reader.FontManager(appContext)
+    /**
+     * TTS 听书控制器（M13.1）：进程级单例，引擎与状态都不进 Composable/Activity。
+     * TtsPlaybackService 只是保活壳（步骤 9 升级前台/MediaSession 时引擎层不动）。
+     */
+    val ttsController = com.llzx373.foldreader.core.tts.android.ReaderTtsController(appContext)
+    /** 阅读器 ↔ 引擎的通信口：ReaderViewModel 订阅它做翻页联动。 */
+    val ttsState: kotlinx.coroutines.flow.StateFlow<com.llzx373.foldreader.core.tts.TtsState>
+        get() = ttsController.state
     val backupManager = com.llzx373.foldreader.core.backup.BackupManager(
         context = appContext,
         bookshelfRepository = bookshelfRepository,

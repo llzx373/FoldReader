@@ -117,6 +117,11 @@
             </intent-filter>
         </activity>
 
+        <!-- TTS 听书保活壳（M13.1）：引擎在 AppContainer 的 ReaderTtsController，这里只托进程 -->
+        <service
+            android:name=".core.tts.android.TtsPlaybackService"
+            android:exported="false" />
+
         <!-- 诊断日志分享（设置 → 诊断 → 分享日志文件）：仅暴露 cacheDir/diagnostics -->
         <provider
             android:name="androidx.core.content.FileProvider"

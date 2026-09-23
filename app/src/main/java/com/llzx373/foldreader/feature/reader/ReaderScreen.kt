@@ -182,6 +182,8 @@ fun ReaderScreen(
     val prefs by viewModel.preferences.collectAsState()
     val prefsLoaded by viewModel.preferencesLoaded.collectAsState()
     val autoPageStatus by viewModel.autoPageStatus.collectAsState()
+    val ttsState by viewModel.ttsState.collectAsState()
+    val ttsPlaying = ttsState.playing && ttsState.bookId == bookId
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkedOffsets = remember(bookmarks) { bookmarks.map { it.charOffset }.toSet() }
     val annotations by viewModel.annotations.collectAsState()
@@ -622,12 +624,16 @@ fun ReaderScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(foreground, menuVisible, uiState.loading, uiState.error, selection != null, peel.busy) {
+    LaunchedEffect(
+        foreground, menuVisible, uiState.loading, uiState.error, selection != null, peel.busy, ttsPlaying,
+    ) {
         viewModel.setReadingActive(
             foreground && !menuVisible && !uiState.loading && uiState.error == null,
         )
         viewModel.setAutoPageUiPaused(
-            !foreground || menuVisible || selection != null || uiState.loading || uiState.error != null || peel.busy,
+            // TTS 朗读期间自动翻页（INTERVAL/SCROLL）让位：翻页由朗读进度驱动
+            !foreground || menuVisible || selection != null || uiState.loading ||
+                uiState.error != null || peel.busy || ttsPlaying,
         )
     }
 
@@ -641,6 +647,22 @@ fun ReaderScreen(
             if (!menuVisible && selection == null && animSpread == null && !peel.busy) {
                 latestTurn(forward)
             }
+        }
+    }
+
+    // TTS 翻页联动（M13.1）：朗读越过跨页末尾时 VM 发翻页请求，走与自动翻页相同的口径
+    LaunchedEffect(Unit) {
+        viewModel.ttsPageTurns.collect { forward ->
+            if (!menuVisible && selection == null && animSpread == null && !peel.busy) {
+                latestTurn(forward)
+            }
+        }
+    }
+
+    // TTS 错误（设备不支持中文 TTS / 引擎初始化失败等）一次性提示
+    LaunchedEffect(ttsState.error) {
+        ttsState.error?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1648,6 +1670,10 @@ fun ReaderScreen(
                     }
                 },
                 onOpenSettings = { exit.leaveTo(onOpenSettings) },
+                ttsPlaying = ttsPlaying,
+                onSpeakFromHere = { scope.launch { viewModel.speakFromHere() } },
+                onSpeakChapter = { scope.launch { viewModel.speakChapter() } },
+                onStopSpeaking = viewModel::stopSpeaking,
             )
         }
 

@@ -45,6 +45,9 @@ import com.llzx373.foldreader.core.reader.collectScrollPages
 import com.llzx373.foldreader.core.reader.decodeSampledImage
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
 import com.llzx373.foldreader.core.reader.sliceSpansForLine
+import com.llzx373.foldreader.core.tts.TtsSentenceSplitter
+import com.llzx373.foldreader.core.tts.TtsState
+import com.llzx373.foldreader.core.tts.android.ReaderTtsController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.CoroutineScope
@@ -140,6 +143,8 @@ class ReaderViewModel(
     private val parsers: BookParsers,
     private val fontManager: FontManager,
     private val pageDiskCache: PageDiskCache,
+    /** TTS 听书控制器（M13.1）：AppContainer 持有的进程级单例，状态不经 Composable。 */
+    private val ttsController: ReaderTtsController,
     private val initialAnchor: Long = -1L,
 ) : ViewModel() {
 
@@ -238,6 +243,13 @@ class ReaderViewModel(
 
     private val autoPageTurnRequests = AutoPageTurnRequests()
     val autoPageTurns: kotlinx.coroutines.flow.SharedFlow<Boolean> = autoPageTurnRequests.requests
+
+    /** TTS 朗读（M13.1）整段状态：UI 订阅显示「停止朗读」/错误提示，下方 collector 做翻页联动。 */
+    val ttsState: StateFlow<TtsState> = ttsController.state
+
+    private val ttsTurnRequests = AutoPageTurnRequests()
+    /** TTS 推进到下一跨页时的翻页请求：走 UI 正常翻页动画（落后多页时 VM 直接 seek，不经这里）。 */
+    val ttsPageTurns: kotlinx.coroutines.flow.SharedFlow<Boolean> = ttsTurnRequests.requests
 
     /**
      * 只保留**文本锚点**的书签。
@@ -541,6 +553,58 @@ class ReaderViewModel(
                 }
         }
         viewModelScope.launch { autoPageLoop() }
+        viewModelScope.launch { followTtsPlayback() }
+    }
+
+    /**
+     * TTS 翻页联动（M13.1）：朗读进度（下一句起点的全书偏移）越过当前跨页末尾时翻页。
+     * 只超一页发翻页请求走 UI 动画；落后多页（长句停顿、翻页被动画挡住）直接 seek
+     * 到偏移所在跨页，避免连翻动画。滚动翻页模式下不做页面跟随（本步口径）。
+     */
+    private suspend fun followTtsPlayback() {
+        ttsController.state.collect { state ->
+            if (!state.playing || state.bookId != bookId) return@collect
+            if (preferences.value.pageTurnMode == PageTurnMode.SCROLL) return@collect
+            val spread = _uiState.value.spread ?: return@collect
+            val spreadEnd = spread.right?.charEnd ?: spread.left.charEnd
+            if (state.charOffset < spreadEnd) return@collect
+            val next = adjacentSpread(true)
+            if (next != null && state.charOffset < (next.right?.charEnd ?: next.left.charEnd)) {
+                ttsTurnRequests.request(forward = true)
+            } else if (next != null) {
+                seekToOffset(state.charOffset)
+            }
+        }
+    }
+
+    /** 「从当前位置朗读」：当前锚点 → 当前章末（无章节坐标时到全书末）。 */
+    suspend fun speakFromHere() {
+        val source = content ?: return
+        val start = anchorOffset.value
+        val end = chapters.getOrNull(chapterIndexAt(chapters, start))
+            ?.charEnd
+            ?.takeIf { it > start }
+            ?: source.charCount
+        speakRange(start, end)
+    }
+
+    /** 「朗读本章」：当前章 charStart..charEnd（无章节坐标时整本）。 */
+    suspend fun speakChapter() {
+        val source = content ?: return
+        val chapter = chapters.getOrNull(_readingPosition.value.chapterIndex)
+        val start = chapter?.charStart ?: 0L
+        val end = chapter?.charEnd?.takeIf { it > start } ?: source.charCount
+        speakRange(start, end)
+    }
+
+    fun stopSpeaking() = ttsController.stop()
+
+    private suspend fun speakRange(start: Long, end: Long) {
+        val source = content ?: return
+        if (end <= start) return
+        val text = runCatching { source.read(start until end) }.getOrNull() ?: return
+        val segments = TtsSentenceSplitter.split(text, start)
+        ttsController.speak(bookId, segments)
     }
 
     /**
@@ -1480,6 +1544,7 @@ class ReaderViewModel(
                     parsers = container.bookParsers,
                     fontManager = container.fontManager,
                     pageDiskCache = container.pageDiskCache,
+                    ttsController = container.ttsController,
                     initialAnchor = initialAnchor,
                 )
             }

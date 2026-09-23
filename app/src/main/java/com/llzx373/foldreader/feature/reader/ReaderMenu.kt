@@ -244,6 +244,11 @@ fun ReaderMenuPanel(
     onCycleAutoPageMode: () -> Unit,
     onCycleAutoPageSpeed: () -> Unit,
     onOpenSettings: () -> Unit,
+    /** TTS 听书（M13.1）：朗读中操作区只留「停止朗读」。 */
+    ttsPlaying: Boolean,
+    onSpeakFromHere: () -> Unit,
+    onSpeakChapter: () -> Unit,
+    onStopSpeaking: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showBrightness by remember { mutableStateOf(false) }
@@ -478,6 +483,17 @@ fun ReaderMenuPanel(
                     weight = 1f)
                 clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
                 clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
+            }
+            ButtonGroup(
+                overflowIndicator = {},
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (ttsPlaying) {
+                    clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
+                } else {
+                    clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
+                    clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+                }
             }
             // 开关都是中文长标签，窄屏下横排会容不下被逐字竖排：改用 FlowRow 自动换行，
             // 每个标签本身强制单行，换不下就整块挪到下一行。
