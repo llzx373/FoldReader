@@ -283,6 +283,7 @@ class ImportBookCleanTest {
         override suspend fun saveProgress(progress: ReadingProgressEntity) = Unit
         override suspend fun getChapters(bookId: Long): List<Chapter> = emptyList()
         override fun observeChapters(bookId: Long): Flow<List<Chapter>> = flowOf(emptyList())
+        override fun observePersonAppearances(bookId: Long): Flow<List<com.llzx373.foldreader.core.data.db.PersonAppearanceEntity>> = flowOf(emptyList())
         override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) = Unit
         override fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>> = flowOf(emptyList())
         override fun observeAllBookmarks(): Flow<List<BookmarkEntity>> = flowOf(emptyList())

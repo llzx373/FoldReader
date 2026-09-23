@@ -4,6 +4,7 @@ import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
+import com.llzx373.foldreader.core.data.db.PersonAppearanceEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.format.Chapter
@@ -136,6 +137,8 @@ class FakeBookshelfRepository : BookshelfRepository {
     override suspend fun getChapters(bookId: Long): List<Chapter> = unsupported()
 
     override fun observeChapters(bookId: Long): Flow<List<Chapter>> = unsupported()
+
+    override fun observePersonAppearances(bookId: Long): Flow<List<PersonAppearanceEntity>> = unsupported()
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) = unsupported()
 

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.data.db.PersonAppearanceEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
@@ -164,6 +165,14 @@ class ReaderViewModel(
     val preferences: StateFlow<ReadingPreferences> = bookPrefsRepository.observe(bookId)
         .onEach { _preferencesLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingPreferences())
+
+    /**
+     * 人物出场索引（M13.2）。只有目录面板的「人物」页签会订阅它——面板一关
+     * WhileSubscribed 就停掉上游收集，不参与每页重组路径。
+     */
+    val personAppearances: StateFlow<List<PersonAppearanceEntity>> =
+        bookshelfRepository.observePersonAppearances(bookId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // 下面这些是「主线程发布、之后被 Default/IO 线程读取」的字段：分页（Default）与位图预取（IO）
     // 都要读它们。不标 @Volatile 时另一个线程可能长读旧引用（改字号/换书之后尤其明显），所以全部标上。

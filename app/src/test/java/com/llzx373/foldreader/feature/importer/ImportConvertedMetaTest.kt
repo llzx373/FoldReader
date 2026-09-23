@@ -72,6 +72,7 @@ class ImportConvertedMetaTest {
             throw UnsupportedOperationException()
         override suspend fun getChapters(bookId: Long) = throw UnsupportedOperationException()
         override fun observeChapters(bookId: Long) = throw UnsupportedOperationException()
+        override fun observePersonAppearances(bookId: Long) = throw UnsupportedOperationException()
         override suspend fun saveChapters(bookId: Long, chapters: List<com.llzx373.foldreader.core.format.Chapter>) =
             throw UnsupportedOperationException()
         override fun observeBookmarks(bookId: Long) = throw UnsupportedOperationException()

@@ -1423,6 +1423,8 @@ fun ComicReaderScreen(
             // 复用文本阅读器那套目录对话框（同样的层级缩进与高亮），只是锚点换成页序号
             ChapterListDialog(
                 chapters = outline,
+                // 漫画/PDF 不做人物识别（无字符坐标正文），人物页签恒为空
+                persons = emptyList(),
                 currentIndex = viewModel.outlineIndexFor(uiState.pageIndex),
                 remainingText = null,
                 colors = colors,

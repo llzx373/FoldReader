@@ -96,6 +96,8 @@ class BookshelfViewModel(
     private val comicImport: ComicImportUseCase,
     private val reclean: RecleanBookUseCase,
     private val cleanProfileFactory: CleanProfileFactory,
+    /** 人物出场索引（M13.2）重算入口；重扫章节完成后触发，失败静默（实现内部已兜底）。 */
+    private val refreshPersonAppearances: suspend (Long) -> Unit = {},
 ) : ViewModel() {
 
     val books: StateFlow<List<BookWithProgress>> = combine(
@@ -438,6 +440,8 @@ class BookshelfViewModel(
             parsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override, bookId)
         }.getOrDefault(emptyList())
         bookshelfRepository.saveChapters(bookId, scanned)
+        // 章节变了人物出场索引跟着重算；失败不影响重扫本身
+        runCatching { refreshPersonAppearances(bookId) }
     }
 
     /**
@@ -481,6 +485,7 @@ class BookshelfViewModel(
                     comicImport = container.comicImportUseCase,
                     reclean = container.recleanBookUseCase,
                     cleanProfileFactory = container.cleanProfileFactory,
+                    refreshPersonAppearances = container::refreshPersonAppearances,
                 )
             }
         }

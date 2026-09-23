@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.data.db.PersonAppearanceEntity
 import com.llzx373.foldreader.core.data.settings.DualPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
@@ -514,25 +515,49 @@ fun ReaderMenuPanel(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ChapterListDialog(
     chapters: List<Chapter>,
+    persons: List<PersonAppearanceEntity>,
     currentIndex: Int,
     remainingText: String?,
     colors: ReaderColors,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var showPersons by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("关闭") }
         },
-        title = { Text("目录") },
+        title = {
+            Column {
+                Text(if (showPersons) "人物" else "目录")
+                ButtonGroup(
+                    overflowIndicator = {},
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    toggleableItem(
+                        checked = !showPersons,
+                        label = "目录",
+                        onCheckedChange = { showPersons = false },
+                        weight = 1f)
+                    toggleableItem(
+                        checked = showPersons,
+                        label = "人物",
+                        onCheckedChange = { showPersons = true },
+                        weight = 1f)
+                }
+            }
+        },
         text = {
             Column {
-                if (remainingText != null) {
+                if (remainingText != null && !showPersons) {
                     Text(
                         text = remainingText,
                         style = MaterialTheme.typography.labelMedium,
@@ -540,7 +565,40 @@ fun ChapterListDialog(
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }
-                if (chapters.size <= 1) {
+                if (showPersons) {
+                    if (persons.isEmpty()) {
+                        Text(
+                            text = "未识别到人物",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.height(360.dp)) {
+                            itemsIndexed(persons) { _, person ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelect(person.firstChapterIndex) }
+                                        .padding(vertical = 10.dp),
+                                ) {
+                                    Text(
+                                        text = "${person.name} · 出场 ${person.mentionCount} 次",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                    )
+                                    chapters.getOrNull(person.firstChapterIndex)?.let { chapter ->
+                                        Text(
+                                            text = "首出场：${chapter.title}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = colors.accent,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (chapters.size <= 1) {
                     Text(
                         text = "未识别到章节，可用进度条跳转",
                         style = MaterialTheme.typography.bodyMedium,

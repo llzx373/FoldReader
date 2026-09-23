@@ -9,6 +9,8 @@ import com.llzx373.foldreader.core.data.db.BookmarkDao
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
 import com.llzx373.foldreader.core.data.db.ChapterDao
 import com.llzx373.foldreader.core.data.db.ChapterEntity
+import com.llzx373.foldreader.core.data.db.PersonAppearanceDao
+import com.llzx373.foldreader.core.data.db.PersonAppearanceEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionDao
@@ -24,6 +26,7 @@ class BookshelfRepositoryImpl(
     private val bookmarkDao: BookmarkDao,
     private val annotationDao: AnnotationDao,
     private val sessionDao: ReadingSessionDao,
+    private val personAppearanceDao: PersonAppearanceDao? = null,
     /** 非 TXT 压平缓存目录；删除书籍时按 contentHash 一并清理（TXT 无此文件，删除为 no-op）。 */
     private val convertedDir: java.io.File? = null,
     /** 封面目录；删除书籍时按 coverPath 一并清理。 */
@@ -161,6 +164,9 @@ class BookshelfRepositoryImpl(
 
     override fun observeChapters(bookId: Long): Flow<List<Chapter>> =
         chapterDao.observeForBook(bookId).map { list -> list.map { it.toChapter() } }
+
+    override fun observePersonAppearances(bookId: Long): Flow<List<PersonAppearanceEntity>> =
+        personAppearanceDao?.observeForBook(bookId) ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
     override suspend fun saveChapters(bookId: Long, chapters: List<Chapter>) {
         chapterDao.replaceForBook(

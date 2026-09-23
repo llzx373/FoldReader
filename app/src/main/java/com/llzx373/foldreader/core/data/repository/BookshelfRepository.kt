@@ -4,6 +4,7 @@ import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
+import com.llzx373.foldreader.core.data.db.PersonAppearanceEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
 import com.llzx373.foldreader.core.format.Chapter
@@ -67,6 +68,9 @@ interface BookshelfRepository {
     suspend fun getChapters(bookId: Long): List<Chapter>
     fun observeChapters(bookId: Long): Flow<List<Chapter>>
     suspend fun saveChapters(bookId: Long, chapters: List<Chapter>)
+
+    /** 人物出场索引（M13.2）：按提及次数降序，随章节索引流程后台回填。 */
+    fun observePersonAppearances(bookId: Long): Flow<List<PersonAppearanceEntity>>
 
     fun observeBookmarks(bookId: Long): Flow<List<BookmarkEntity>>
     fun observeAllBookmarks(): Flow<List<BookmarkEntity>>

@@ -1653,8 +1653,11 @@ fun ReaderScreen(
 
         if (catalogVisible) {
             val position by viewModel.readingPosition.collectAsState()
+            // 只在面板可见时收集人物索引（ViewModel 侧 WhileSubscribed 随之启停）
+            val persons by viewModel.personAppearances.collectAsState()
             ChapterListDialog(
                 chapters = viewModel.chapterList(),
+                persons = persons,
                 currentIndex = position.chapterIndex,
                 remainingText = viewModel.remainingTimeText(),
                 colors = colors,

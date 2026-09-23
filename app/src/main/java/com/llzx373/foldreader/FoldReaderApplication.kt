@@ -85,6 +85,7 @@ class AppContainer(context: Context) {
         bookmarkDao = database.bookmarkDao(),
         annotationDao = database.annotationDao(),
         sessionDao = database.readingSessionDao(),
+        personAppearanceDao = database.personAppearanceDao(),
         convertedDir = convertedDir,
         coversDir = coversDir,
         pageDiskCache = pageDiskCache,
@@ -154,6 +155,58 @@ class AppContainer(context: Context) {
     private val bookIdForUri: suspend (android.net.Uri, Long?) -> Long? = { uri, bookId ->
         bookId ?: bookshelfRepository.findByFileUri(uri.toString())?.id
     }
+    // 四个文本 parser 共用的章节落库回调：落库后顺手把人物出场索引（M13.2）的重算
+    // 排到后台。重算异步进行、失败静默——人物索引只是目录面板的增强，不挡章节落库主链路。
+    private val onChaptersIndexed: suspend (Long, List<Chapter>) -> Unit = { bookId, chapters ->
+        bookshelfRepository.saveChapters(bookId, chapters)
+        parserScope.launch { refreshPersonAppearances(bookId) }
+    }
+    /**
+     * 人物出场索引（M13.2）重算：逐章读正文喂规则抽取器，结果整体覆盖落库。
+     *
+     * 只处理文本型书：漫画没有文本 parser（直接跳过）；PDF 页式章节（目录锚点
+     * charStart/charEnd 全 0，见 [applyPdfInfo]）没有字符坐标可扫，清空旧索引后返回。
+     * 整段跑在 IO、失败静默（runCatching 兜底），不影响章节落库主流程。
+     */
+    suspend fun refreshPersonAppearances(bookId: Long) = withContext(Dispatchers.IO) {
+        runCatching {
+            val book = bookshelfRepository.getBook(bookId) ?: return@withContext
+            if (book.format == BookFormat.COMIC) return@withContext
+            val chapters = bookshelfRepository.getChapters(bookId)
+            if (chapters.none { it.charEnd > it.charStart }) {
+                database.personAppearanceDao().replaceForBook(bookId, emptyList())
+                return@withContext
+            }
+            val parser = bookParsers.parserFor(book.format)
+            val content = parser.openContent(
+                Uri.parse(book.fileUri),
+                com.llzx373.foldreader.core.format.EncodingDetector.forNameOrNull(book.encoding),
+                bookId,
+            )
+            try {
+                val extractor = com.llzx373.foldreader.core.format.person.PersonNameExtractor()
+                chapters.filter { it.charEnd > it.charStart }.forEach { chapter ->
+                    extractor.feed(content.read(chapter.charStart..chapter.charEnd), chapter.charStart)
+                }
+                val appearances = extractor.result().map { mention ->
+                    com.llzx373.foldreader.core.data.db.PersonAppearanceEntity(
+                        bookId = bookId,
+                        name = mention.name,
+                        // 与 ReaderLogic.chapterIndexAt 同口径：最后一个 charStart <= offset 的章
+                        firstChapterIndex = com.llzx373.foldreader.feature.reader.chapterIndexAt(
+                            chapters,
+                            mention.firstOffset,
+                        ),
+                        firstCharOffset = mention.firstOffset,
+                        mentionCount = mention.count,
+                    )
+                }
+                database.personAppearanceDao().replaceForBook(bookId, appearances)
+            } finally {
+                (content as? java.io.Closeable)?.close()
+            }
+        }
+    }
     val txtBookParser = TxtBookParser(
         context = context,
         offsetIndexStore = offsetIndexStore,
@@ -164,9 +217,7 @@ class AppContainer(context: Context) {
             cleaned?.let { Uri.fromFile(java.io.File(it)) } ?: uri
         },
         onBookIndexed = onBookIndexed,
-        onChaptersIndexed = { bookId, chapters ->
-            bookshelfRepository.saveChapters(bookId, chapters)
-        },
+        onChaptersIndexed = onChaptersIndexed,
         chapterRules = chapterRules,
     )
     // 内部 TXT 管线（EPUB/FB2 共用）：压平文件 uri → 文件名即原书 contentHash → 反查 bookId，
@@ -195,9 +246,7 @@ class AppContainer(context: Context) {
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
         bookIdResolver = bookIdForUri,
-        onChaptersIndexed = { bookId, chapters ->
-            bookshelfRepository.saveChapters(bookId, chapters)
-        },
+        onChaptersIndexed = onChaptersIndexed,
     )
     val fb2BookParser = Fb2BookParser(
         convertedDir = convertedDir,
@@ -205,9 +254,7 @@ class AppContainer(context: Context) {
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
         bookIdResolver = bookIdForUri,
-        onChaptersIndexed = { bookId, chapters ->
-            bookshelfRepository.saveChapters(bookId, chapters)
-        },
+        onChaptersIndexed = onChaptersIndexed,
     )
     /**
      * 文本型 PDF 的「当电子书读」入口：抽正文压平后进 TXT 管线。
@@ -220,9 +267,7 @@ class AppContainer(context: Context) {
         openChannel = { uri -> UriChannels.open(context, uri) },
         displayNameOf = { uri -> UriChannels.displayName(context, uri) },
         bookIdResolver = bookIdForUri,
-        onChaptersIndexed = { bookId, chapters ->
-            bookshelfRepository.saveChapters(bookId, chapters)
-        },
+        onChaptersIndexed = onChaptersIndexed,
     )
     val bookParsers = BookParsers(
         mapOf(
