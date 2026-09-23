@@ -6,7 +6,7 @@
 [![Android](https://img.shields.io/badge/Android-13%2B%20(API%2033)-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 
-**A fully offline e-book, comic and PDF reader built for foldable phones.**
+**A local-first e-book, comic and PDF reader built for foldable phones.**
 
 > When a foldable unfolds it is not "a bigger phone" — it is an open book. The hinge is the spine; the two halves are the two pages.
 
@@ -26,7 +26,7 @@ English | [简体中文](README.md)
 - **In-page anchors** — bookmarks and annotations can point at a page position (point or rectangle), for reflowable text, comics and PDFs alike. The middle tap zone is configurable: single and double tap each bind to a chosen action.
 - **Library** — grid/list shelf, groups, auto-generated covers, batch import, built-in file browser, and automatic **same-series previous/next volume switching**.
 - **Smart cleanup for downloaded novels** — an offline, deterministic rule engine that fixes what scraped TXT files usually suffer from: mangled whitespace, trailing spaces, blank lines inside paragraphs, paragraphs broken by hard wrapping, chapter titles buried mid-line or named inconsistently, quotes split by spaces/newlines, asterisk-masked words, site promos and forum leftovers. Three presets plus 14 individual switches, a change-report preview before you commit, and "smart tidy" for books already in the library. No model, no network.
-- **Privacy** — the app declares **no Android permissions at all**, not even `INTERNET`. No accounts, no cloud sync, no telemetry.
+- **Privacy** — local-first: no accounts, no first-party cloud, no telemetry. The current build declares **no Android permissions at all** and makes no network requests. Two planned features will add `INTERNET`: AI features (bring your own API key; the app talks directly to the provider you configure) and WebDAV backup/restore (self-hosted). Until you configure one of them, the app never touches the network.
 
 ## Supported formats
 
