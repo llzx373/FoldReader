@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -46,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -55,6 +57,7 @@ import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.ai.AiProtocol
 import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.ai.gate.AiContentGate
+import com.llzx373.foldreader.core.ai.prompt.BuiltinPrompts
 import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.settings.ComicDirection
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
@@ -95,6 +98,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var aiTextFieldDialog by remember { mutableStateOf<AiTextFieldDialog?>(null) }
     var showAiApiKeyDialog by remember { mutableStateOf(false) }
     var showAiHistoryDialog by remember { mutableStateOf(false) }
+    var showBuiltinPromptsDialog by remember { mutableStateOf(false) }
     var showAiClearKeyConfirm by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
@@ -555,6 +559,11 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     modifier = Modifier.clickable { showAiHistoryDialog = true },
                 )
                 ListItem(
+                    headlineContent = { Text("内置提示词") },
+                    supportingContent = { Text("各 AI 功能发往模型的提示词全文，只读可核对") },
+                    modifier = Modifier.clickable { showBuiltinPromptsDialog = true },
+                )
+                ListItem(
                     headlineContent = { Text("清除凭据") },
                     supportingContent = { Text("删除已保存的 API 密钥") },
                     modifier = Modifier.clickable { showAiClearKeyConfirm = true },
@@ -747,6 +756,9 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             records = viewModel.outboundHistory().asReversed(),
             onDismiss = { showAiHistoryDialog = false },
         )
+    }
+    if (showBuiltinPromptsDialog) {
+        BuiltinPromptsDialog(onDismiss = { showBuiltinPromptsDialog = false })
     }
     if (showAiClearKeyConfirm) {
         AlertDialog(
@@ -1380,6 +1392,42 @@ private fun AiOutboundHistoryDialog(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** 内置提示词只读查看：逐项分区展示功能名与提示词全文，可选择复制。 */
+@Composable
+private fun BuiltinPromptsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("内置提示词") },
+        text = {
+            SelectionContainer {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    BuiltinPrompts.all.forEach { prompt ->
+                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                            Text(
+                                text = prompt.feature,
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = prompt.template,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
                     }
                 }
             }
