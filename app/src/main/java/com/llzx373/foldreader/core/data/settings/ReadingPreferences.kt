@@ -131,6 +131,8 @@ data class ReadingPreferences(
     val aiModelTranslation: String = "",
     val aiModelVision: String = "",
     val aiTargetLang: AiTargetLang = AiTargetLang.ZH_HANS,
+    /** M15：AI 章节规则生成的首次外发一次性确认；确认后不再弹。 */
+    val aiChapterRuleConfirmed: Boolean = false,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

@@ -112,6 +112,32 @@ class AppContainer(context: Context) {
         }
 
     /**
+     * AI 功能入口可见性判据：已启用 + 已配地址 + 已存 key。
+     * 只读配置与凭据，不触碰网络组件（OkHttpClient 仍只在真正调用时创建）。
+     */
+    suspend fun aiConfigured(): Boolean {
+        val prefs = settingsRepository.preferences.first()
+        return prefs.aiEnabled && prefs.aiBaseUrl.isNotBlank() && credentialStore.readKey() != null
+    }
+
+    /**
+     * 重建目录：作废偏移索引 → 清空章节 → 用最新规则重扫（此时读的是当前副本）。
+     * 书架「重建目录」与 M15「AI 章节规则生成」的选定后重扫共用这条链路。
+     */
+    suspend fun rebuildBookChapters(bookId: Long) {
+        val book = bookshelfRepository.getBook(bookId) ?: return
+        offsetIndexStore.invalidate(bookId.toString())
+        bookshelfRepository.saveChapters(bookId, emptyList())
+        val override = com.llzx373.foldreader.core.format.EncodingDetector.forNameOrNull(book.encoding)
+        val scanned = runCatching {
+            bookParsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override, bookId)
+        }.getOrDefault(emptyList())
+        bookshelfRepository.saveChapters(bookId, scanned)
+        // 章节变了人物出场索引跟着重算；失败不影响重扫本身
+        runCatching { refreshPersonAppearances(bookId) }
+    }
+
+    /**
      * 按当前设置装配 AI Provider；未启用 / 未配地址 / 未存 key 时返回 null，
      * 且整个调用链不触碰网络组件（client 只在确认有 key 后才创建）。
      */

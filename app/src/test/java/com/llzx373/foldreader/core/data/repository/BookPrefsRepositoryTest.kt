@@ -330,5 +330,6 @@ class BookPrefsRepositoryTest {
         override suspend fun setAiModelTranslation(model: String) = Unit
         override suspend fun setAiModelVision(model: String) = Unit
         override suspend fun setAiTargetLang(targetLang: AiTargetLang) = Unit
+        override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) = Unit
     }
 }

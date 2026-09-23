@@ -214,6 +214,8 @@ fun BookDetailDialog(
                         ) {
                             Text("重建目录")
                         }
+                        // M15：仅 TXT + AI 已配置时渲染（组件内部自查）
+                        ChapterRuleAiEntry(bookId)
                         if (book.format == BookFormat.TXT) {
                             val cleanDefaults by viewModel.cleanDefaults.collectAsState()
                             val cleanPreview by viewModel.cleanPreview.collectAsState()

@@ -73,4 +73,5 @@ interface SettingsRepository {
     suspend fun setAiModelTranslation(model: String)
     suspend fun setAiModelVision(model: String)
     suspend fun setAiTargetLang(targetLang: AiTargetLang)
+    suspend fun setAiChapterRuleConfirmed(confirmed: Boolean)
 }

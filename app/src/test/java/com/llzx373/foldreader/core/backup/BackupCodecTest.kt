@@ -548,6 +548,9 @@ class BackupCodecTest {
         override suspend fun setAiTargetLang(targetLang: AiTargetLang) =
             update { copy(aiTargetLang = targetLang) }
 
+        override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) =
+            update { copy(aiChapterRuleConfirmed = confirmed) }
+
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()
         }

@@ -68,6 +68,7 @@ import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.feature.bookshelf.ReaderChapterRuleAiEntry
 import com.llzx373.foldreader.ui.EncodingPickerDialog
 import kotlinx.coroutines.launch
 
@@ -599,11 +600,15 @@ fun ChapterListDialog(
                         }
                     }
                 } else if (chapters.size <= 1) {
-                    Text(
-                        text = "未识别到章节，可用进度条跳转",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 16.dp),
-                    )
+                    Column {
+                        Text(
+                            text = "未识别到章节，可用进度条跳转",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                        // M15：仅 TXT + AI 已配置时渲染（组件内部自查，produceState 缓存判据）
+                        ReaderChapterRuleAiEntry()
+                    }
                 } else {
                     val listState = rememberLazyListState()
                     LaunchedEffect(Unit) {

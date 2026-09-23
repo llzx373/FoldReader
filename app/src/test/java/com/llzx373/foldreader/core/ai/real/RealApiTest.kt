@@ -10,7 +10,6 @@ import java.awt.Color
 import java.awt.Font
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.util.Base64
 import javax.imageio.ImageIO
 import kotlinx.coroutines.flow.toList
@@ -28,41 +27,11 @@ import org.junit.Test
 class RealApiTest {
 
     companion object {
-        private val props: Map<String, String> by lazy { loadConfig() }
+        private val props: Map<String, String> get() = RealApiConfig.props
 
-        private val apiKey: String get() = props["AI_API_KEY"].orEmpty()
-        private val baseUrl: String get() = props["AI_BASE_URL"].orEmpty()
-        private val protocol: AiProtocol
-            get() = when (props["AI_PROTOCOL"].orEmpty().ifBlank { "openai-chat" }) {
-                "openai-responses" -> AiProtocol.OPENAI_RESPONSES
-                "anthropic" -> AiProtocol.ANTHROPIC
-                else -> AiProtocol.OPENAI_CHAT
-            }
-
-        /** 环境变量优先；否则读仓库根 .env（单测工作目录是 app/ 模块目录）。 */
-        private fun loadConfig(): Map<String, String> {
-            val file = sequenceOf(
-                File("../.env"),
-                File("").absoluteFile.parentFile?.resolve(".env"),
-            ).filterNotNull().firstOrNull { it.isFile }
-
-            val fromFile = file?.readLines().orEmpty()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("#") && '=' in it }
-                .associate { line ->
-                    val key = line.substringBefore('=').trim()
-                    key to line.substringAfter('=').trim()
-                }
-            val keys = setOf(
-                "AI_PROTOCOL", "AI_BASE_URL", "AI_API_KEY",
-                "AI_MODEL_GENERAL", "AI_MODEL_TRANSLATION", "AI_MODEL_VISION",
-            )
-            return keys.associateWith { key ->
-                System.getenv(key)?.takeIf { it.isNotBlank() } ?: fromFile[key].orEmpty()
-            }.also {
-                if (file != null) println("[RealApiTest] 配置文件：${file.absoluteFile.normalize()}")
-            }
-        }
+        private val apiKey: String get() = RealApiConfig.apiKey
+        private val baseUrl: String get() = RealApiConfig.baseUrl
+        private val protocol: AiProtocol get() = RealApiConfig.protocol
     }
 
     @Test(timeout = 180_000)

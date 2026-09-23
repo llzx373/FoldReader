@@ -13,10 +13,8 @@ import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
-import com.llzx373.foldreader.core.format.BookParsers
 import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.FormatDetector
-import com.llzx373.foldreader.core.format.OffsetIndexStore
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.clean.CleanReport
@@ -91,15 +89,12 @@ class BookshelfViewModel(
     private val batchImport: BatchImportUseCase,
     private val bookshelfRepository: BookshelfRepository,
     private val settingsRepository: SettingsRepository,
-    private val parsers: BookParsers,
-    private val offsetIndexStore: OffsetIndexStore,
     private val comicImport: ComicImportUseCase,
     private val reclean: RecleanBookUseCase,
     private val cleanProfileFactory: CleanProfileFactory,
-    /** 人物出场索引（M13.2）重算入口；重扫章节完成后触发，失败静默（实现内部已兜底）。 */
-    private val refreshPersonAppearances: suspend (Long) -> Unit = {},
+    /** 重建目录（作废索引 → 重扫 → 落库），实现挂在容器上，与 M15 AI 章节规则共用。 */
+    private val rebuildBookChapters: suspend (Long) -> Unit,
 ) : ViewModel() {
-
     val books: StateFlow<List<BookWithProgress>> = combine(
         bookshelfRepository.observeBookshelfWithProgress(),
         settingsRepository.preferences
@@ -324,10 +319,10 @@ class BookshelfViewModel(
                     if (!outcome.changed) {
                         "按当前设置没有需要改动的内容"
                     } else if (cleanLevel == null) {
-                        rebuildChaptersNow(bookId)
+                        rebuildBookChapters(bookId)
                         "已撤销清理，阅读器恢复读取原文件；目录已重建"
                     } else {
-                        rebuildChaptersNow(bookId)
+                        rebuildBookChapters(bookId)
                         "智能整理完成：${outcome.report.summary()}。目录已重建，进度与书签位置可能变化"
                     }
 
@@ -427,21 +422,7 @@ class BookshelfViewModel(
     }
 
     fun rebuildChapters(bookId: Long) {
-        viewModelScope.launch { rebuildChaptersNow(bookId) }
-    }
-
-    /** 重建目录的实体。作废偏移索引 → 清空章节 → 用最新规则重扫（此时读的是当前副本）。 */
-    private suspend fun rebuildChaptersNow(bookId: Long) {
-        val book = bookshelfRepository.getBook(bookId) ?: return
-        offsetIndexStore.invalidate(bookId.toString())
-        bookshelfRepository.saveChapters(bookId, emptyList())
-        val override = EncodingDetector.forNameOrNull(book.encoding)
-        val scanned = runCatching {
-            parsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override, bookId)
-        }.getOrDefault(emptyList())
-        bookshelfRepository.saveChapters(bookId, scanned)
-        // 章节变了人物出场索引跟着重算；失败不影响重扫本身
-        runCatching { refreshPersonAppearances(bookId) }
+        viewModelScope.launch { rebuildBookChapters(bookId) }
     }
 
     /**
@@ -480,12 +461,10 @@ class BookshelfViewModel(
                     batchImport = container.batchImportUseCase,
                     bookshelfRepository = container.bookshelfRepository,
                     settingsRepository = container.settingsRepository,
-                    parsers = container.bookParsers,
-                    offsetIndexStore = container.offsetIndexStore,
                     comicImport = container.comicImportUseCase,
                     reclean = container.recleanBookUseCase,
                     cleanProfileFactory = container.cleanProfileFactory,
-                    refreshPersonAppearances = container::refreshPersonAppearances,
+                    rebuildBookChapters = container::rebuildBookChapters,
                 )
             }
         }

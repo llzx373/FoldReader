@@ -78,6 +78,7 @@ class SettingsRepositoryImpl(
         val AI_MODEL_TRANSLATION = stringPreferencesKey("ai_model_translation")
         val AI_MODEL_VISION = stringPreferencesKey("ai_model_vision")
         val AI_TARGET_LANG = stringPreferencesKey("ai_target_lang")
+        val AI_CHAPTER_RULE_CONFIRMED = booleanPreferencesKey("ai_chapter_rule_confirmed")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -153,6 +154,8 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiModelTranslation,
                 aiModelVision = prefs[Keys.AI_MODEL_VISION] ?: defaults.aiModelVision,
                 aiTargetLang = enumOrDefault(prefs[Keys.AI_TARGET_LANG], defaults.aiTargetLang),
+                aiChapterRuleConfirmed = prefs[Keys.AI_CHAPTER_RULE_CONFIRMED]
+                    ?: defaults.aiChapterRuleConfirmed,
             )
         }
 
@@ -409,5 +412,9 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiTargetLang(targetLang: AiTargetLang) {
         context.readingPreferencesStore.edit { it[Keys.AI_TARGET_LANG] = targetLang.name }
+    }
+
+    override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_CHAPTER_RULE_CONFIRMED] = confirmed }
     }
 }
