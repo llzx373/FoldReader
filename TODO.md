@@ -56,7 +56,7 @@
 - [x] `anthropic/AnthropicProvider`（R1）：同上，Messages 协议事件格式
 - [x] MockWebServer 测试网：三协议 SSE 流端到端用例（正常增量/粘包/中途断流/429 限流/非 200 错误体 + 图片块请求体断言）
 - [x] 统一错误模型：超时/限流/额度/网络不可达 → 可读错误文案
-- [ ] `core/ai/prompt/`：提示词模板与响应解析（纯 JVM，解析单测覆盖畸形响应）——**随 M15 首个消费功能落地**
+- [x] `core/ai/prompt/`：提示词模板与响应解析（纯 JVM，解析单测覆盖畸形响应）——已随 M15 落地（章节规则生成提示词）
 - [x] `android/CredentialStore`：Keystore 加密存取 key（AES/GCM，KeyStore 惰性获取）；不进备份（backup_rules/data_extraction_rules 显式 exclude）、不写日志
 - [x] `gate/AiContentGate`：外发历史记录与查询（时间/功能/数据范围/估算 token，500 条轮转）；**确认弹窗随 M15 首个外发功能接入**
 - [x] `AppContainer` 惰性装配：未配置 key 不创建任何网络组件（OkHttpClient 亦不创建）
