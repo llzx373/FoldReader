@@ -7,6 +7,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.llzx373.foldreader.AppContainer
+import com.llzx373.foldreader.core.ai.AiException
+import com.llzx373.foldreader.core.ai.AiMessage
+import com.llzx373.foldreader.core.ai.AiProvider
+import com.llzx373.foldreader.core.ai.AiRole
+import com.llzx373.foldreader.core.ai.AiTargetLang
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.android.CredentialStore
+import com.llzx373.foldreader.core.ai.gate.AiContentGate
 import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.repository.BookPrefsRepository
 import com.llzx373.foldreader.core.data.settings.ComicDirection
@@ -20,12 +28,14 @@ import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.reader.FontManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
@@ -33,6 +43,9 @@ class SettingsViewModel(
     private val bookshelfRepository: com.llzx373.foldreader.core.data.repository.BookshelfRepository,
     private val backupManager: BackupManager,
     private val bookPrefsRepository: BookPrefsRepository,
+    private val credentialStore: CredentialStore,
+    private val aiContentGate: AiContentGate,
+    private val aiProvider: suspend () -> AiProvider?,
 ) : ViewModel() {
 
     val preferences: StateFlow<ReadingPreferences> = settingsRepository.preferences
@@ -178,6 +191,71 @@ class SettingsViewModel(
     fun updateCleanToggle(key: String, enabled: Boolean) =
         launch { settingsRepository.setCleanToggle(key, enabled) }
 
+    // ---- AI 服务 ----
+
+    fun updateAiEnabled(enabled: Boolean) = launch { settingsRepository.setAiEnabled(enabled) }
+    fun updateAiProtocol(protocol: AiProtocol) = launch { settingsRepository.setAiProtocol(protocol) }
+    fun updateAiBaseUrl(baseUrl: String) = launch { settingsRepository.setAiBaseUrl(baseUrl.trim()) }
+    fun updateAiModelGeneral(model: String) = launch { settingsRepository.setAiModelGeneral(model.trim()) }
+    fun updateAiModelTranslation(model: String) =
+        launch { settingsRepository.setAiModelTranslation(model.trim()) }
+    fun updateAiModelVision(model: String) = launch { settingsRepository.setAiModelVision(model.trim()) }
+    fun updateAiTargetLang(targetLang: AiTargetLang) =
+        launch { settingsRepository.setAiTargetLang(targetLang) }
+
+    private val _apiKeyConfigured = MutableStateFlow(credentialStore.readKey() != null)
+    val apiKeyConfigured: StateFlow<Boolean> = _apiKeyConfigured.asStateFlow()
+
+    fun saveApiKey(key: String) {
+        credentialStore.saveKey(key)
+        _apiKeyConfigured.value = true
+    }
+
+    fun clearApiKey() {
+        credentialStore.clear()
+        _apiKeyConfigured.value = false
+    }
+
+    /** 测试连接的状态；key 永远不进入这里（也不进日志）。 */
+    sealed interface AiTestState {
+        data object Running : AiTestState
+        data class Success(val reply: String) : AiTestState
+        data class Failure(val message: String) : AiTestState
+    }
+
+    private val _aiTestState = MutableStateFlow<AiTestState?>(null)
+    val aiTestState: StateFlow<AiTestState?> = _aiTestState.asStateFlow()
+
+    fun testConnection() {
+        launch {
+            _aiTestState.value = AiTestState.Running
+            val provider = aiProvider()
+            if (provider == null) {
+                _aiTestState.value = AiTestState.Failure("请完成协议、地址与 API key 配置")
+                return@launch
+            }
+            try {
+                val reply = StringBuilder()
+                withTimeout(AI_TEST_TIMEOUT_MS) {
+                    provider.chat(
+                        listOf(AiMessage.of(AiRole.USER, "用三个字回答：1+1=?")),
+                        preferences.value.aiModelGeneral,
+                    ).collect { reply.append(it) }
+                }
+                _aiTestState.value = AiTestState.Success(reply.toString().take(50))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AiException) {
+                _aiTestState.value = AiTestState.Failure(e.message ?: "调用失败")
+            } catch (e: Exception) {
+                _aiTestState.value = AiTestState.Failure("网络不可达或响应异常")
+            }
+        }
+    }
+
+    /** 出站历史直接读台账（最新在前由界面负责反转）。 */
+    fun outboundHistory(): List<AiContentGate.OutboundRecord> = aiContentGate.history()
+
     fun importFont(uri: Uri, displayName: String?, onResult: (Boolean) -> Unit) {
         launch {
             val key = fontManager.import(uri, displayName)
@@ -215,8 +293,12 @@ class SettingsViewModel(
                     bookshelfRepository = container.bookshelfRepository,
                     backupManager = container.backupManager,
                     bookPrefsRepository = container.bookPrefsRepository,
+                    credentialStore = container.credentialStore,
+                    aiContentGate = container.aiContentGate,
+                    aiProvider = container::aiProvider,
                 )
             }
         }
+        private const val AI_TEST_TIMEOUT_MS = 90_000L
     }
 }

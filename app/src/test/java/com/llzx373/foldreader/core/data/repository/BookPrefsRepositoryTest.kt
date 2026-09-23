@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.data.repository
 
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.data.db.BookPrefsDao
 import com.llzx373.foldreader.core.data.db.BookPrefsEntity
 import com.llzx373.foldreader.core.data.db.toBookPrefsEntity
@@ -321,5 +323,12 @@ class BookPrefsRepositoryTest {
         override suspend fun setComicSpreadAutoDetect(enabled: Boolean) = Unit
         override suspend fun setComicFitMode(mode: ComicFitMode) = Unit
         override suspend fun setComicScrollGapDp(gapDp: Int) = Unit
+        override suspend fun setAiEnabled(enabled: Boolean) = Unit
+        override suspend fun setAiProtocol(protocol: AiProtocol) = Unit
+        override suspend fun setAiBaseUrl(baseUrl: String) = Unit
+        override suspend fun setAiModelGeneral(model: String) = Unit
+        override suspend fun setAiModelTranslation(model: String) = Unit
+        override suspend fun setAiModelVision(model: String) = Unit
+        override suspend fun setAiTargetLang(targetLang: AiTargetLang) = Unit
     }
 }

@@ -53,16 +53,21 @@ FoldReader 的 AI 功能统一遵循一个形态：
 
 ### 2.1 模块结构
 
-新增 `core/ai/`，保持纯逻辑可测（参照 `clean/` 整包纯 JVM 的约束，prompt 构造与结果解析不引用 `android.*`，Android 依赖收在 `core/ai/android/`）：
+新增 `core/ai/`，保持纯逻辑可测（参照 `clean/` 整包纯 JVM 的约束，prompt 构造与结果解析不引用 `android.*`，Android 依赖收在 `core/ai/android/`；M14 已落地的实际结构）：
 
 ```
 core/ai/
-├── AiProvider.kt              # 接口：chat(messages): Flow<String>（SSE 流式，R2）
+├── AiProvider.kt              # 接口：chat(messages, model): Flow<String>（SSE 流式，R2）
+├── AiConfig.kt                # AiProtocol（三协议，R1）/ AiTargetLang（R4）/ AiConfig
+├── AiMessage.kt               # 内容块消息模型：Text / Image（图片仅允许 USER 消息）
+├── AiError.kt                 # 错误模型：超时/限流/额度/认证/网络不可达 → 可读文案
+├── AiProviderFactory.kt       # 按配置创建 Provider；defaultClient 统一超时策略
+├── sse/SseParser.kt           # SSE 行流解析（纯 JVM，单测覆盖粘包/CRLF/多行 data）
 ├── openai/ChatCompletionsProvider.kt   # OpenAI Chat Completions（R1）
 ├── openai/ResponsesProvider.kt         # OpenAI Responses（R1）
 ├── anthropic/AnthropicProvider.kt      # Anthropic Messages（R1）
-├── prompt/                    # 各功能的系统提示词模板与响应解析（纯 JVM，单测覆盖）
-├── gate/AiContentGate.kt      # 外发确认与记录（见 2.3）
+├── prompt/                    # 各功能的系统提示词模板与响应解析（纯 JVM，单测覆盖；M15 起随功能落地）
+├── gate/AiContentGate.kt      # 外发记录与查询（见 2.3；确认弹窗随 M15 首个消费功能接入）
 └── android/
     ├── CredentialStore.kt     # Keystore 加密的 key 存取
     └── ModelManager.kt        # OCR 模型导入/校验/删除（M21 用）
@@ -91,15 +96,17 @@ core/ai/
 
 | 依赖 | 体积（R8 后） | 用途 | 结论 |
 | --- | --- | --- | --- |
-| OkHttp（+okio） | ~1MB | HTTP 传输与 SSE 流式 | **引入（M14，R2 已拍板）**；为将来 WebDAV 预留同一网络栈 |
-| MockWebServer | test 依赖，不进 APK | 三协议 SSE 端到端单测 | **引入（M14，R2）** |
-| kotlinx.serialization | ~1MB | 请求/响应 JSON | 引入（M14） |
+| OkHttp（+okio） 4.12.0 | ~1MB | HTTP 传输与 SSE 流式 | **引入（M14，R2 已拍板，已落地）**；为将来 WebDAV 预留同一网络栈 |
+| MockWebServer 4.12.0 | test 依赖，不进 APK | 三协议 SSE 端到端单测 | **引入（M14，R2，已落地）** |
+| kotlinx.serialization 1.8.1 | ~1MB | 请求/响应 JSON | 引入（M14，已落地） |
 | onnxruntime-mobile | ~10MB | OCR 推理 | 引入（M21） |
 | OCR 模型（det/rec/气泡检测） | ~40MB | 文字检测识别 | **不作依赖**，用户自行下载后导入（R7） |
 
 依赖纪律：OkHttp 的引入是逐案评审的结果，不构成放宽 M5.12 门槛的先例；后续新依赖仍按"体积、维护成本与收益写进方案"的标准逐案评估。
 
 ### 2.5 提示词管理
+
+> **M14 实施注**：「内置提示词」查看入口推迟至 M15——M14 尚无任何内置提示词，设置页只会是空壳；首个提示词随章节规则生成（M15）落地时同步补查看入口。
 
 - 所有内置系统提示词集中在 `core/ai/prompt/`，按功能分文件（纯 JVM，响应解析随单测锁定输出契约）；
 - 设置页「内置提示词」只读查看全文（2.2）；
@@ -334,7 +341,8 @@ OCR 缓存与翻译结果分文件（参考项目做法）：换模型/改提示
 | 元数据（含 metaSource） | 进 |
 | 自定义章节规则 / 清洗配方 | 进（现有机制已覆盖） |
 | 译本、漫画覆盖层、OCR 缓存 | 不进（可重新生成，体积大） |
-| 凭据 | 绝不进 |
+| AI 服务配置（协议/地址/模型名/目标语言） | 不进（M14 实施决议：避免私有端点地址随备份上云；换机重新配置成本低） |
+| 凭据 | 绝不进（Keystore 密文另在 backup_rules / data_extraction_rules 显式 exclude） |
 
 ---
 
@@ -356,7 +364,7 @@ OCR 缓存与翻译结果分文件（参考项目做法）：换模型/改提示
 | 里程碑 | 内容 | 依赖 | 验收要点 |
 | --- | --- | --- | --- |
 | M13 | TTS 听书 + 人物出场索引 | 无 | 朗读与翻页联动、锁屏可控；人物页签可跳转 |
-| M14 | AI 底座（core/ai 三协议 + OkHttp SSE + MockWebServer 测试网 + 设置页含提示词查看与目标语言 + Keystore + 外发门 + 文档同步） | 无 | 未配置抓包零请求；三种协议测试连接均通过；MockWebServer 用例全绿 |
+| M14 | AI 底座（core/ai 三协议 + OkHttp SSE + MockWebServer 测试网 + 设置页含目标语言 + Keystore + 外发门 + 文档同步） | 无 | **已落地**（提示词查看随 M15 首个内置提示词一起落，见 2.5 注）；未配置抓包零请求；三种协议测试连接均通过；MockWebServer 用例全绿 |
 | M15 | AI 章节规则生成 | M14 | 失败 TXT 切出可用目录 |
 | M16 | AI 清洗配方推荐 | M14 | 清洗测试集全绿；配方走预览报告确认 |
 | M17 | 元数据补全 + 智能分组 | M14 | DB 迁移；用户编辑不被覆盖 |

@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.plugin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
 }
@@ -99,6 +100,17 @@ android {
     }
 }
 
+// Robolectric 没有 AndroidKeyStore 实现（robolectric/robolectric#1518），
+// 而 CredentialStore 在 AppContainer 构建期就会 KeyStore.getInstance("AndroidKeyStore")。
+// 给测试 JVM 追加一个内存版 Provider（见 src/test/resources 下文件头部的编号说明），
+// 否则所有走 Application 的 Robolectric 用例都会在 onCreate 崩掉。
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "-Djava.security.properties=" +
+            file("src/test/resources/fake-keystore.java.security").toURI().toURL(),
+    )
+}
+
 // 注意：本项目走 AGP 9 的内置 Kotlin 编译（build/intermediates/built_in_kotlinc），
 // 实测 `composeCompiler {}` 的 stabilityConfigurationFile / metricsDestination 都不会
 // 接到编译任务上（改配置文件不会让 compileDebugKotlin 失效、指标目录也不生成）。
@@ -152,12 +164,17 @@ dependencies {
     implementation(libs.androidx.pdf.core)
     implementation(libs.androidx.pdf.document.service)
     implementation(libs.pdfbox.android)
+    // AI 底座（M14）：OkHttp 传输与 SSE 流式 + 请求/响应 JSON
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
     // JVM 单测用的 XmlPullParser 实现（生产用 android.util.Xml）
     testImplementation(libs.kxml2)
     // 需要真实 Android API 的单测（Paint 字宽 / BitmapFactory / Room 迁移 / Compose 重组）
     testImplementation(libs.robolectric)
+    // AI 底座（M14）：三协议 SSE 流的端到端 JVM 锁定，不进 APK
+    testImplementation(libs.mockwebserver)
     // 确定性驱动协程（后台队列/节流这类异步行为的单测）
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -92,6 +92,41 @@ class AppContainer(context: Context) {
         sourceDir = sourceDir,
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
+    /** AI API key 加密存储（AndroidKeyStore AES/GCM）；明文不出存储边界。 */
+    val credentialStore = com.llzx373.foldreader.core.ai.android.CredentialStore(appContext)
+    /** AI 出站内容台账：设置页「外发历史」展示的记录来源。 */
+    val aiContentGate = com.llzx373.foldreader.core.ai.gate.AiContentGate(
+        File(appContext.filesDir, "ai_outbound_history.json"),
+    )
+    // v2.6 约束：未配置 API key 时不创建任何网络组件。
+    // client 惰性单例、进程内共享；Provider 廉价，每次按当前配置新建。
+    @Volatile
+    private var aiHttpClient: okhttp3.OkHttpClient? = null
+
+    private fun sharedAiHttpClient(): okhttp3.OkHttpClient =
+        aiHttpClient ?: synchronized(this) {
+            aiHttpClient ?: com.llzx373.foldreader.core.ai.AiProviderFactory
+                .defaultClient(timeoutSeconds = 60)
+                .also { aiHttpClient = it }
+        }
+
+    /**
+     * 按当前设置装配 AI Provider；未启用 / 未配地址 / 未存 key 时返回 null，
+     * 且整个调用链不触碰网络组件（client 只在确认有 key 后才创建）。
+     */
+    suspend fun aiProvider(): com.llzx373.foldreader.core.ai.AiProvider? {
+        val prefs = settingsRepository.preferences.first()
+        if (!prefs.aiEnabled || prefs.aiBaseUrl.isBlank()) return null
+        val key = credentialStore.readKey() ?: return null
+        return com.llzx373.foldreader.core.ai.AiProviderFactory.create(
+            com.llzx373.foldreader.core.ai.AiConfig(
+                protocol = prefs.aiProtocol,
+                baseUrl = prefs.aiBaseUrl,
+                apiKey = key,
+            ),
+            sharedAiHttpClient(),
+        )
+    }
     /** 清洗配方组装：导入对话框、浏览打开、批量导入共用同一份规则。 */
     val cleanProfileFactory = com.llzx373.foldreader.feature.importer.CleanProfileFactory(settingsRepository)
     val fileBrowserRootsStore = FileBrowserRootsStore(context)

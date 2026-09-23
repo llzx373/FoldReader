@@ -1,6 +1,6 @@
 # FoldReader 开发任务清单（TODO）
 
-> 依据《docs/AI功能需求与实施.md》v1.3 拆解；网络政策见《docs/需求与设计说明书.md》附录 v2.6。
+> 依据《docs/AI功能需求与实施.md》v1.4 拆解；网络政策见《docs/需求与设计说明书.md》附录 v2.6。
 > 旧版任务清单（M1–M12，全部完成及历史评估记录）已归档至 `docs/TODO-归档-v1.md`。
 > 执行规则：按里程碑顺序推进（标注"可并行"的除外）；每个任务完成即勾选 `[x]`；每完成一个里程碑必须达到对应"验收标准"、编译通过（`./gradlew :app:assembleDebug`）且单元测试全绿（`./gradlew :app:testDebugUnitTest`）后再进入下一个。
 
@@ -42,34 +42,35 @@
 
 ---
 
-## M14 AI 底座（一切 AI 功能的前置）
+## M14 AI 底座（一切 AI 功能的前置）✅ 已完成（2026-09-23）
 
-**验收标准**：未配置 key 时抓包零请求、无 AI 入口；三种协议「测试连接」均通过；MockWebServer 用例全绿；设置页可查看内置提示词全文。
+**验收标准**：未配置 key 时抓包零请求、无 AI 入口；三种协议「测试连接」均通过；MockWebServer 用例全绿；~~设置页可查看内置提示词全文~~（推迟至 M15：M14 无任何内置提示词，随首个提示词落地查看入口）。
+**验收记录**：844 单测全绿（46 个新增，含 MockWebServer 三协议套件）；`.env` 真实 API 测试命中 DeepSeek（文本流式 + 图片识别双路径）；`assembleRelease`（R8）通过。
 
 ### 14.1 core/ai 模块
-- [ ] 引入依赖：OkHttp（+okio，主依赖）与 MockWebServer（test 依赖）；`proguard-rules.pro` 校验 consumer rules（R2）
-- [ ] `AiProvider` 接口：`chat(messages): Flow<String>`（流式）
-- [ ] 单例 `OkHttpClient`：超时/连接池统一策略；协程取消时正确回收 socket
-- [ ] `openai/ChatCompletionsProvider`（R1）：请求构造 + SSE 事件→文本增量映射
-- [ ] `openai/ResponsesProvider`（R1）：同上，Responses 协议事件格式
-- [ ] `anthropic/AnthropicProvider`（R1）：同上，Messages 协议事件格式
-- [ ] MockWebServer 测试网：三协议 SSE 流端到端用例（正常增量/粘包/中途断流/429 限流/非 200 错误体）
-- [ ] 统一错误模型：超时/限流/额度/网络不可达 → 可读错误文案
-- [ ] `core/ai/prompt/`：提示词模板与响应解析（纯 JVM，解析单测覆盖畸形响应）
-- [ ] `android/CredentialStore`：Keystore 加密存取 key；不进备份、不写日志（沿用 PDF 密码规则）
-- [ ] `gate/AiContentGate`：外发确认流程 + 外发历史记录（时间/书籍/数据范围/估算 token）
-- [ ] `AppContainer` 惰性装配：未配置 key 不创建任何网络组件（OkHttpClient 亦不创建）
+- [x] 引入依赖：OkHttp 4.12.0（+okio，主依赖）与 MockWebServer（test 依赖）、kotlinx.serialization 1.8.1；release 构建验证 consumer rules（R2）
+- [x] `AiProvider` 接口：`chat(messages, model): Flow<String>`（流式）；消息模型含 Text/Image 内容块（图片仅 USER 消息，为 M23 视觉 OCR 预留）
+- [x] 单例 `OkHttpClient`：惰性创建、超时统一策略；协程取消时断开连接回收 socket
+- [x] `openai/ChatCompletionsProvider`（R1）：请求构造 + SSE 事件→文本增量映射
+- [x] `openai/ResponsesProvider`（R1）：同上，Responses 协议事件格式
+- [x] `anthropic/AnthropicProvider`（R1）：同上，Messages 协议事件格式
+- [x] MockWebServer 测试网：三协议 SSE 流端到端用例（正常增量/粘包/中途断流/429 限流/非 200 错误体 + 图片块请求体断言）
+- [x] 统一错误模型：超时/限流/额度/网络不可达 → 可读错误文案
+- [ ] `core/ai/prompt/`：提示词模板与响应解析（纯 JVM，解析单测覆盖畸形响应）——**随 M15 首个消费功能落地**
+- [x] `android/CredentialStore`：Keystore 加密存取 key（AES/GCM，KeyStore 惰性获取）；不进备份（backup_rules/data_extraction_rules 显式 exclude）、不写日志
+- [x] `gate/AiContentGate`：外发历史记录与查询（时间/功能/数据范围/估算 token，500 条轮转）；**确认弹窗随 M15 首个外发功能接入**
+- [x] `AppContainer` 惰性装配：未配置 key 不创建任何网络组件（OkHttpClient 亦不创建）
 
 ### 14.2 设置页「AI 服务」
-- [ ] 总开关（默认关）+ 协议预设（OpenAI Chat / OpenAI Responses / Anthropic）+ 服务商地址预设 + base URL + 通用模型 + 翻译模型（R3）+ key + 测试连接
-- [ ] 默认目标语言（R4：简中/繁中/英文/日文）
-- [ ] 「内置提示词」只读查看（按功能分：章节规则/清洗配方/元数据/文本翻译/漫画翻译）
-- [ ] 「外发历史」列表 + 「清除全部 AI 数据」+「清除凭据」
-- [ ] 未配置完成时全书 AI 入口不显示（界面零变化）
+- [x] 总开关（默认关）+ 协议预设（OpenAI Chat / OpenAI Responses / Anthropic）+ 服务商地址预设（DeepSeek/OpenAI/Anthropic/通义/自定义）+ base URL + 通用/翻译/视觉模型 + key + 测试连接
+- [x] 默认目标语言（R4：简中/繁中/英文/日文）
+- [ ] 「内置提示词」只读查看——**推迟至 M15**（同 14.1 prompt/）
+- [x] 「外发历史」列表 + 「清除凭据」；「清除全部 AI 数据」随 M15+ 的数据产物落地
+- [x] 未配置完成时全书 AI 入口不显示（M14 尚无消费功能入口，天然满足）
 
 ### 14.3 合规与文档（v2.6 约束 5）
-- [ ] Manifest 增加 `INTERNET`
-- [ ] 同一提交内：README / README_EN / 应用内隐私说明改写
+- [x] Manifest 增加 `INTERNET`
+- [x] 同一提交内：README / README_EN / 应用内「关于 AI」说明改写
 
 ---
 

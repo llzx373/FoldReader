@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.data.settings
 
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 
@@ -121,6 +123,14 @@ data class ReadingPreferences(
      * 所以来回切换不会把位置算错——切回去还是各自上次停的地方。
      */
     val pdfReadingMode: PdfReadingMode? = null,
+    /** 以下为 AI 功能（M14）设置；API Key 不走这里，由 CredentialStore 加密托管。 */
+    val aiEnabled: Boolean = false,
+    val aiProtocol: AiProtocol = AiProtocol.OPENAI_CHAT,
+    val aiBaseUrl: String = "",
+    val aiModelGeneral: String = "",
+    val aiModelTranslation: String = "",
+    val aiModelVision: String = "",
+    val aiTargetLang: AiTargetLang = AiTargetLang.ZH_HANS,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

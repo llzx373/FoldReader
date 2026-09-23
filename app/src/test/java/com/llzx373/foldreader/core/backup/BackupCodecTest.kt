@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.backup
 
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
@@ -524,6 +526,27 @@ class BackupCodecTest {
 
         override suspend fun setComicScrollGapDp(gapDp: Int) =
             update { copy(comicScrollGapDp = gapDp) }
+
+        override suspend fun setAiEnabled(enabled: Boolean) =
+            update { copy(aiEnabled = enabled) }
+
+        override suspend fun setAiProtocol(protocol: AiProtocol) =
+            update { copy(aiProtocol = protocol) }
+
+        override suspend fun setAiBaseUrl(baseUrl: String) =
+            update { copy(aiBaseUrl = baseUrl) }
+
+        override suspend fun setAiModelGeneral(model: String) =
+            update { copy(aiModelGeneral = model) }
+
+        override suspend fun setAiModelTranslation(model: String) =
+            update { copy(aiModelTranslation = model) }
+
+        override suspend fun setAiModelVision(model: String) =
+            update { copy(aiModelVision = model) }
+
+        override suspend fun setAiTargetLang(targetLang: AiTargetLang) =
+            update { copy(aiTargetLang = targetLang) }
 
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()

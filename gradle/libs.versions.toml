@@ -37,6 +37,9 @@ androidxPdf = "1.0.0-beta01"
 pdfboxAndroid = "2.0.27.0"
 # JVM 单测里的 Android API（Paint / BitmapFactory / SQLite / Compose UI）
 robolectric = "4.17"
+# AI 底座（M14）：OkHttp 传输与 SSE 流式；MockWebServer 仅为 test 依赖
+okhttp = "4.12.0"
+kotlinxSerializationJson = "1.8.1"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
 # tools/cleaner 的 material3。CMP 1.12.0 弃用了 compose.material3 访问器，
@@ -88,6 +91,10 @@ androidx-pdf-document-service = { group = "androidx.pdf", name = "pdf-document-s
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+# AI 底座（M14）
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 # 桌面清理工具（tools/cleaner）
 compose-material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "composeMaterial3" }
 
@@ -95,6 +102,7 @@ compose-material3 = { group = "org.jetbrains.compose.material3", name = "materia
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }

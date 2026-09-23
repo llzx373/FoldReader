@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
@@ -69,6 +71,13 @@ class SettingsRepositoryImpl(
         val COMIC_SPREAD_AUTO_DETECT = booleanPreferencesKey("comic_spread_auto_detect")
         val COMIC_FIT_MODE = stringPreferencesKey("comic_fit_mode")
         val COMIC_SCROLL_GAP_DP = intPreferencesKey("comic_scroll_gap_dp")
+        val AI_ENABLED = booleanPreferencesKey("ai_enabled")
+        val AI_PROTOCOL = stringPreferencesKey("ai_protocol")
+        val AI_BASE_URL = stringPreferencesKey("ai_base_url")
+        val AI_MODEL_GENERAL = stringPreferencesKey("ai_model_general")
+        val AI_MODEL_TRANSLATION = stringPreferencesKey("ai_model_translation")
+        val AI_MODEL_VISION = stringPreferencesKey("ai_model_vision")
+        val AI_TARGET_LANG = stringPreferencesKey("ai_target_lang")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -136,6 +145,14 @@ class SettingsRepositoryImpl(
                     ?: defaults.comicSpreadAutoDetect,
                 comicFitMode = enumOrDefault(prefs[Keys.COMIC_FIT_MODE], defaults.comicFitMode),
                 comicScrollGapDp = prefs[Keys.COMIC_SCROLL_GAP_DP] ?: defaults.comicScrollGapDp,
+                aiEnabled = prefs[Keys.AI_ENABLED] ?: defaults.aiEnabled,
+                aiProtocol = enumOrDefault(prefs[Keys.AI_PROTOCOL], defaults.aiProtocol),
+                aiBaseUrl = prefs[Keys.AI_BASE_URL] ?: defaults.aiBaseUrl,
+                aiModelGeneral = prefs[Keys.AI_MODEL_GENERAL] ?: defaults.aiModelGeneral,
+                aiModelTranslation = prefs[Keys.AI_MODEL_TRANSLATION]
+                    ?: defaults.aiModelTranslation,
+                aiModelVision = prefs[Keys.AI_MODEL_VISION] ?: defaults.aiModelVision,
+                aiTargetLang = enumOrDefault(prefs[Keys.AI_TARGET_LANG], defaults.aiTargetLang),
             )
         }
 
@@ -364,5 +381,33 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit {
             it[Keys.COMIC_SCROLL_GAP_DP] = gapDp.coerceIn(0, 64)
         }
+    }
+
+    override suspend fun setAiEnabled(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_ENABLED] = enabled }
+    }
+
+    override suspend fun setAiProtocol(protocol: AiProtocol) {
+        context.readingPreferencesStore.edit { it[Keys.AI_PROTOCOL] = protocol.name }
+    }
+
+    override suspend fun setAiBaseUrl(baseUrl: String) {
+        context.readingPreferencesStore.edit { it[Keys.AI_BASE_URL] = baseUrl.trim() }
+    }
+
+    override suspend fun setAiModelGeneral(model: String) {
+        context.readingPreferencesStore.edit { it[Keys.AI_MODEL_GENERAL] = model.trim() }
+    }
+
+    override suspend fun setAiModelTranslation(model: String) {
+        context.readingPreferencesStore.edit { it[Keys.AI_MODEL_TRANSLATION] = model.trim() }
+    }
+
+    override suspend fun setAiModelVision(model: String) {
+        context.readingPreferencesStore.edit { it[Keys.AI_MODEL_VISION] = model.trim() }
+    }
+
+    override suspend fun setAiTargetLang(targetLang: AiTargetLang) {
+        context.readingPreferencesStore.edit { it[Keys.AI_TARGET_LANG] = targetLang.name }
     }
 }

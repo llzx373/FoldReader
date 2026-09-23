@@ -26,6 +26,9 @@ key.properties
 *.jks
 *.keystore
 
+# AI 功能实测凭据（LLM 端点 / API key），绝不允许入库
+.env
+
 # 构建产物
 *.apk
 *.aab

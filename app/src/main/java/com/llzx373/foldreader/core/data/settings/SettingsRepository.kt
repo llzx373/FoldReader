@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.core.data.settings
 
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.Flow
@@ -64,4 +66,11 @@ interface SettingsRepository {
     suspend fun setComicSpreadAutoDetect(enabled: Boolean)
     suspend fun setComicFitMode(mode: ComicFitMode)
     suspend fun setComicScrollGapDp(gapDp: Int)
+    suspend fun setAiEnabled(enabled: Boolean)
+    suspend fun setAiProtocol(protocol: AiProtocol)
+    suspend fun setAiBaseUrl(baseUrl: String)
+    suspend fun setAiModelGeneral(model: String)
+    suspend fun setAiModelTranslation(model: String)
+    suspend fun setAiModelVision(model: String)
+    suspend fun setAiTargetLang(targetLang: AiTargetLang)
 }

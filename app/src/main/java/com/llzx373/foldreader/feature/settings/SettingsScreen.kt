@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -45,11 +46,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.ai.AiProtocol
+import com.llzx373.foldreader.core.ai.AiTargetLang
+import com.llzx373.foldreader.core.ai.gate.AiContentGate
 import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.settings.ComicDirection
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
@@ -84,6 +89,13 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showCleanLevelDialog by remember { mutableStateOf(false) }
     var showCleanTogglesDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
+    val apiKeyConfigured by viewModel.apiKeyConfigured.collectAsState()
+    val aiTestState by viewModel.aiTestState.collectAsState()
+    var showAiPresetDialog by remember { mutableStateOf(false) }
+    var aiTextFieldDialog by remember { mutableStateOf<AiTextFieldDialog?>(null) }
+    var showAiApiKeyDialog by remember { mutableStateOf(false) }
+    var showAiHistoryDialog by remember { mutableStateOf(false) }
+    var showAiClearKeyConfirm by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
     val clipboard = LocalClipboardManager.current
@@ -459,6 +471,107 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("AI 服务")
+            SwitchSetting("启用 AI 服务", prefs.aiEnabled, viewModel::updateAiEnabled)
+            if (prefs.aiEnabled) {
+                SegmentedSetting(
+                    label = "协议",
+                    options = listOf("OpenAI Chat", "OpenAI Responses", "Anthropic"),
+                    selectedIndex = when (prefs.aiProtocol) {
+                        AiProtocol.OPENAI_CHAT -> 0
+                        AiProtocol.OPENAI_RESPONSES -> 1
+                        AiProtocol.ANTHROPIC -> 2
+                    },
+                    onSelect = { index ->
+                        viewModel.updateAiProtocol(
+                            when (index) {
+                                1 -> AiProtocol.OPENAI_RESPONSES
+                                2 -> AiProtocol.ANTHROPIC
+                                else -> AiProtocol.OPENAI_CHAT
+                            },
+                        )
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("服务商预设") },
+                    supportingContent = { Text("DeepSeek / OpenAI / Anthropic / 通义千问 / 自定义") },
+                    modifier = Modifier.clickable { showAiPresetDialog = true },
+                )
+                ListItem(
+                    headlineContent = { Text("服务商地址") },
+                    supportingContent = { Text(prefs.aiBaseUrl.ifBlank { "未配置" }) },
+                    modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.BASE_URL },
+                )
+                ListItem(
+                    headlineContent = { Text("通用模型") },
+                    supportingContent = { Text(prefs.aiModelGeneral.ifBlank { "未配置" }) },
+                    modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.MODEL_GENERAL },
+                )
+                ListItem(
+                    headlineContent = { Text("翻译模型") },
+                    supportingContent = { Text(prefs.aiModelTranslation.ifBlank { "未配置" }) },
+                    modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.MODEL_TRANSLATION },
+                )
+                ListItem(
+                    headlineContent = { Text("视觉模型") },
+                    supportingContent = { Text(prefs.aiModelVision.ifBlank { "未配置" }) },
+                    modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.MODEL_VISION },
+                )
+                ListItem(
+                    headlineContent = { Text("API 密钥") },
+                    supportingContent = {
+                        Text(if (apiKeyConfigured) "已配置（本地加密存储）" else "未配置")
+                    },
+                    modifier = Modifier.clickable { showAiApiKeyDialog = true },
+                )
+                ListItem(
+                    headlineContent = { Text("测试连接") },
+                    supportingContent = { Text(aiTestSummary(aiTestState)) },
+                    modifier = Modifier.clickable { viewModel.testConnection() },
+                )
+                SegmentedSetting(
+                    label = "默认目标语言",
+                    options = listOf("简体中文", "繁体中文", "English", "日本語"),
+                    selectedIndex = when (prefs.aiTargetLang) {
+                        AiTargetLang.ZH_HANS -> 0
+                        AiTargetLang.ZH_HANT -> 1
+                        AiTargetLang.EN -> 2
+                        AiTargetLang.JA -> 3
+                    },
+                    onSelect = { index ->
+                        viewModel.updateAiTargetLang(
+                            when (index) {
+                                1 -> AiTargetLang.ZH_HANT
+                                2 -> AiTargetLang.EN
+                                3 -> AiTargetLang.JA
+                                else -> AiTargetLang.ZH_HANS
+                            },
+                        )
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("外发历史") },
+                    supportingContent = { Text("每次向模型发送内容前的本地台账，可随时审查") },
+                    modifier = Modifier.clickable { showAiHistoryDialog = true },
+                )
+                ListItem(
+                    headlineContent = { Text("清除凭据") },
+                    supportingContent = { Text("删除已保存的 API 密钥") },
+                    modifier = Modifier.clickable { showAiClearKeyConfirm = true },
+                )
+                ListItem(
+                    headlineContent = { Text("关于 AI") },
+                    supportingContent = {
+                        Text(
+                            "正文/采样会发往你在上方自配的服务商，请自行评估其隐私政策；" +
+                                "API 密钥仅在本机加密存储，不进备份、不写日志；" +
+                                "未配置密钥时不会产生任何网络请求。",
+                        )
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("外观与书架")
             SegmentedSetting(
                 label = "夜间模式",
@@ -593,6 +706,62 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             toggles = prefs.cleanToggles,
             onToggle = viewModel::updateCleanToggle,
             onDismiss = { showCleanTogglesDialog = false },
+        )
+    }
+    if (showAiPresetDialog) {
+        AiPresetDialog(
+            onSelect = { url ->
+                if (url != null) viewModel.updateAiBaseUrl(url)
+                showAiPresetDialog = false
+            },
+            onDismiss = { showAiPresetDialog = false },
+        )
+    }
+    aiTextFieldDialog?.let { dialog ->
+        AiTextInputDialog(
+            title = aiTextFieldTitle(dialog),
+            current = aiTextFieldValue(dialog, prefs),
+            onSave = { value ->
+                when (dialog) {
+                    AiTextFieldDialog.BASE_URL -> viewModel.updateAiBaseUrl(value)
+                    AiTextFieldDialog.MODEL_GENERAL -> viewModel.updateAiModelGeneral(value)
+                    AiTextFieldDialog.MODEL_TRANSLATION -> viewModel.updateAiModelTranslation(value)
+                    AiTextFieldDialog.MODEL_VISION -> viewModel.updateAiModelVision(value)
+                }
+                aiTextFieldDialog = null
+            },
+            onDismiss = { aiTextFieldDialog = null },
+        )
+    }
+    if (showAiApiKeyDialog) {
+        AiApiKeyDialog(
+            onSave = {
+                viewModel.saveApiKey(it)
+                showAiApiKeyDialog = false
+            },
+            onDismiss = { showAiApiKeyDialog = false },
+        )
+    }
+    if (showAiHistoryDialog) {
+        AiOutboundHistoryDialog(
+            records = viewModel.outboundHistory().asReversed(),
+            onDismiss = { showAiHistoryDialog = false },
+        )
+    }
+    if (showAiClearKeyConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAiClearKeyConfirm = false },
+            title = { Text("清除凭据") },
+            text = { Text("将删除本机保存的 API 密钥，AI 功能随即不可用。配置的服务商地址与模型保留。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearApiKey()
+                    showAiClearKeyConfirm = false
+                }) { Text("清除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAiClearKeyConfirm = false }) { Text("取消") }
+            },
         )
     }
 
@@ -1034,6 +1203,184 @@ private fun ChapterRulesDialog(
                     modifier = Modifier.align(Alignment.End),
                 ) {
                     Text("添加")
+                }
+            }
+        },
+    )
+}
+
+// ---- AI 服务 ----
+
+/** 「服务商地址 / 三个模型」共用的文本输入对话框入口。 */
+private enum class AiTextFieldDialog { BASE_URL, MODEL_GENERAL, MODEL_TRANSLATION, MODEL_VISION }
+
+private fun aiTextFieldTitle(dialog: AiTextFieldDialog): String = when (dialog) {
+    AiTextFieldDialog.BASE_URL -> "服务商地址"
+    AiTextFieldDialog.MODEL_GENERAL -> "通用模型"
+    AiTextFieldDialog.MODEL_TRANSLATION -> "翻译模型"
+    AiTextFieldDialog.MODEL_VISION -> "视觉模型"
+}
+
+private fun aiTextFieldValue(dialog: AiTextFieldDialog, prefs: ReadingPreferences): String =
+    when (dialog) {
+        AiTextFieldDialog.BASE_URL -> prefs.aiBaseUrl
+        AiTextFieldDialog.MODEL_GENERAL -> prefs.aiModelGeneral
+        AiTextFieldDialog.MODEL_TRANSLATION -> prefs.aiModelTranslation
+        AiTextFieldDialog.MODEL_VISION -> prefs.aiModelVision
+    }
+
+private fun aiTestSummary(state: SettingsViewModel.AiTestState?): String = when (state) {
+    null -> "发送一条测试消息验证配置"
+    SettingsViewModel.AiTestState.Running -> "测试中…"
+    is SettingsViewModel.AiTestState.Success -> "成功：${state.reply}"
+    is SettingsViewModel.AiTestState.Failure -> "失败：${state.message}"
+}
+
+/** 预设只填地址，协议仍需在上方按服务商文档选择。 */
+private val aiPresets = listOf(
+    "DeepSeek" to "https://api.deepseek.com",
+    "OpenAI" to "https://api.openai.com/v1",
+    "Anthropic" to "https://api.anthropic.com",
+    "通义千问" to "https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
+
+@Composable
+private fun AiPresetDialog(
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("服务商预设") },
+        text = {
+            Column {
+                Text(
+                    text = "选择预设只填写服务商地址；「自定义」保留当前地址不变。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                aiPresets.forEach { (name, url) ->
+                    ListItem(
+                        headlineContent = { Text(name) },
+                        supportingContent = { Text(url) },
+                        modifier = Modifier.clickable { onSelect(url) },
+                    )
+                }
+                ListItem(
+                    headlineContent = { Text("自定义") },
+                    supportingContent = { Text("在「服务商地址」里手动填写") },
+                    modifier = Modifier.clickable { onSelect(null) },
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun AiTextInputDialog(
+    title: String,
+    current: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draft by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = { Text(title) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(draft) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** key 掩码输入；只交给 CredentialStore，不落任何状态与日志。 */
+@Composable
+private fun AiApiKeyDialog(
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var key by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("API 密钥") },
+        text = {
+            Column {
+                Text(
+                    text = "密钥仅在本机加密存储，不进备份、不写日志。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("API 密钥") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(key.trim()) }, enabled = key.isNotBlank()) {
+                Text("保存")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun AiOutboundHistoryDialog(
+    records: List<AiContentGate.OutboundRecord>,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("外发历史") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                if (records.isEmpty()) {
+                    Text(
+                        text = "暂无记录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val timeFormat = remember {
+                    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                }
+                records.forEach { record ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(
+                            text = "${timeFormat.format(Date(record.timestamp))} · ${record.feature}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "${record.scope} · ≈${record.estimatedTokens} token",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         },
