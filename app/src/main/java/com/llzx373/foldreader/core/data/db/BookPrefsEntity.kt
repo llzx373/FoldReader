@@ -59,6 +59,8 @@ data class BookPrefsEntity(
     val comicFitMode: String = "FIT_PAGE",
     /** PDF 的阅读模式（PAGED/TEXT）；null = 未由用户定过，按文档是否有正文决定。 */
     val pdfReadingMode: String? = null,
+    /** 按书自定义章节正则，\u001F 分隔编码（与全局规则同编码）；空串 = 未自定义。 */
+    @ColumnInfo(defaultValue = "") val chapterRules: String = "",
 )
 
 @Dao

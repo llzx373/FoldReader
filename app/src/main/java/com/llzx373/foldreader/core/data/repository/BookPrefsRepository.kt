@@ -9,9 +9,12 @@ import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.data.settings.decodeCustomChapterRules
+import com.llzx373.foldreader.core.data.settings.encodeCustomChapterRules
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 /**
  * 每书阅读偏好：首次打开书籍时以当时的全局默认落库，之后读写均走 book_prefs。
@@ -39,6 +42,18 @@ class BookPrefsRepository(
         val current = bookPrefsDao.get(bookId)
             ?: settingsRepository.preferences.first().toBookPrefsEntity(bookId)
         bookPrefsDao.upsert(transform(current))
+    }
+
+    /** 按书自定义章节规则（原始正则串列表）；未自定义（或尚未落库）时为空列表。 */
+    fun observeChapterRules(bookId: Long): Flow<List<String>> =
+        bookPrefsDao.observe(bookId).map { decodeCustomChapterRules(it?.chapterRules) }
+
+    suspend fun chapterRules(bookId: Long): List<String> =
+        decodeCustomChapterRules(bookPrefsDao.get(bookId)?.chapterRules)
+
+    /** 空列表存空串，等价于"未自定义"。 */
+    suspend fun setChapterRules(bookId: Long, rules: List<String>) {
+        update(bookId) { it.copy(chapterRules = encodeCustomChapterRules(rules)) }
     }
 
     /** 全局翻页模式变更同步到所有已落库的书：覆盖每书模式。 */

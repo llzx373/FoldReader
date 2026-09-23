@@ -86,8 +86,7 @@ class DatabaseMigrationTest {
         }
 
     @Test
-    fun `v1 升到 v2 保住老数据且新列结构与 Room 期望一致`() {
-        val v1 = openV1()
+    fun `v1 升到 v2 保住老数据且新列结构与 Room 期望一致`() {        val v1 = openV1()
         val migrated = openV1()
 
         MIGRATION_1_2.migrate(migrated)
@@ -113,5 +112,69 @@ class DatabaseMigrationTest {
             columns(v1, "book_prefs") + Column("normalizeWhitespaceEnabled", "INTEGER", true, "0"),
             columns(migrated, "book_prefs"),
         )
+    }
+
+    /** 建一个 v2 形态的库：v1 结构 + MIGRATION_1_2 的新列，之后手动跑 v2→v3 迁移。 */
+    private fun openV2(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(2) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+                db.execSQL(bookPrefsV1)
+                db.execSQL(insertV1)
+                MIGRATION_1_2.migrate(db)
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v2 升到 v3 建人物出场表且 book_prefs 加章节规则列`() {
+        val v2 = openV2()
+        val migrated = openV2()
+
+        MIGRATION_2_3.migrate(migrated)
+
+        // book_prefs 老行原样还在，新列按 DEFAULT '' 落地
+        migrated.query(
+            "SELECT `fontSizeSp`, `chapterRules` FROM `book_prefs` WHERE `bookId` = 7",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals(21.5f, c.getFloat(0), 0.001f)
+            assertEquals("", c.getString(1))
+        }
+        // 列结构 = v2 的全部列 + 新列（与 Room 期望逐项一致）
+        assertEquals(
+            columns(v2, "book_prefs") + Column("chapterRules", "TEXT", true, "''"),
+            columns(migrated, "book_prefs"),
+        )
+        // 新表结构与 3.json 快照一致
+        assertEquals(
+            listOf(
+                Column("bookId", "INTEGER", true, null),
+                Column("name", "TEXT", true, null),
+                Column("firstChapterIndex", "INTEGER", true, null),
+                Column("firstCharOffset", "INTEGER", true, null),
+                Column("mentionCount", "INTEGER", true, null),
+            ),
+            columns(migrated, "person_appearances"),
+        )
+        // 复合主键 (bookId, name) 与外键级联的形状校验
+        migrated.query("PRAGMA index_list(`person_appearances`)").use { c ->
+            assertTrue("缺主键索引", c.moveToFirst())
+        }
+        migrated.query("PRAGMA foreign_key_list(`person_appearances`)").use { c ->
+            assertTrue("缺外键", c.moveToFirst())
+            assertEquals("books", c.getString(2))
+            assertEquals("CASCADE", c.getString(6))
+        }
     }
 }

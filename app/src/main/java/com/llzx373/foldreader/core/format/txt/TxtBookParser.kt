@@ -36,7 +36,8 @@ class TxtBookParser(
     private val onBookIndexed: suspend (bookId: Long, totalChars: Long) -> Unit = { _, _ -> },
     /** 实时索引（异步建偏移索引）扫描完成后回传章节，调用方负责落库与通知 UI。 */
     private val onChaptersIndexed: suspend (bookId: Long, chapters: List<Chapter>) -> Unit = { _, _ -> },
-    private val chapterRules: suspend () -> List<Regex> = { ChapterRules.DEFAULT },
+    /** 按书取章节规则；bookId 为 null（还没入库的书）时只有内置/全局规则可用。 */
+    private val chapterRules: suspend (bookId: Long?) -> List<Regex> = { ChapterRules.DEFAULT },
 ) : BookParser {
 
     /**
@@ -78,12 +79,12 @@ class TxtBookParser(
         charsetOverride: Charset? = null,
         bookId: Long? = null,
     ): TxtIndex = withContext(Dispatchers.IO) {
-        val (contentUri, _) = resolveContent(uri, bookId)
+        val (contentUri, effectiveBookId) = resolveContent(uri, bookId)
         UriChannels.open(context, contentUri).use { channel ->
             val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
             val charset = effectiveCharset(sample, charsetOverride)
             val bom = EncodingDetector.bomLengthOf(sample)
-            TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules())
+            TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules(effectiveBookId))
         }
     }
 
@@ -131,11 +132,11 @@ class TxtBookParser(
                             bookId = effectiveBookId,
                             store = store,
                             parentScope = scope,
-                            rules = chapterRules(),
+                            rules = chapterRules(effectiveBookId),
                         )
                     }
                 }
-                val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules())
+                val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules(effectiveBookId))
                 persistIndex(uri, index, effectiveBookId)
                 TxtBookContent(channel, charset, index.offsetIndex)
             } catch (t: Throwable) {

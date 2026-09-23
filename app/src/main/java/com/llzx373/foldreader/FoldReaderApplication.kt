@@ -144,8 +144,10 @@ class AppContainer(context: Context) {
             ?.takeIf { it.totalChars != totalChars }
             ?.let { bookshelfRepository.upsertBook(it.copy(totalChars = totalChars)) }
     }
-    private val chapterRules: suspend () -> List<Regex> = {
-        ChapterRules.merge(settingsRepository.preferences.first().customChapterRules)
+    // 章节规则 = 按书自定义（book_prefs）+ 全局自定义，再叠内置规则（merge 内部追加 DEFAULT）。
+    private val chapterRules: suspend (Long?) -> List<Regex> = { bookId ->
+        val perBook = bookId?.let { bookPrefsRepository.chapterRules(it) } ?: emptyList()
+        ChapterRules.merge(perBook + settingsRepository.preferences.first().customChapterRules)
     }
     // 同一个 fileUri 在库里可能有多行（原版 + 清洗版），所以调用方给了 bookId 就一律以它为准，
     // 只有不知道 bookId 的调用方（如 JVM 单测、旧的 2 参入口）才回落到按 URI 反查。
@@ -183,7 +185,7 @@ class AppContainer(context: Context) {
         // 压平文件的章节来自 EPUB/FB2 的 .toc sidecar，这里扫出来的结果由下面那行空回调丢弃。
         // 用空规则集跳过索引扫描期间的逐行正则匹配——那次扫描只剩纯解码，没有白做的活。
         onChaptersIndexed = { _, _ -> },
-        chapterRules = { emptyList() },
+        chapterRules = { _ -> emptyList() },
     )
     private val openFlattenedContent: suspend (File) -> com.llzx373.foldreader.core.format.BookContent =
         { file -> flattenedTxtParser.openContent(Uri.fromFile(file), Charsets.UTF_8) }
