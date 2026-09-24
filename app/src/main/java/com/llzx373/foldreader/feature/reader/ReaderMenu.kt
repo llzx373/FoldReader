@@ -251,6 +251,26 @@ fun ReaderMenuPanel(
     onSpeakChapter: () -> Unit,
     onToggleSpeakPause: () -> Unit = {},
     onStopSpeaking: () -> Unit,
+    /** M19 翻译组：AI 已配置且当前为文本内容时显示整组。 */
+    translateAvailable: Boolean = false,
+    /** 译文视角下隐藏 TTS 组，翻译组只留视角切换。 */
+    viewModeTranslated: Boolean = false,
+    /** 目标语言已有可用译文（决定原文模式下是否显示视角切换）。 */
+    translationReady: Boolean = false,
+    unitTranslateRunning: Boolean = false,
+    /** false 时「翻译本章」显示为「翻译本节」（无章节索引的书按固定块切）。 */
+    hasChapters: Boolean = false,
+    /** M20 视角 2：双页对照可用（当前为双页翻页布局且目标语言已有译本）。 */
+    bilingualCompareAvailable: Boolean = false,
+    bilingualCompareActive: Boolean = false,
+    onToggleBilingualCompare: () -> Unit = {},
+    /** M20 视角 3：段落对照可用（滚动模式且目标语言已有译本）。 */
+    paragraphCompareAvailable: Boolean = false,
+    paragraphCompareActive: Boolean = false,
+    onToggleParagraphCompare: () -> Unit = {},
+    onTranslatePage: () -> Unit = {},
+    onTranslateUnit: () -> Unit = {},
+    onToggleViewMode: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showBrightness by remember { mutableStateOf(false) }
@@ -486,19 +506,66 @@ fun ReaderMenuPanel(
                 clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
                 clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
             }
-            ButtonGroup(
-                overflowIndicator = {},
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (ttsPlaying) {
-                    clickableItem(
-                        onClick = onToggleSpeakPause,
-                        label = if (ttsPaused) "继续朗读" else "暂停朗读",
-                        weight = 1f)
-                    clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
-                } else {
-                    clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
-                    clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+            if (!viewModeTranslated) {
+                ButtonGroup(
+                    overflowIndicator = {},
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (ttsPlaying) {
+                        clickableItem(
+                            onClick = onToggleSpeakPause,
+                            label = if (ttsPaused) "继续朗读" else "暂停朗读",
+                            weight = 1f)
+                        clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
+                    } else {
+                        clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
+                        clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+                    }
+                }
+            }
+            if (translateAvailable) {
+                ButtonGroup(
+                    overflowIndicator = {},
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (!viewModeTranslated) {
+                        clickableItem(onClick = onTranslatePage, label = "翻译本页", weight = 1f)
+                        clickableItem(
+                            onClick = onTranslateUnit,
+                            label = when {
+                                unitTranslateRunning -> "翻译中…"
+                                hasChapters -> "翻译本章"
+                                else -> "翻译本节"
+                            },
+                            weight = 1f)
+                    }
+                    if (viewModeTranslated || translationReady) {
+                        clickableItem(
+                            onClick = onToggleViewMode,
+                            label = if (viewModeTranslated) "视角：译文" else "视角：原文",
+                            weight = 1f)
+                    }
+                }
+                // 视角 2/3：与当前版式互斥的两个对照入口（双页对照只在双页翻页布局，
+                // 段落对照只在滚动模式），译文视角下隐藏
+                if (!viewModeTranslated && (bilingualCompareAvailable || paragraphCompareAvailable)) {
+                    ButtonGroup(
+                        overflowIndicator = {},
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (bilingualCompareAvailable) {
+                            clickableItem(
+                                onClick = onToggleBilingualCompare,
+                                label = "双页对照：${if (bilingualCompareActive) "开" else "关"}",
+                                weight = 1f)
+                        }
+                        if (paragraphCompareAvailable) {
+                            clickableItem(
+                                onClick = onToggleParagraphCompare,
+                                label = "段落对照：${if (paragraphCompareActive) "开" else "关"}",
+                                weight = 1f)
+                        }
+                    }
                 }
             }
             // 开关都是中文长标签，窄屏下横排会容不下被逐字竖排：改用 FlowRow 自动换行，
@@ -548,6 +615,11 @@ fun ChapterListDialog(
     colors: ReaderColors,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
+    /** M19：每章的翻译状态标签（null = 不显示），下标与 [chapters] 对齐。 */
+    chapterStatus: List<String?> = emptyList(),
+    /** M19：该章是否可点「重译」（存在已译/失败单位），下标与 [chapters] 对齐。 */
+    chapterRetranslatable: List<Boolean> = emptyList(),
+    onRetranslateChapter: ((Int) -> Unit)? = null,
 ) {
     var showPersons by remember { mutableStateOf(false) }
     AlertDialog(
@@ -638,11 +710,8 @@ fun ChapterListDialog(
                     }
                     LazyColumn(state = listState, modifier = Modifier.height(360.dp)) {
                         itemsIndexed(chapters) { index, chapter ->
-                            Text(
-                                text = chapter.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (index == currentIndex) colors.accent else Color.Unspecified,
-                                maxLines = 1,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onSelect(index) }
@@ -653,7 +722,37 @@ fun ChapterListDialog(
                                         top = 10.dp,
                                         bottom = 10.dp,
                                     ),
-                            )
+                            ) {
+                                Text(
+                                    text = chapter.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (index == currentIndex) colors.accent else Color.Unspecified,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                chapterStatus.getOrNull(index)?.let { status ->
+                                    Text(
+                                        text = status,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.accent,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
+                                }
+                                if (onRetranslateChapter != null &&
+                                    chapterRetranslatable.getOrNull(index) == true
+                                ) {
+                                    Text(
+                                        text = "重译",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.accent,
+                                        maxLines = 1,
+                                        modifier = Modifier
+                                            .clickable { onRetranslateChapter(index) }
+                                            .padding(start = 8.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

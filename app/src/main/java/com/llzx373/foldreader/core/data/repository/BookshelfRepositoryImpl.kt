@@ -37,6 +37,12 @@ class BookshelfRepositoryImpl(
     private val comicStore: com.llzx373.foldreader.core.comic.ComicExtractionStore? = null,
     /** 源文件副本目录；删除书籍时按 `fileUri` 清理（只在**这个目录内**才动手）。 */
     private val sourceDir: java.io.File? = null,
+    /** M19 译本副本；删除书籍且清本地数据时按 bookId 连文件一起清理。 */
+    private val translationStore: com.llzx373.foldreader.core.translate.TranslationStore? = null,
+    /** M19 翻译台账；随「删除本地数据」一起清（书都没了，台账留着只会误导重译判据）。 */
+    private val translationDao: com.llzx373.foldreader.core.data.db.TranslationDao? = null,
+    /** M20 术语表；单书术语随「删除本地数据」按 (scope=book, ownerKey=bookId) 定点清。 */
+    private val glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -90,6 +96,16 @@ class BookshelfRepositoryImpl(
             progressDao.deleteByBookIds(bookIds)
             bookmarkDao.deleteByBookIds(bookIds)
             annotationDao.deleteByBookIds(bookIds)
+            translationDao?.let { dao -> bookIds.forEach { dao.deleteForBook(it) } }
+            translationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+            glossaryTermDao?.let { dao ->
+                bookIds.forEach {
+                    dao.deleteFor(
+                        com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK,
+                        it.toString(),
+                    )
+                }
+            }
         }
         pageDiskCache?.let { cache -> bookIds.forEach { cache.deleteForBook(it) } }
         val booksById = bookDao.getByIds(bookIds).associateBy { it.id }

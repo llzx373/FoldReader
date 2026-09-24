@@ -690,6 +690,52 @@ fun ReaderScreen(
     val scrollListState = rememberLazyListState()
     var brightnessHint by remember { mutableStateOf<Float?>(null) }
 
+    // M18 选中即译：AI 服务已配置才在选区操作条给「翻译」入口（未配置时界面零变化）
+    var aiConfigured by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { aiConfigured = app.container.aiConfigured() }
+
+    // M19 视角 1：原文 / 译文。译文模式下标注写入、选字翻译、TTS 全部禁用
+    // （标注/书签锚点是原文坐标系，写进去必错位）。
+    val viewMode by viewModel.viewMode.collectAsState()
+    val viewModeTranslated = viewMode == ReaderViewModel.ReaderViewMode.TRANSLATED
+
+    // M20 视角 2/3：双页对照（左原文右译文）与滚动段落对照
+    val bilingualCompare by viewModel.bilingualCompare.collectAsState()
+    val paragraphCompare by viewModel.paragraphCompare.collectAsState()
+
+    // 对照模式的版式兜底：折叠成单页 / 悬停 / 切滚动模式即退回视角 1 的原文口径
+    LaunchedEffect(dual, bilingualCompare) {
+        if (bilingualCompare && !dual) viewModel.setBilingualCompare(false)
+    }
+    LaunchedEffect(scrollMode, paragraphCompare) {
+        if (paragraphCompare && !scrollMode) viewModel.setParagraphCompare(false)
+    }
+    // 进入双页对照后右页是译本坐标：清掉原文右页的行几何，点按/选区不再命中它
+    LaunchedEffect(bilingualCompare) {
+        if (bilingualCompare) rightLineBoxes.value = null
+    }
+
+    // 目标语言是否已有可用译文（菜单「视角」项的显示判据）：菜单打开时查一次
+    var translationReady by remember { mutableStateOf(false) }
+    LaunchedEffect(menuVisible, viewMode, aiConfigured) {
+        if (menuVisible && aiConfigured && !viewModeTranslated) {
+            translationReady = viewModel.hasTranslationForTargetLang()
+        }
+    }
+
+    // 「翻译本章/节」后台进行中（菜单按钮文案 + 防重入提示）
+    val unitTranslateRunning by viewModel.unitTranslateRunning.collectAsState()
+
+    // VM 的一次性轻提示（如「已存为批注」）：短暂展示后自动消失
+    var notice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { viewModel.notices.collect { notice = it } }
+    LaunchedEffect(notice) {
+        if (notice != null) {
+            delay(2000)
+            notice = null
+        }
+    }
+
     fun scrollByScreen(direction: Int) {
         scope.launch {
             val info = scrollListState.layoutInfo
@@ -776,14 +822,19 @@ fun ReaderScreen(
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page?): List<TextRangeSpan> {
         if (page == null) return emptyList()
-        val spans = annotationIndex.overlapping(page.charStart, page.charEnd).map { ann ->
-            TextRangeSpan(
-                ann.startCharOffset,
-                ann.endCharOffset,
-                Color(ann.color.toInt()),
-                underline = ann.style ==
-                    com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
-            )
+        // 译文模式：标注锚点是原文坐标系，画上去必错位，只抑制标注渲染（选区/搜索高亮照常）
+        val spans = if (viewModeTranslated) {
+            emptyList()
+        } else {
+            annotationIndex.overlapping(page.charStart, page.charEnd).map { ann ->
+                TextRangeSpan(
+                    ann.startCharOffset,
+                    ann.endCharOffset,
+                    Color(ann.color.toInt()),
+                    underline = ann.style ==
+                        com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
+                )
+            }
         }
         val hit = searchHighlight
         return if (hit != null && hit.second > page.charStart && hit.first < page.charEnd) {
@@ -821,7 +872,12 @@ fun ReaderScreen(
             val target = viewModel.adjacentSpread(forward) ?: return@launch
             viewModel.showSpread(target)
             val boundary = if (forward) {
-                (target.right ?: target.left).charEnd
+                // 双页对照下右页是译本坐标，选区跨页端点取原文跨页末端
+                if (bilingualCompare) {
+                    viewModel.originalSpreadEndFor(target)
+                } else {
+                    (target.right ?: target.left).charEnd
+                }
             } else {
                 target.left.charStart
             }
@@ -953,16 +1009,19 @@ fun ReaderScreen(
         if (scrollMode) {
             val relX = offset.x - contentRect.left
             val relY = offset.y - contentRect.top
-            // 链接/脚注引用点按优先（命中即消费，不弹菜单）
-            if (consumeLink(scrollLinkHitAt(relX, relY))) return@tap
-            val caret = scrollCaretAt(relX, relY)
-            if (caret != null) {
-                val ann = annotations.firstOrNull {
-                    caret >= it.startCharOffset && caret < it.endCharOffset
-                }
-                if (ann != null) {
-                    editingAnnotation = ann
-                    return@tap
+            // 段落对照模式没有行几何（纯文本对照列表）：链接/划线命中整条跳过，点按只弹菜单
+            if (!paragraphCompare) {
+                // 链接/脚注引用点按优先（命中即消费，不弹菜单）
+                if (consumeLink(scrollLinkHitAt(relX, relY))) return@tap
+                val caret = scrollCaretAt(relX, relY)
+                if (caret != null) {
+                    val ann = annotations.firstOrNull {
+                        caret >= it.startCharOffset && caret < it.endCharOffset
+                    }
+                    if (ann != null) {
+                        editingAnnotation = ann
+                        return@tap
+                    }
                 }
             }
             menuVisible = true
@@ -1250,22 +1309,31 @@ fun ReaderScreen(
                     .clipToBounds(),
             ) {
                 if (scrollMode && geomReady) {
-                    ScrollContent(
-                        viewModel = viewModel,
-                        listState = scrollListState,
-                        colors = colors,
-                        pageHeight = contentRect.height.roundToInt(),
-                        dualColumns = scrollDual,
-                        leftDp = leftDp,
-                        hingeDp = hingeDp,
-                        rightDp = rightDp,
-                        pageWidthDp = pageWidthDp,
-                        selection = selection,
-                        onSelectionChange = { selection = it },
-                        caretAtContent = ::scrollCaretAt,
-                        lineBoxes = scrollLineBoxes,
-                        selectionColor = colors.accent.copy(alpha = 0.32f),
-                    )
+                    if (paragraphCompare) {
+                        // 视角 3：滚动模式段落对照（替代页流列表）
+                        ParagraphCompareContent(
+                            viewModel = viewModel,
+                            listState = scrollListState,
+                            colors = colors,
+                        )
+                    } else {
+                        ScrollContent(
+                            viewModel = viewModel,
+                            listState = scrollListState,
+                            colors = colors,
+                            pageHeight = contentRect.height.roundToInt(),
+                            dualColumns = scrollDual,
+                            leftDp = leftDp,
+                            hingeDp = hingeDp,
+                            rightDp = rightDp,
+                            pageWidthDp = pageWidthDp,
+                            selection = selection,
+                            onSelectionChange = { selection = it },
+                            caretAtContent = ::scrollCaretAt,
+                            lineBoxes = scrollLineBoxes,
+                            selectionColor = colors.accent.copy(alpha = 0.32f),
+                        )
+                    }
                 } else {
                     val spread = uiState.spread
                     if (spread != null && geomReady) {
@@ -1285,11 +1353,20 @@ fun ReaderScreen(
                                 .fillMaxSize()
                                 .graphicsLayer { translationY = -autoScrollY },
                             leftHighlights = spansFor(spread.left),
-                            rightHighlights = spansFor(spread.right),
+                            // 双页对照的右页是译本坐标：标注 / 搜索高亮不挂（视角 2 口径）
+                            rightHighlights = if (bilingualCompare) {
+                                emptyList()
+                            } else {
+                                spansFor(spread.right)
+                            },
                             selection = selection,
                             selectionColor = colors.accent.copy(alpha = 0.32f),
                             onLeftGeometry = { leftLineBoxes.value = it },
-                            onRightGeometry = { rightLineBoxes.value = it },
+                            onRightGeometry = if (bilingualCompare) {
+                                ({})
+                            } else {
+                                ({ rightLineBoxes.value = it })
+                            },
                         )
                         val overlay = animSpread
                         if (overlay != null) {
@@ -1489,22 +1566,31 @@ fun ReaderScreen(
             }
             SelectionActionBar(
                 colors = colors,
-                onPickColor = { argb ->
-                    viewModel.addAnnotation(
-                        activeSelection.start,
-                        selectionEnd(activeSelection),
-                        argb,
-                        null,
-                    )
-                    clearSelection()
+                // 译文模式：标注/书签锚点是原文坐标系，写入必错位——只留「复制 / 取消」
+                onPickColor = if (viewModeTranslated) {
+                    null
+                } else {
+                    { argb ->
+                        viewModel.addAnnotation(
+                            activeSelection.start,
+                            selectionEnd(activeSelection),
+                            argb,
+                            null,
+                        )
+                        clearSelection()
+                    }
                 },
-                onNote = { noteDraft = activeSelection },
-                onBookmark = {
-                    viewModel.toggleBookmarkAt(
-                        activeSelection.start,
-                        selectionEnd(activeSelection),
-                    )
-                    clearSelection()
+                onNote = if (viewModeTranslated) null else ({ noteDraft = activeSelection }),
+                onBookmark = if (viewModeTranslated) {
+                    null
+                } else {
+                    {
+                        viewModel.toggleBookmarkAt(
+                            activeSelection.start,
+                            selectionEnd(activeSelection),
+                        )
+                        clearSelection()
+                    }
                 },
                 onCopy = {
                     scope.launch {
@@ -1519,12 +1605,67 @@ fun ReaderScreen(
                     }
                     clearSelection()
                 },
+                onTranslate = if (aiConfigured && !viewModeTranslated) {
+                    {
+                        viewModel.translateSelection(
+                            activeSelection.start,
+                            selectionEnd(activeSelection),
+                        )
+                        clearSelection()
+                    }
+                } else {
+                    null
+                },
                 onCancel = { clearSelection() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(16.dp),
             )
+        }
+
+        // M18 选中即译卡片：与底部菜单同构的 AnimatedVisibility 底部面板
+        val translateCard by viewModel.translationCardState.collectAsState()
+        AnimatedVisibility(
+            visible = translateCard != null,
+            enter = fadeIn(tween(MENU_ANIM_MS)) + slideInVertically { it / 3 },
+            exit = fadeOut(tween(MENU_ANIM_MS)) + slideOutVertically { it / 3 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        ) {
+            translateCard?.let { cardState ->
+                TranslateCard(
+                    state = cardState,
+                    colors = colors,
+                    onSelectLang = viewModel::retranslate,
+                    onConfirm = viewModel::confirmTranslation,
+                    onSaveAsNote = viewModel::saveTranslationAsNote,
+                    onRetry = viewModel::retryTranslation,
+                    onClose = viewModel::closeTranslationCard,
+                )
+            }
+        }
+
+        // M19 翻译本页：确认页（范围/语言/当次提示词）→ 对照面板（流式，不落盘）
+        val pageTranslate by viewModel.pageTranslateState.collectAsState()
+        pageTranslate?.let { pageState ->
+            if (pageState.confirming) {
+                PageTranslateConfirmDialog(
+                    charCount = (pageState.end - pageState.start).toInt().coerceAtLeast(0),
+                    initialLang = pageState.lang,
+                    colors = colors,
+                    onStart = viewModel::startPageTranslation,
+                    onDismiss = viewModel::closePageTranslation,
+                )
+            } else {
+                PageTranslatePanel(
+                    state = pageState,
+                    colors = colors,
+                    onRetry = viewModel::retryPageTranslation,
+                    onClose = viewModel::closePageTranslation,
+                )
+            }
         }
 
         if (tabletop != null && !uiState.loading && uiState.error == null) {
@@ -1598,6 +1739,18 @@ fun ReaderScreen(
             )
         }
 
+        notice?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.text,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(colors.background.copy(alpha = 0.85f), MaterialTheme.shapes.small)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         // 顶栏 / 底部菜单：进出与漫画阅读器同构（淡入 + 从各自边缘滑入），
         // 不再用裸 if 直接挂载/卸载——那会让整块 chrome 瞬现瞬隐。
         // readingPosition 的订阅刻意留在内容 lambda 内：它在阅读器顶层订阅会让整棵树
@@ -1615,10 +1768,14 @@ fun ReaderScreen(
                 colors = colors,
                 onBack = { exit.leaveTo(onBack) },
                 dualPage = uiState.dualPage,
-                hasRightPage = uiState.spread?.right != null,
-                leftBookmarked = uiState.spread?.left?.charStart in bookmarkedOffsets,
-                rightBookmarked = uiState.spread?.right?.charStart in bookmarkedOffsets,
-                onToggleBookmark = viewModel::toggleBookmark,
+                // 双页对照下右页是译本坐标：右页书签入口隐藏（锚点写进去必错位）
+                hasRightPage = !bilingualCompare && uiState.spread?.right != null,
+                leftBookmarked = !viewModeTranslated &&
+                    uiState.spread?.left?.charStart in bookmarkedOffsets,
+                rightBookmarked = !viewModeTranslated &&
+                    uiState.spread?.right?.charStart in bookmarkedOffsets,
+                // 译文模式禁用书签写入（锚点是原文坐标系）
+                onToggleBookmark = { left -> if (!viewModeTranslated) viewModel.toggleBookmark(left) },
                 onOpenBookmarks = { bookmarksVisible = true },
                 onOpenSearch = { searchVisible = true },
             )
@@ -1702,6 +1859,37 @@ fun ReaderScreen(
                     if (ttsPaused) viewModel.resumeSpeaking() else viewModel.pauseSpeaking()
                 },
                 onStopSpeaking = viewModel::stopSpeaking,
+                translateAvailable = aiConfigured && uiState.error == null && !uiState.loading,
+                viewModeTranslated = viewModeTranslated,
+                translationReady = translationReady,
+                unitTranslateRunning = unitTranslateRunning,
+                hasChapters = position.chapterCount > 1,
+                onTranslatePage = {
+                    menuVisible = false
+                    viewModel.requestPageTranslation()
+                },
+                onTranslateUnit = {
+                    menuVisible = false
+                    viewModel.translateCurrentUnit()
+                },
+                onToggleViewMode = {
+                    menuVisible = false
+                    viewModel.toggleViewMode()
+                },
+                // M20 视角 2：仅双页翻页布局 + 已有译本时给入口（单页/悬停退回视角 1）
+                bilingualCompareAvailable = aiConfigured && translationReady && dual && !viewModeTranslated,
+                bilingualCompareActive = bilingualCompare,
+                onToggleBilingualCompare = {
+                    menuVisible = false
+                    viewModel.toggleBilingualCompare()
+                },
+                // M20 视角 3：仅滚动模式 + 已有译本时给入口
+                paragraphCompareAvailable = aiConfigured && translationReady && scrollMode && !viewModeTranslated,
+                paragraphCompareActive = paragraphCompare,
+                onToggleParagraphCompare = {
+                    menuVisible = false
+                    viewModel.toggleParagraphCompare()
+                },
             )
         }
 
@@ -1709,8 +1897,33 @@ fun ReaderScreen(
             val position by viewModel.readingPosition.collectAsState()
             // 只在面板可见时收集人物索引（ViewModel 侧 WhileSubscribed 随之启停）
             val persons by viewModel.personAppearances.collectAsState()
+            // M19：目录行翻译状态——面板可见时预载单位清单并收集台账
+            LaunchedEffect(catalogVisible, aiConfigured) {
+                if (catalogVisible && aiConfigured) viewModel.prepareUnitStatuses()
+            }
+            val translationUnits by viewModel.translationUnits.collectAsState()
+            val unitStatuses by viewModel.unitStatuses.collectAsState()
+            val catalogChapters = viewModel.chapterList()
+            val chapterStatus = remember(catalogChapters, translationUnits, unitStatuses, aiConfigured) {
+                if (aiConfigured) {
+                    com.llzx373.foldreader.feature.translate.chapterStatusLabels(
+                        catalogChapters, translationUnits, unitStatuses,
+                    )
+                } else {
+                    emptyList()
+                }
+            }
+            val chapterRetranslatable = remember(catalogChapters, translationUnits, unitStatuses, aiConfigured) {
+                if (aiConfigured) {
+                    com.llzx373.foldreader.feature.translate.chapterRetranslatable(
+                        catalogChapters, translationUnits, unitStatuses,
+                    )
+                } else {
+                    emptyList()
+                }
+            }
             ChapterListDialog(
-                chapters = viewModel.chapterList(),
+                chapters = catalogChapters,
                 persons = persons,
                 currentIndex = position.chapterIndex,
                 remainingText = viewModel.remainingTimeText(),
@@ -1723,6 +1936,16 @@ fun ReaderScreen(
                     }
                 },
                 onDismiss = { catalogVisible = false },
+                chapterStatus = chapterStatus,
+                chapterRetranslatable = chapterRetranslatable,
+                onRetranslateChapter = if (aiConfigured && !viewModeTranslated) {
+                    { index ->
+                        catalogVisible = false
+                        viewModel.retranslateChapter(index)
+                    }
+                } else {
+                    null
+                },
             )
         }
 
@@ -2110,19 +2333,26 @@ private fun ScrollContent(
     val uiState by viewModel.uiState.collectAsState()
     val annotations by viewModel.annotations.collectAsState()
     val annotationIndex = remember(annotations) { AnnotationIndex(annotations) }
+    val viewMode by viewModel.viewMode.collectAsState()
+    val viewModeTranslated = viewMode == ReaderViewModel.ReaderViewMode.TRANSLATED
     val searchHighlight by viewModel.searchHighlight.collectAsState()
     var extending by remember { mutableStateOf(false) }
     val density = LocalDensity.current
 
     fun spansFor(page: com.llzx373.foldreader.core.reader.Page): List<TextRangeSpan> {
-        val spans = annotationIndex.overlapping(page.charStart, page.charEnd).mapTo(ArrayList(4)) { ann ->
-            TextRangeSpan(
-                ann.startCharOffset,
-                ann.endCharOffset,
-                Color(ann.color.toInt()),
-                underline = ann.style ==
-                    com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
-            )
+        // 译文模式：标注锚点是原文坐标系，画上去必错位，只抑制标注渲染（选区/搜索高亮照常）
+        val spans = if (viewModeTranslated) {
+            ArrayList<TextRangeSpan>(4)
+        } else {
+            annotationIndex.overlapping(page.charStart, page.charEnd).mapTo(ArrayList(4)) { ann ->
+                TextRangeSpan(
+                    ann.startCharOffset,
+                    ann.endCharOffset,
+                    Color(ann.color.toInt()),
+                    underline = ann.style ==
+                        com.llzx373.foldreader.core.data.db.AnnotationEntity.STYLE_UNDERLINE,
+                )
+            }
         }
         val sel = selection
         if (sel != null) {

@@ -7,6 +7,8 @@
     <!-- TTS 听书（M13.1）：前台媒体播放服务 + 通知（POST_NOTIFICATIONS 在首次点朗读入口时运行时申请） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 全书翻译（M20）：dataSync 类型前台服务托住翻译队列 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -130,6 +132,12 @@
             android:name=".core.tts.android.TtsPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- 全书翻译前台服务（M20）：队列在 AppContainer 的 BookTranslationQueue，这里托进程 + 进度/完成通知 -->
+        <service
+            android:name=".feature.translate.TranslationService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 诊断日志分享（设置 → 诊断 → 分享日志文件）：仅暴露 cacheDir/diagnostics -->
         <provider

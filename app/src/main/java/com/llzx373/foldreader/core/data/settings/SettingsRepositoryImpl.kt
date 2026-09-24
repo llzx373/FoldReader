@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -79,6 +80,9 @@ class SettingsRepositoryImpl(
         val AI_MODEL_VISION = stringPreferencesKey("ai_model_vision")
         val AI_TARGET_LANG = stringPreferencesKey("ai_target_lang")
         val AI_CHAPTER_RULE_CONFIRMED = booleanPreferencesKey("ai_chapter_rule_confirmed")
+        val AI_TRANSLATION_CONFIRMED = booleanPreferencesKey("ai_translation_confirmed")
+        val TRANSLATION_VIEW_HINT_SHOWN = booleanPreferencesKey("translation_view_hint_shown")
+        val AI_PRICE_PER_MILLION = doublePreferencesKey("ai_price_per_million")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -156,6 +160,11 @@ class SettingsRepositoryImpl(
                 aiTargetLang = enumOrDefault(prefs[Keys.AI_TARGET_LANG], defaults.aiTargetLang),
                 aiChapterRuleConfirmed = prefs[Keys.AI_CHAPTER_RULE_CONFIRMED]
                     ?: defaults.aiChapterRuleConfirmed,
+                aiTranslationConfirmed = prefs[Keys.AI_TRANSLATION_CONFIRMED]
+                    ?: defaults.aiTranslationConfirmed,
+                translationViewHintShown = prefs[Keys.TRANSLATION_VIEW_HINT_SHOWN]
+                    ?: defaults.translationViewHintShown,
+                aiPricePerMillion = prefs[Keys.AI_PRICE_PER_MILLION] ?: defaults.aiPricePerMillion,
             )
         }
 
@@ -416,5 +425,17 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AI_CHAPTER_RULE_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setAiTranslationConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_TRANSLATION_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setTranslationViewHintShown(shown: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.TRANSLATION_VIEW_HINT_SHOWN] = shown }
+    }
+
+    override suspend fun setAiPricePerMillion(price: Double) {
+        context.readingPreferencesStore.edit { it[Keys.AI_PRICE_PER_MILLION] = price }
     }
 }

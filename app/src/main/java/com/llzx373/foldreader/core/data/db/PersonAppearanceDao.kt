@@ -14,6 +14,10 @@ interface PersonAppearanceDao {
     @Query("SELECT * FROM person_appearances WHERE bookId = :bookId ORDER BY mentionCount DESC")
     fun observeForBook(bookId: Long): Flow<List<PersonAppearanceEntity>>
 
+    /** 提及次数 Top N（M20 人物术语候选的初始来源）。 */
+    @Query("SELECT * FROM person_appearances WHERE bookId = :bookId ORDER BY mentionCount DESC LIMIT :limit")
+    suspend fun topForBook(bookId: Long, limit: Int): List<PersonAppearanceEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(appearances: List<PersonAppearanceEntity>)
 

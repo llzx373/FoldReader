@@ -78,4 +78,67 @@ class ReadingProgressAnchorTest {
         assertEquals(9000L, row.charOffset)
         assertEquals(3, row.chapterIndex)
     }
+
+    // ---------- M19 译文锚点（三模式对称） ----------
+
+    private fun translationSave(anchor: Long, now: Long = 0L) = ReadingProgressEntity(
+        bookId = 1,
+        charOffset = 0,
+        chapterIndex = 0,
+        totalReadingMillis = 10,
+        firstReadAt = 1,
+        charsReadTotal = 2,
+        translationAnchor = anchor,
+        updatedAt = now,
+    )
+
+    @Test
+    fun `译文保存保留旧的文本锚点与页式锚点`() {
+        val existing = pagedSave(page = 50).keepTextAnchor(textSave(offset = 1234))
+
+        val saved = translationSave(anchor = 777).keepTranslationAnchor(existing)
+
+        assertEquals(777L, saved.translationAnchor)
+        assertEquals(1234L, saved.charOffset)
+        assertEquals(3, saved.chapterIndex)
+        assertEquals(50, saved.comicPage)
+    }
+
+    @Test
+    fun `文本与页式保存都保留旧的译文锚点`() {
+        val existing = translationSave(anchor = 777)
+
+        val textSaved = textSave(offset = 9000).keepPagedAnchor(existing)
+        assertEquals(777L, textSaved.translationAnchor)
+        assertEquals(9000L, textSaved.charOffset)
+
+        val pagedSaved = pagedSave(page = 7).keepTextAnchor(existing)
+        assertEquals(777L, pagedSaved.translationAnchor)
+        assertEquals(7, pagedSaved.comicPage)
+    }
+
+    @Test
+    fun `译文保存没有旧行时保持自身`() {
+        val saved = translationSave(anchor = 42).keepTranslationAnchor(null)
+
+        assertEquals(42L, saved.translationAnchor)
+        assertEquals(0L, saved.charOffset)
+        assertEquals(null, saved.comicPage)
+    }
+
+    @Test
+    fun `三种模式来回切换三个位置都不丢`() {
+        // 文本读到 9000
+        var row: ReadingProgressEntity? = textSave(offset = 9000)
+        // 切译文模式读一会儿
+        row = translationSave(anchor = 777).keepTranslationAnchor(row)
+        // 切页式（漫画/PDF）读到第 50 页
+        row = pagedSave(page = 50).keepTextAnchor(row)
+        // 再切回文本
+        row = textSave(offset = 9100).keepPagedAnchor(row)
+
+        assertEquals(9100L, row.charOffset)
+        assertEquals(777L, row.translationAnchor)
+        assertEquals(50, row.comicPage)
+    }
 }

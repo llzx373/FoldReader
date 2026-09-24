@@ -177,4 +177,177 @@ class DatabaseMigrationTest {
             assertEquals("CASCADE", c.getString(6))
         }
     }
+
+    /** v3 的 `reading_progress` 建表语句，摘自 `app/schemas/…/3.json`（已发布快照不可改写）。 */
+    private val readingProgressV3 =
+        "CREATE TABLE IF NOT EXISTS `reading_progress` (`bookId` INTEGER NOT NULL, " +
+            "`charOffset` INTEGER NOT NULL, `chapterIndex` INTEGER NOT NULL, " +
+            "`totalReadingMillis` INTEGER NOT NULL, `firstReadAt` INTEGER NOT NULL DEFAULT 0, " +
+            "`charsReadTotal` INTEGER NOT NULL DEFAULT 0, `comicPage` INTEGER, " +
+            "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookId`), " +
+            "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )"
+
+    /** 建一个 v3 形态的库（含一行阅读进度老数据），之后手动跑 v3→v4 迁移。 */
+    private fun openV3(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(3) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+                db.execSQL(bookPrefsV1)
+                db.execSQL(insertV1)
+                MIGRATION_1_2.migrate(db)
+                MIGRATION_2_3.migrate(db)
+                db.execSQL(readingProgressV3)
+                db.execSQL(
+                    "INSERT INTO `reading_progress` (`bookId`, `charOffset`, `chapterIndex`, " +
+                        "`totalReadingMillis`, `firstReadAt`, `charsReadTotal`, `comicPage`, " +
+                        "`updatedAt`) VALUES (7, 9000, 3, 60000, 1, 9000, 50, 2)",
+                )
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v3 升到 v4 建翻译台账表且 reading_progress 加译文锚点列`() {
+        val v3 = openV3()
+        val migrated = openV3()
+
+        MIGRATION_3_4.migrate(migrated)
+
+        // reading_progress 老行原样还在，新列默认 NULL
+        migrated.query(
+            "SELECT `charOffset`, `comicPage`, `translationAnchor` FROM `reading_progress` WHERE `bookId` = 7",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals(9000L, c.getLong(0))
+            assertEquals(50, c.getInt(1))
+            assertTrue("新列应默认 NULL", c.isNull(2))
+        }
+        // 列结构 = v3 的全部列 + 新列（可空、无默认值，与 Room 期望逐项一致）
+        assertEquals(
+            columns(v3, "reading_progress") + Column("translationAnchor", "INTEGER", false, null),
+            columns(migrated, "reading_progress"),
+        )
+        // 新表结构与 4.json 快照一致
+        assertEquals(
+            listOf(
+                Column("bookId", "INTEGER", true, null),
+                Column("lang", "TEXT", true, null),
+                Column("unitKind", "TEXT", true, null),
+                Column("unitIndex", "INTEGER", true, null),
+                Column("status", "TEXT", true, null),
+                Column("model", "TEXT", true, null),
+                Column("paragraphCount", "INTEGER", true, null),
+                Column("updatedAt", "INTEGER", true, null),
+            ),
+            columns(migrated, "translations"),
+        )
+        // 复合主键 (bookId, lang, unitIndex) 与外键级联的形状校验
+        migrated.query("PRAGMA index_list(`translations`)").use { c ->
+            assertTrue("缺主键索引", c.moveToFirst())
+        }
+        migrated.query("PRAGMA foreign_key_list(`translations`)").use { c ->
+            assertTrue("缺外键", c.moveToFirst())
+            assertEquals("books", c.getString(2))
+            assertEquals("CASCADE", c.getString(6))
+        }
+        // 插入一行台账抽查可写
+        migrated.execSQL(
+            "INSERT INTO `translations` (`bookId`, `lang`, `unitKind`, `unitIndex`, `status`, " +
+                "`model`, `paragraphCount`, `updatedAt`) VALUES (7, 'ZH_HANS', 'chapter', 0, 'done', 'm', 12, 3)",
+        )
+        migrated.query(
+            "SELECT `status`, `paragraphCount` FROM `translations` WHERE `bookId` = 7 AND `lang` = 'ZH_HANS'",
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("done", c.getString(0))
+            assertEquals(12, c.getInt(1))
+        }
+    }
+
+    /** 建一个 v4 形态的库（含一行翻译台账老数据），之后手动跑 v4→v5 迁移。 */
+    private fun openV4(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(4) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+                db.execSQL(readingProgressV3)
+                MIGRATION_3_4.migrate(db)
+                db.execSQL(
+                    "INSERT INTO `translations` (`bookId`, `lang`, `unitKind`, `unitIndex`, `status`, " +
+                        "`model`, `paragraphCount`, `updatedAt`) VALUES (7, 'ZH_HANS', 'chapter', 0, 'done', 'm', 12, 3)",
+                )
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v4 升到 v5 建术语表且老数据不动`() {
+        val migrated = openV4()
+
+        MIGRATION_4_5.migrate(migrated)
+
+        // 老表老行原样还在
+        migrated.query(
+            "SELECT `status` FROM `translations` WHERE `bookId` = 7 AND `lang` = 'ZH_HANS'",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals("done", c.getString(0))
+        }
+        // 新表列结构与 Room 期望逐项一致
+        assertEquals(
+            listOf(
+                Column("id", "INTEGER", true, null),
+                Column("scope", "TEXT", true, null),
+                Column("ownerKey", "TEXT", true, null),
+                Column("source", "TEXT", true, null),
+                Column("target", "TEXT", true, null),
+                Column("origin", "TEXT", true, null),
+                Column("confirmed", "INTEGER", true, null),
+            ),
+            columns(migrated, "glossary_terms"),
+        )
+        // (scope, ownerKey, source) 唯一索引：同键二插必败
+        migrated.execSQL(
+            "INSERT INTO `glossary_terms` (`scope`, `ownerKey`, `source`, `target`, `origin`, `confirmed`) " +
+                "VALUES ('book', '7', '张三', 'Zhang San', 'auto', 0)",
+        )
+        var duplicateRejected = false
+        try {
+            migrated.execSQL(
+                "INSERT INTO `glossary_terms` (`scope`, `ownerKey`, `source`, `target`, `origin`, `confirmed`) " +
+                    "VALUES ('book', '7', '张三', 'Sam', 'user', 1)",
+            )
+        } catch (_: android.database.SQLException) {
+            duplicateRejected = true
+        }
+        assertTrue("唯一索引未生效", duplicateRejected)
+        // 不同 scope / ownerKey 的同名 source 共存
+        migrated.execSQL(
+            "INSERT INTO `glossary_terms` (`scope`, `ownerKey`, `source`, `target`, `origin`, `confirmed`) " +
+                "VALUES ('global', '', '张三', 'Sam', 'user', 1)",
+        )
+        migrated.query("SELECT COUNT(*) FROM `glossary_terms`").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
+        }
+    }
 }

@@ -46,6 +46,8 @@ class SettingsViewModel(
     private val credentialStore: CredentialStore,
     private val aiContentGate: AiContentGate,
     private val aiProvider: suspend () -> AiProvider?,
+    /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
+    private val clearAiDataAction: suspend () -> Unit = {},
 ) : ViewModel() {
 
     val preferences: StateFlow<ReadingPreferences> = settingsRepository.preferences
@@ -202,6 +204,8 @@ class SettingsViewModel(
     fun updateAiModelVision(model: String) = launch { settingsRepository.setAiModelVision(model.trim()) }
     fun updateAiTargetLang(targetLang: AiTargetLang) =
         launch { settingsRepository.setAiTargetLang(targetLang) }
+    fun updateAiPricePerMillion(price: Double) =
+        launch { settingsRepository.setAiPricePerMillion(price) }
 
     private val _apiKeyConfigured = MutableStateFlow(credentialStore.readKey() != null)
     val apiKeyConfigured: StateFlow<Boolean> = _apiKeyConfigured.asStateFlow()
@@ -215,6 +219,9 @@ class SettingsViewModel(
         credentialStore.clear()
         _apiKeyConfigured.value = false
     }
+
+    /** 「清除全部 AI 数据」（M19/M20）：译本副本 + 翻译台账 + 术语表；凭据与外发历史不动。 */
+    fun clearAiData() = launch { clearAiDataAction() }
 
     /** 测试连接的状态；key 永远不进入这里（也不进日志）。 */
     sealed interface AiTestState {
@@ -296,6 +303,7 @@ class SettingsViewModel(
                     credentialStore = container.credentialStore,
                     aiContentGate = container.aiContentGate,
                     aiProvider = container::aiProvider,
+                    clearAiDataAction = container::clearAiData,
                 )
             }
         }

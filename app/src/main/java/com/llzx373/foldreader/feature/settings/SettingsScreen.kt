@@ -99,7 +99,9 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showAiApiKeyDialog by remember { mutableStateOf(false) }
     var showAiHistoryDialog by remember { mutableStateOf(false) }
     var showBuiltinPromptsDialog by remember { mutableStateOf(false) }
+    var showGlossaryDialog by remember { mutableStateOf(false) }
     var showAiClearKeyConfirm by remember { mutableStateOf(false) }
+    var showAiClearDataConfirm by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
     val clipboard = LocalClipboardManager.current
@@ -564,9 +566,19 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     modifier = Modifier.clickable { showBuiltinPromptsDialog = true },
                 )
                 ListItem(
+                    headlineContent = { Text("术语表") },
+                    supportingContent = { Text("确认自动生成的专名候选，维护全局与单书的约定译法") },
+                    modifier = Modifier.clickable { showGlossaryDialog = true },
+                )
+                ListItem(
                     headlineContent = { Text("清除凭据") },
                     supportingContent = { Text("删除已保存的 API 密钥") },
                     modifier = Modifier.clickable { showAiClearKeyConfirm = true },
+                )
+                ListItem(
+                    headlineContent = { Text("清除全部 AI 数据") },
+                    supportingContent = { Text("删除所有书的译本、翻译台账与术语表；凭据与外发历史保留") },
+                    modifier = Modifier.clickable { showAiClearDataConfirm = true },
                 )
                 ListItem(
                     headlineContent = { Text("关于 AI") },
@@ -760,6 +772,9 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     if (showBuiltinPromptsDialog) {
         BuiltinPromptsDialog(onDismiss = { showBuiltinPromptsDialog = false })
     }
+    if (showGlossaryDialog) {
+        GlossaryDialog(onDismiss = { showGlossaryDialog = false })
+    }
     if (showAiClearKeyConfirm) {
         AlertDialog(
             onDismissRequest = { showAiClearKeyConfirm = false },
@@ -773,6 +788,27 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             },
             dismissButton = {
                 TextButton(onClick = { showAiClearKeyConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+    if (showAiClearDataConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAiClearDataConfirm = false },
+            title = { Text("清除全部 AI 数据") },
+            text = {
+                Text(
+                    "将删除所有书的译本文件、翻译台账与术语表（已译章节需重新翻译）。" +
+                        "API 密钥、服务商配置与外发历史保留。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearAiData()
+                    showAiClearDataConfirm = false
+                }) { Text("清除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAiClearDataConfirm = false }) { Text("取消") }
             },
         )
     }

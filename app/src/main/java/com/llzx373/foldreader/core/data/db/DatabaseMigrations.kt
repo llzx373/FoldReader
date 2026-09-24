@@ -32,6 +32,46 @@ internal val MIGRATION_2_3 = object : Migration(2, 3) {
 }
 
 /**
+ * v4：新建翻译单位台账表 `translations`（M19），并给 `reading_progress` 加
+ * 译文模式锚点列 `translationAnchor`（可空，原/译/页式三锚点对称共存）。
+ * 建表语句照 `app/schemas/…/4.json` 快照逐字誊写。
+ */
+internal val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `translations` (`bookId` INTEGER NOT NULL, " +
+                "`lang` TEXT NOT NULL, `unitKind` TEXT NOT NULL, `unitIndex` INTEGER NOT NULL, " +
+                "`status` TEXT NOT NULL, `model` TEXT NOT NULL, `paragraphCount` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookId`, `lang`, `unitIndex`), " +
+                "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL(
+            "ALTER TABLE `reading_progress` ADD COLUMN `translationAnchor` INTEGER",
+        )
+    }
+}
+
+/**
+ * v5：新建术语表 `glossary_terms`（M20，R6）。自增主键 + (scope, ownerKey, source)
+ * 唯一索引；不设书籍外键（global/series 行不属于任何书）。
+ * 建表语句照 Room 期望的结构书写，由迁移测试与 `app/schemas/…/5.json` 快照核对。
+ */
+internal val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `glossary_terms` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`scope` TEXT NOT NULL, `ownerKey` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+                "`target` TEXT NOT NULL, `origin` TEXT NOT NULL, `confirmed` INTEGER NOT NULL)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_glossary_terms_scope_ownerKey_source` " +
+                "ON `glossary_terms` (`scope`, `ownerKey`, `source`)",
+        )
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -40,4 +80,5 @@ internal val MIGRATION_2_3 = object : Migration(2, 3) {
  *
  * 迁移只做结构变更；要动数据另起一条 Migration，并在上面补注释说明。
  */
-val DATABASE_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+val DATABASE_MIGRATIONS: Array<Migration> =
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)

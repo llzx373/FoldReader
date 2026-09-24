@@ -82,16 +82,20 @@ private fun ColorDots(
  *
  * 传 null 的项不显示——页式（漫画 / PDF）没有笔记与文字层，那里只给
  * 「色点高亮 / 下划线 / 书签 / 复制（有文字层时）/ 取消」。
+ * 「翻译」（M18 选中即译）只在 AI 服务已配置时由调用方传入。
+ * 译文视角（M19）下标注写入全部禁用：调用方把色点/笔记/下划线/书签/翻译都传 null，
+ * 只留「复制 / 取消」。
  */
 @Composable
 fun SelectionActionBar(
     colors: ReaderColors,
-    onPickColor: (Long) -> Unit,
-    onBookmark: () -> Unit,
+    onPickColor: ((Long) -> Unit)? = null,
+    onBookmark: (() -> Unit)? = null,
     onCancel: () -> Unit,
     onNote: (() -> Unit)? = null,
     onUnderline: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
+    onTranslate: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -106,11 +110,12 @@ fun SelectionActionBar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            ColorDots(selectedArgb = -1L, onPick = onPickColor)
+            if (onPickColor != null) ColorDots(selectedArgb = -1L, onPick = onPickColor)
             if (onNote != null) TextButton(onClick = onNote) { Text("笔记") }
             if (onUnderline != null) TextButton(onClick = onUnderline) { Text("下划线") }
-            TextButton(onClick = onBookmark) { Text("书签") }
+            if (onBookmark != null) TextButton(onClick = onBookmark) { Text("书签") }
             if (onCopy != null) TextButton(onClick = onCopy) { Text("复制") }
+            if (onTranslate != null) TextButton(onClick = onTranslate) { Text("翻译") }
             TextButton(onClick = onCancel) { Text("取消") }
         }
     }

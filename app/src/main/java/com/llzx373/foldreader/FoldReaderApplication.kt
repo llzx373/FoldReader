@@ -2,7 +2,9 @@ package com.llzx373.foldreader
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.room.Room
 import com.llzx373.foldreader.core.data.db.DATABASE_MIGRATIONS
 import com.llzx373.foldreader.core.data.db.FoldReaderDatabase
@@ -78,6 +80,9 @@ class AppContainer(context: Context) {
     )
     val pageDiskCache: com.llzx373.foldreader.core.reader.PageDiskCache =
         com.llzx373.foldreader.core.reader.FilePageDiskCache(pageBoundsDir)
+    /** 译本副本目录（M19）：`<bookId>/<lang>/` 下 units.json + unit_*.json + content.txt/.toc。 */
+    val translationsDir = File(context.filesDir, "translations").apply { mkdirs() }
+    val translationStore = com.llzx373.foldreader.core.translate.TranslationStore(translationsDir)
     val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
         bookDao = database.bookDao(),
         progressDao = database.readingProgressDao(),
@@ -91,6 +96,9 @@ class AppContainer(context: Context) {
         pageDiskCache = pageDiskCache,
         comicStore = comicExtractionStore,
         sourceDir = sourceDir,
+        translationStore = translationStore,
+        translationDao = database.translationDao(),
+        glossaryTermDao = database.glossaryTermDao(),
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     /** AI API key 加密存储（AndroidKeyStore AES/GCM）；明文不出存储边界。 */
@@ -154,6 +162,143 @@ class AppContainer(context: Context) {
             sharedAiHttpClient(),
         )
     }
+    /**
+     * 装配翻译引擎（M19/M20）：每次按当前配置新建（Provider 廉价），未配置时引擎内
+     * provider 为 null、所有翻译入口直接失败返回。引擎无状态，随取随用。
+     * 术语注入经 [glossaryRepository] 每单位现取（确认动作即时生效）。
+     */
+    suspend fun translateEngine(): com.llzx373.foldreader.feature.translate.TranslateEngine =
+        com.llzx373.foldreader.feature.translate.TranslateEngine(
+            provider = aiProvider(),
+            contentGate = aiContentGate,
+            store = translationStore,
+            translationDao = database.translationDao(),
+            preferences = { settingsRepository.preferences.first() },
+            glossaryRepository = glossaryRepository,
+        )
+
+    /** 术语表仓库（M20）：全局/单书（系列预留）合并注入与候选落表的统一入口。 */
+    val glossaryRepository =
+        com.llzx373.foldreader.core.translate.GlossaryRepository(database.glossaryTermDao())
+
+    /**
+     * 人物候选生成（M20，R6）：取该书人物出场索引 Top N（按提及次数）落为
+     * 未确认候选（target 空，确认时补填）。术语 UI 打开单书候选与全书翻译启动时调用。
+     */
+    suspend fun seedGlossaryCandidatesFromPersons(bookId: Long) = withContext(Dispatchers.IO) {
+        runCatching {
+            val persons = database.personAppearanceDao().topForBook(bookId, PERSON_CANDIDATE_LIMIT)
+            glossaryRepository.upsertCandidates(
+                com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK,
+                bookId.toString(),
+                persons.map { it.name to "" },
+            )
+        }
+    }
+
+    /**
+     * 设置页「清除全部 AI 数据」（M19/M20）：译本副本目录整体清空 + 翻译台账与术语表清零。
+     * 不影响 API 凭据与外发历史（各有独立入口）；清完后所有书的翻译入口回到「未译」。
+     */
+    suspend fun clearAiData() = withContext(Dispatchers.IO) {
+        translationsDir.listFiles()?.forEach { it.deleteRecursively() }
+        database.translationDao().deleteAll()
+        database.glossaryTermDao().deleteAll()
+    }
+
+    /**
+     * 队列消费侧的一本书内容源：打开 parser 内容 → 读/算单位清单（首算落盘
+     * saveUnits，断点续译共享同一份切块边界）→ 逐单位读原文。实时索引未封口时
+     * 等封口再切块（切块边界依赖终值 charCount，同阅读器口径）。
+     */
+    private class ContainerTranslationSource(
+        private val book: com.llzx373.foldreader.core.data.db.BookEntity,
+        private val content: com.llzx373.foldreader.core.format.BookContent,
+        private val chapters: List<com.llzx373.foldreader.core.format.Chapter>,
+        private val store: com.llzx373.foldreader.core.translate.TranslationStore,
+        private val bookId: Long,
+    ) : com.llzx373.foldreader.feature.translate.BookTranslationSource {
+        override val bookTitle: String get() = book.title
+
+        override suspend fun units(
+            lang: com.llzx373.foldreader.core.ai.AiTargetLang,
+        ): List<com.llzx373.foldreader.core.translate.TranslationUnit> =
+            withContext(Dispatchers.IO) {
+                store.readUnits(bookId, lang.name) ?: run {
+                    // 等实时索引封口：awaitCharsAbove 在封口（仍不够 = 真文末）时返回
+                    content.awaitCharsAbove(Long.MAX_VALUE)
+                    if (!content.isCharCountFinal) return@run emptyList()
+                    com.llzx373.foldreader.core.translate.computeUnits(
+                        chapters,
+                        content.charCount,
+                        read = { range -> kotlinx.coroutines.runBlocking { content.read(range) } },
+                    ).also { units ->
+                        if (units.isNotEmpty()) store.saveUnits(bookId, lang.name, units)
+                    }
+                }
+            }
+
+        override suspend fun readUnitText(
+            unit: com.llzx373.foldreader.core.translate.TranslationUnit,
+        ): String = runCatching { content.read(unit.charStart until unit.charEnd) }.getOrDefault("")
+
+        override fun close() {
+            runCatching { (content as? java.io.Closeable)?.close() }
+        }
+    }
+
+    /** 打开一本书的翻译内容源（队列/插队直译共用）；打不开（格式不支持/书不存在）返回 null。 */
+    suspend fun openTranslationSource(
+        bookId: Long,
+    ): com.llzx373.foldreader.feature.translate.BookTranslationSource? = withContext(Dispatchers.IO) {
+        runCatching {
+            val book = bookshelfRepository.getBook(bookId) ?: return@withContext null
+            val parser = bookParsers.parserFor(book.format) ?: return@withContext null
+            val content = parser.openContent(
+                Uri.parse(book.fileUri),
+                com.llzx373.foldreader.core.format.EncodingDetector.forNameOrNull(book.encoding),
+                bookId,
+            )
+            ContainerTranslationSource(
+                book = book,
+                content = content,
+                chapters = bookshelfRepository.getChapters(bookId),
+                store = translationStore,
+                bookId = bookId,
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * 全书批量翻译队列（M20）：AppContainer 单例，生产装配走真实引擎与内容源。
+     * 进度 StateFlow 同时喂前台服务通知与（后续）阅读器/UI 展示。
+     */
+    val bookTranslationQueue = com.llzx373.foldreader.feature.translate.BookTranslationQueue(
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        sourceFor = { bookId -> openTranslationSource(bookId) },
+        translationDao = database.translationDao(),
+        translateUnitCall = { bookId, title, unit, text, lang ->
+            translateEngine().translateUnit(bookId, title, unit, text, lang)
+        },
+        currentLang = { settingsRepository.preferences.first().aiTargetLang },
+    )
+
+    /**
+     * 全书翻译入队（详情页确认入口）：人物候选先落表（幂等 upsert），再入队断点续译。
+     * 返回 false = AI 未配置（入口本该隐藏，这里是兜底）。
+     */
+    suspend fun enqueueBookTranslation(bookId: Long, lang: com.llzx373.foldreader.core.ai.AiTargetLang): Boolean {
+        if (!aiConfigured()) return false
+        seedGlossaryCandidatesFromPersons(bookId)
+        bookTranslationQueue.enqueueBook(bookId, lang)
+        // 前台服务托住队列（退桌面/锁屏不断译）；POST_NOTIFICATIONS 被拒时静默降级
+        ContextCompat.startForegroundService(
+            appContext,
+            Intent(appContext, com.llzx373.foldreader.feature.translate.TranslationService::class.java),
+        )
+        return true
+    }
+
     /** 清洗配方组装：导入对话框、浏览打开、批量导入共用同一份规则。 */
     val cleanProfileFactory = com.llzx373.foldreader.feature.importer.CleanProfileFactory(settingsRepository)
     val fileBrowserRootsStore = FileBrowserRootsStore(context)
@@ -319,6 +464,7 @@ class AppContainer(context: Context) {
         settingsRepository = settingsRepository,
         bookPrefsDao = database.bookPrefsDao(),
         readingSessionDao = database.readingSessionDao(),
+        glossaryTermDao = database.glossaryTermDao(),
     )
     /** 漫画容器读取（zip 随机访问 / tar·7z·rar 解压缓存 / SAF 目录）。 */
     val comicArchiveFactory = com.llzx373.foldreader.core.comic.ComicArchiveFactory(
@@ -635,6 +781,11 @@ class AppContainer(context: Context) {
                 comicExtractionStore.sweep(books.map { it.contentHash }.toSet())
             }
         }
+    }
+
+    companion object {
+        /** M20 人物术语候选：按提及次数取 Top N 落未确认候选。 */
+        private const val PERSON_CANDIDATE_LIMIT = 20
     }
 }
 

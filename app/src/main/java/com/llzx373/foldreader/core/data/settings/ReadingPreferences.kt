@@ -133,6 +133,12 @@ data class ReadingPreferences(
     val aiTargetLang: AiTargetLang = AiTargetLang.ZH_HANS,
     /** M15：AI 章节规则生成的首次外发一次性确认；确认后不再弹。 */
     val aiChapterRuleConfirmed: Boolean = false,
+    /** M18：选中即译的首次外发一次性确认；确认后不再弹。 */
+    val aiTranslationConfirmed: Boolean = false,
+    /** M19：首次切到译文视角的提示（坐标系/功能限制）只弹一次。 */
+    val translationViewHintShown: Boolean = false,
+    /** M20：「翻译全书」成本预估单价（元 / 百万 token），用户在确认页可改并持久化。 */
+    val aiPricePerMillion: Double = 2.0,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

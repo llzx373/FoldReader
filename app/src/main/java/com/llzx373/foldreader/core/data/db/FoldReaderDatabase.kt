@@ -23,8 +23,10 @@ import androidx.room.RoomDatabase
         OffsetIndexMetaEntity::class,
         BookPrefsEntity::class,
         PersonAppearanceEntity::class,
+        TranslationEntity::class,
+        GlossaryTermEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {
@@ -38,4 +40,6 @@ abstract class FoldReaderDatabase : RoomDatabase() {
     abstract fun offsetIndexDao(): OffsetIndexDao
     abstract fun bookPrefsDao(): BookPrefsDao
     abstract fun personAppearanceDao(): PersonAppearanceDao
+    abstract fun translationDao(): TranslationDao
+    abstract fun glossaryTermDao(): GlossaryTermDao
 }

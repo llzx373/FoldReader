@@ -10,6 +10,10 @@ data class BuiltinPrompt(val feature: String, val template: String)
  */
 object BuiltinPrompts {
     val chapterRuleGeneration = BuiltinPrompt("章节规则生成", ChapterRulePrompt.SYSTEM_PROMPT)
+    val selectionTranslation = BuiltinPrompt("选中即译", SelectionTranslatePrompt.SYSTEM_PROMPT)
+    val unitTranslation = BuiltinPrompt("章节翻译", UnitTranslatePrompt.SYSTEM_PROMPT)
+    val glossaryBackfill = BuiltinPrompt("术语回填", GlossaryBackfillPrompt.SYSTEM_PROMPT)
 
-    val all: List<BuiltinPrompt> = listOf(chapterRuleGeneration)
+    val all: List<BuiltinPrompt> =
+        listOf(chapterRuleGeneration, selectionTranslation, unitTranslation, glossaryBackfill)
 }

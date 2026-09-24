@@ -114,9 +114,8 @@ class ChapterRulePromptTest {
 
     @Test
     fun `BuiltinPrompts 登记章节规则生成提示词全文`() {
-        val entry = BuiltinPrompts.all.single()
+        val entry = BuiltinPrompts.all.single { it.feature == "章节规则生成" }
 
-        assertEquals("章节规则生成", entry.feature)
         assertEquals(ChapterRulePrompt.SYSTEM_PROMPT, entry.template)
     }
 }

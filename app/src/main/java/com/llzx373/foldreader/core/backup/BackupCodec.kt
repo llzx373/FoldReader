@@ -31,6 +31,8 @@ class BackupCodec(
     private val settingsRepository: SettingsRepository,
     private val bookPrefsDao: BookPrefsDao,
     private val readingSessionDao: ReadingSessionDao,
+    /** M20 术语表（glossary 段）；null = 不导出（测试或旧装配点）。 */
+    private val glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
 ) {
 
     suspend fun exportJson(): JSONObject {
@@ -143,6 +145,36 @@ class BackupCodec(
             booksJson.put(bookJson)
         }
         root.put("books", booksJson)
+        // M20 术语表（v6 起）：全部层级整表导出。单书行的 ownerKey 是本机 bookId，
+        // 换机恢复时按 contentHash 重映射（书没导入则跳过该行），所以附带 contentHash。
+        glossaryTermDao?.let { dao ->
+            val booksById = books.associateBy { it.id }
+            val glossaryJson = JSONArray()
+            dao.getAll().forEach { term ->
+                val book = if (term.scope == com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK) {
+                    booksById[term.ownerKey.toLongOrNull()]
+                } else {
+                    null
+                }
+                // 单书行找不到所属书（库内已无该书）不导出——恢复过去也是孤儿
+                if (term.scope == com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK &&
+                    book == null
+                ) {
+                    return@forEach
+                }
+                glossaryJson.put(
+                    JSONObject()
+                        .put("scope", term.scope)
+                        .put("ownerKey", term.ownerKey)
+                        .put("source", term.source)
+                        .put("target", term.target)
+                        .put("origin", term.origin)
+                        .put("confirmed", term.confirmed)
+                        .put("contentHash", book?.contentHash ?: JSONObject.NULL),
+                )
+            }
+            root.put("glossary", glossaryJson)
+        }
         return root
     }
 
@@ -304,6 +336,43 @@ class BackupCodec(
             }
         }
 
+        // M20 术语表（v6 起）：单书行按 contentHash 重映射 ownerKey（书未导入则跳过），
+        // 其余层级原样落库；按 (scope, ownerKey, source) 去重 upsert
+        var restoredGlossary = 0
+        root.optJSONArray("glossary")?.let { arr ->
+            val dao = glossaryTermDao
+            if (dao != null) {
+                val seen = HashSet<String>()
+                for (i in 0 until arr.length()) {
+                    val t = arr.getJSONObject(i)
+                    val scope = t.optString("scope")
+                    var ownerKey = t.optString("ownerKey")
+                    if (scope == com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK) {
+                        val hash = if (t.isNull("contentHash")) null else t.optString("contentHash")
+                        val book = hash?.let { bookshelfRepository.findByContentHash(it) } ?: continue
+                        ownerKey = book.id.toString()
+                    }
+                    val source = t.optString("source")
+                    if (source.isBlank()) continue
+                    if (!seen.add("$scope$ownerKey$source")) continue
+                    dao.upsert(
+                        com.llzx373.foldreader.core.data.db.GlossaryTermEntity(
+                            scope = scope,
+                            ownerKey = ownerKey,
+                            source = source,
+                            target = t.optString("target"),
+                            origin = t.optString(
+                                "origin",
+                                com.llzx373.foldreader.core.data.db.GlossaryTermEntity.ORIGIN_USER,
+                            ),
+                            confirmed = t.optBoolean("confirmed"),
+                        ),
+                    )
+                    restoredGlossary++
+                }
+            }
+        }
+
         return ImportResult(
             restoredBooks = restoredBooks,
             missingBookTitles = missing,
@@ -311,6 +380,7 @@ class BackupCodec(
             restoredAnnotations = restoredAnnotations,
             restoredSessions = restoredSessions,
             restoredBookPrefs = restoredBookPrefs,
+            restoredGlossary = restoredGlossary,
         )
     }
 

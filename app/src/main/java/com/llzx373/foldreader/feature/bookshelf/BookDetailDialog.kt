@@ -216,6 +216,8 @@ fun BookDetailDialog(
                         }
                         // M15：仅 TXT + AI 已配置时渲染（组件内部自查）
                         ChapterRuleAiEntry(bookId)
+                        // M20：全文本书籍 + AI 已配置时渲染（组件内部自查），确认页含成本预估
+                        com.llzx373.foldreader.feature.translate.BookTranslateEntry(bookId)
                         if (book.format == BookFormat.TXT) {
                             val cleanDefaults by viewModel.cleanDefaults.collectAsState()
                             val cleanPreview by viewModel.cleanPreview.collectAsState()

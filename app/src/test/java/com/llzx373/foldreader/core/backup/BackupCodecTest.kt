@@ -9,6 +9,8 @@ import com.llzx373.foldreader.core.data.db.BookPrefsDao
 import com.llzx373.foldreader.core.data.db.BookPrefsEntity
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
+import com.llzx373.foldreader.core.data.db.GlossaryTermDao
+import com.llzx373.foldreader.core.data.db.GlossaryTermEntity
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.data.db.ReadingSessionDao
 import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
@@ -331,6 +333,113 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `v6 术语表随备份往返且单书行按 contentHash 重映射`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceGlossary = FakeGlossaryTermDao()
+        sourceGlossary.rows += GlossaryTermEntity(
+            id = 1, scope = GlossaryTermEntity.SCOPE_GLOBAL, ownerKey = "",
+            source = "魔法", target = "magic",
+            origin = GlossaryTermEntity.ORIGIN_USER, confirmed = true,
+        )
+        sourceGlossary.rows += GlossaryTermEntity(
+            id = 2, scope = GlossaryTermEntity.SCOPE_BOOK, ownerKey = "1",
+            source = "张三", target = "Zhang San",
+            origin = GlossaryTermEntity.ORIGIN_AUTO, confirmed = false,
+        )
+        // 库内已无该书的孤儿单书行：不导出（恢复过去也是孤儿）
+        sourceGlossary.rows += GlossaryTermEntity(
+            id = 3, scope = GlossaryTermEntity.SCOPE_BOOK, ownerKey = "99",
+            source = "孤儿", target = "orphan",
+            origin = GlossaryTermEntity.ORIGIN_AUTO, confirmed = false,
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            sourceGlossary,
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(mutableListOf(book(id = 7, hash = "hashA")))
+        val targetGlossary = FakeGlossaryTermDao()
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            targetGlossary,
+        ).importJson(json)
+
+        assertEquals(2, result.restoredGlossary)
+        val global = targetGlossary.rows.single { it.scope == GlossaryTermEntity.SCOPE_GLOBAL }
+        assertEquals("魔法", global.source)
+        assertEquals(true, global.confirmed)
+        val bookRow = targetGlossary.rows.single { it.scope == GlossaryTermEntity.SCOPE_BOOK }
+        assertEquals("7", bookRow.ownerKey) // ownerKey 已重映射为本机 bookId
+        assertEquals("张三", bookRow.source)
+        assertEquals("Zhang San", bookRow.target)
+        assertEquals(false, bookRow.confirmed)
+        assertEquals(GlossaryTermEntity.ORIGIN_AUTO, bookRow.origin)
+    }
+
+    @Test
+    fun `v6 旧备份缺 glossary 段时不产生任何术语行`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 5,
+              "books": []
+            }
+        """.trimIndent()
+        val targetGlossary = FakeGlossaryTermDao()
+        BackupCodec(
+            FakeBookshelfRepository(),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            targetGlossary,
+        ).importJson(legacy)
+
+        assertTrue(targetGlossary.rows.isEmpty())
+    }
+
+    @Test
+    fun `v6 术语行按 source 去重upsert`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceGlossary = FakeGlossaryTermDao()
+        sourceGlossary.rows += GlossaryTermEntity(
+            id = 1, scope = GlossaryTermEntity.SCOPE_GLOBAL, ownerKey = "",
+            source = "魔法", target = "magic",
+            origin = GlossaryTermEntity.ORIGIN_USER, confirmed = true,
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            sourceGlossary,
+        ).exportJson().toString()
+
+        // 目标机已有同键行（更新的译法）：导入 upsert 覆盖而不是堆出重复行
+        val targetGlossary = FakeGlossaryTermDao()
+        targetGlossary.rows += GlossaryTermEntity(
+            id = 9, scope = GlossaryTermEntity.SCOPE_GLOBAL, ownerKey = "",
+            source = "魔法", target = "sorcery",
+            origin = GlossaryTermEntity.ORIGIN_USER, confirmed = true,
+        )
+        BackupCodec(
+            FakeBookshelfRepository(),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            targetGlossary,
+        ).importJson(json)
+
+        assertEquals(1, targetGlossary.rows.size)
+        assertEquals("magic", targetGlossary.rows.single().target)
+    }
+
+    @Test
     fun `v4 备份恢复 EPUB 扩展元数据且空值恢复为 null`() = runBlocking {
         val sourceBooks = FakeBookshelfRepository(
             mutableListOf(
@@ -551,6 +660,15 @@ class BackupCodecTest {
         override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) =
             update { copy(aiChapterRuleConfirmed = confirmed) }
 
+        override suspend fun setAiTranslationConfirmed(confirmed: Boolean) =
+            update { copy(aiTranslationConfirmed = confirmed) }
+
+        override suspend fun setTranslationViewHintShown(shown: Boolean) =
+            update { copy(translationViewHintShown = shown) }
+
+        override suspend fun setAiPricePerMillion(price: Double) =
+            update { copy(aiPricePerMillion = price) }
+
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()
         }
@@ -687,5 +805,57 @@ class BackupCodecTest {
         override suspend fun getAll(): List<ReadingSessionEntity> = rows.toList()
         override suspend fun countReadingDays(bookId: Long): Int =
             rows.filter { it.bookId == bookId }.size
+    }
+
+    /** 内存术语表：upsert 按 (scope, ownerKey, source) 去重，与唯一索引同口径。 */
+    private class FakeGlossaryTermDao : GlossaryTermDao {
+        val rows = mutableListOf<GlossaryTermEntity>()
+        private var nextId = 1L
+
+        override fun observeFor(scope: String, ownerKey: String): Flow<List<GlossaryTermEntity>> =
+            flowOf(rows.filter { it.scope == scope && it.ownerKey == ownerKey })
+
+        override fun observeUnconfirmed(): Flow<List<GlossaryTermEntity>> =
+            flowOf(rows.filter { !it.confirmed })
+
+        override suspend fun getAll(): List<GlossaryTermEntity> = rows.toList()
+
+        override fun observeAll(): Flow<List<GlossaryTermEntity>> = flowOf(rows.toList())
+
+        override suspend fun upsert(term: GlossaryTermEntity): Long {
+            upsertAll(listOf(term))
+            return rows.last().id
+        }
+
+        override suspend fun upsertAll(terms: List<GlossaryTermEntity>) {
+            terms.forEach { term ->
+                rows.removeAll {
+                    it.scope == term.scope && it.ownerKey == term.ownerKey && it.source == term.source
+                }
+                rows += term.copy(id = if (term.id > 0) term.id else nextId++)
+            }
+        }
+
+        override suspend fun setConfirmed(id: Long, confirmed: Boolean, target: String?) {
+            val index = rows.indexOfFirst { it.id == id }
+            if (index >= 0) {
+                rows[index] = rows[index].copy(confirmed = confirmed, target = target ?: rows[index].target)
+            }
+        }
+
+        override suspend fun delete(id: Long) {
+            rows.removeAll { it.id == id }
+        }
+
+        override suspend fun deleteFor(scope: String, ownerKey: String) {
+            rows.removeAll { it.scope == scope && it.ownerKey == ownerKey }
+        }
+
+        override suspend fun confirmedFor(scope: String, ownerKey: String): List<GlossaryTermEntity> =
+            rows.filter { it.scope == scope && it.ownerKey == ownerKey && it.confirmed }
+
+        override suspend fun deleteAll() {
+            rows.clear()
+        }
     }
 }

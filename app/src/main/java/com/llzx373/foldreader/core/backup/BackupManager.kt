@@ -20,6 +20,7 @@ class BackupManager(
     settingsRepository: SettingsRepository,
     bookPrefsDao: BookPrefsDao,
     readingSessionDao: ReadingSessionDao,
+    glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
 ) {
 
     private val codec = BackupCodec(
@@ -27,6 +28,7 @@ class BackupManager(
         settingsRepository = settingsRepository,
         bookPrefsDao = bookPrefsDao,
         readingSessionDao = readingSessionDao,
+        glossaryTermDao = glossaryTermDao,
     )
 
     data class ImportResult(
@@ -36,6 +38,7 @@ class BackupManager(
         val restoredAnnotations: Int,
         val restoredSessions: Int = 0,
         val restoredBookPrefs: Int = 0,
+        val restoredGlossary: Int = 0,
     )
 
     suspend fun exportTo(uri: Uri) = withContext(Dispatchers.IO) {
@@ -54,9 +57,10 @@ class BackupManager(
 
     companion object {
         /**
+         * v6：新增术语表 `glossary` 段（全局/系列/单书全表，单书行附 contentHash 供换机重映射）。
          * v5：书签/标注增加页式锚点（页序号 + 归一化页内坐标），中间点击区动作入备份。
          * 导入侧对老版本仍然兼容——新字段缺失即按 null / 默认值处理。
          */
-        const val BACKUP_VERSION = 5
+        const val BACKUP_VERSION = 6
     }
 }
