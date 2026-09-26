@@ -192,9 +192,18 @@
 
 ## M23 漫画翻译 v2（按 M22 反馈定范围）
 
-- [ ] 条漫/长图跨页气泡合并（R10）
-- [ ] 气泡位置手动微调
-- [ ] 可选视觉模型 OCR 模式（页图像外发，逐书单独明示）
+- [x] 条漫/长图跨页气泡合并（R10）
+- [x] 气泡位置手动微调
+- [x] 可选视觉模型 OCR 模式（页图像外发，逐书单独明示）
+
+验收记录（2026-09-26）：
+
+- 跨页合并（R10）：`core/translate/CrossPageMerge` 纯逻辑——页 N 贴底（bottom > 0.99）× 页 N+1 贴顶（top < 0.01）、横向重叠 ≥0.5、候选对按重叠降序全局贪心配对；引擎 translatePage 前合并并改写两页 OCR 缓存（owner 气泡并入续段文字行、记 `continuation` 矩形，codec 加可选字段向后兼容）；页 N+1 覆盖层经 `overlayFor` 追加「抹除条目」（`TranslatedBubble.erased`，不透明底色盖掉原文续段、不可调不写字）。
+- 气泡微调：`<page>.adjust.json` 按气泡序号存覆盖矩形（`BubbleAdjust` 纯逻辑：命中取重叠中面积最小、move/resize 夹取页内）；重写 OCR 缓存时同页微调连带作废。菜单「调整气泡」进微调模式（强制覆盖层视角、翻页自动备无译文底图），全部气泡画轮廓，拖动移动、右下角手柄缩放，松手落盘并按最新微调重建覆盖层，「恢复自动位置」一键作废（显隐经 `hasPageAdjustments`）。
+- 视觉模式：`ComicVisionTranslatePrompt`（JSON 数组契约 `box+source+translation`，box 四元界内 l<r/t<b、文非空，任一不符整页失败重试一次）；页图像长边 1024px JPEG q85 经既有 `AiContent.Image` 通道外发；视觉产物照常落 `.ocr.json`（confidence=1f）与译文文件，覆盖层/对照/微调/重译链路完全复用；台账 feature=漫画视觉翻译并注明「页图像」；提示词登记 `BuiltinPrompts`。
+- 合规：页图像外发**逐书**明示确认（`aiComicVisionConfirmedBooks`，对话框说清「整页图片外发」），未确认零外发；未配置视觉模型时入口不出现。
+- 偏差：滚动（条漫连续）模式不支持微调手势（另一套坐标系，入口不出现）；整卷翻译不提供视觉模式（仅「视觉翻译本页」，批量成本与速率不可控，v2 再议）；跨页合并只在两页都未译时自动进行（已译页气泡序号动不得）；视觉模式无流式（数组元素级流式解析不划算，全部译出后一次性回调）。
+- 测试：`BubbleAdjustTest`/`CrossPageMergeTest`/`ComicVisionTranslatePromptTest` 纯逻辑；`ComicTranslationStoreTest` 补微调存取与作废；`ComicTranslationE2ETest` 新增 6 用例（视觉链路落盘与请求体图像块、垃圾输出置 failed、未配视觉模型零网络、跨页合并整句翻译、已译页不合并、覆盖层抹除条目）。
 
 ---
 

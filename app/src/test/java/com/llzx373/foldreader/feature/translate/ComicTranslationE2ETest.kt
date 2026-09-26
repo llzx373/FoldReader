@@ -125,7 +125,10 @@ class ComicTranslationE2ETest {
         )
     }
 
-    private fun newEngine(provider: AiProvider? = this.provider) = ComicTranslateEngine(
+    private fun newEngine(
+        provider: AiProvider? = this.provider,
+        visionModel: String = "vision-model",
+    ) = ComicTranslateEngine(
         provider = provider,
         contentGate = gate,
         store = store,
@@ -133,12 +136,14 @@ class ComicTranslationE2ETest {
         preferences = {
             ReadingPreferences(
                 aiModelTranslation = "test-model",
+                aiModelVision = visionModel,
                 aiTargetLang = AiTargetLang.ZH_HANS,
             )
         },
         glossaryRepository = GlossaryRepository(db.glossaryTermDao()),
         seriesKeyFor = { "test-series" },
         bubblesFor = { _, page -> bubbles[page].orEmpty() },
+        pageImageBase64For = { _, _ -> "QUJD" },
     )
 
     // ---------------------------------------------------------------- SSE 道具
@@ -410,5 +415,174 @@ class ComicTranslationE2ETest {
         assertTrue(result.isFailure)
         assertEquals(0, server.requestCount)
         assertNotNull(result.exceptionOrNull())
+    }
+
+    // ---------------------------------------------------------------- M23 视觉模式
+
+    /** 视觉模型输出：一个气泡的契约 JSON。 */
+    private fun visionJson(vararg bubbles: String): String =
+        bubbles.joinToString(",", prefix = "[", postfix = "]") { it }
+
+    private fun visionBubble(l: Double, t: Double, r: Double, b: Double, source: String, translation: String) =
+        "{\"box\":[$l,$t,$r,$b],\"source\":${JSONObject.quote(source)},\"translation\":${JSONObject.quote(translation)}}"
+
+    @Test
+    fun `视觉模式页图像外发且气泡框与译文一次落盘`() = runTest {
+        server.enqueue(
+            sse(
+                visionJson(
+                    visionBubble(0.1, 0.2, 0.5, 0.4, "行くぞ", "走吧"),
+                    visionBubble(0.6, 0.5, 0.9, 0.8, "待って", "等等"),
+                ),
+            ),
+        )
+        val events = mutableListOf<Pair<Int, String>>()
+
+        val result = newEngine().translatePageVision(1, "测试漫画", 0, AiTargetLang.ZH_HANS) { index, text ->
+            events += index to text
+        }
+
+        assertEquals(2, result.getOrThrow())
+        assertEquals(1, server.requestCount)
+        // 请求体：视觉模型 + 页图像以 image_url 块外发
+        val body = takeRequestJson()
+        assertEquals("vision-model", body.getString("model"))
+        val content = body.getJSONArray("messages").getJSONObject(1).getJSONArray("content")
+        var imageUrl: String? = null
+        for (i in 0 until content.length()) {
+            val block = content.getJSONObject(i)
+            if (block.optString("type") == "image_url") {
+                imageUrl = block.getJSONObject("image_url").getString("url")
+            }
+        }
+        assertEquals("data:image/jpeg;base64,QUJD", imageUrl)
+        // 识别产物（框 + 原文）与译文双双落盘：覆盖层/对照面板照常可用
+        val ocr = store.loadOcr(1, 0)!!
+        assertEquals(2, ocr.size)
+        assertEquals(0.1f, ocr[0].rect.left, 0.001f)
+        assertEquals("行くぞ", ocr[0].text)
+        assertEquals(listOf("走吧", "等等"), store.loadTranslation(1, "ZH_HANS", 0)?.texts)
+        assertEquals(listOf(0 to "走吧", 1 to "等等"), events)
+        val row = db.comicPageTranslationDao().getForBook(1, "ZH_HANS").single()
+        assertEquals(ComicPageTranslationEntity.STATUS_DONE, row.status)
+        assertEquals("vision-model", row.model)
+        // 台账记的是「漫画视觉翻译」且注明页图像
+        val record = gate.history().last()
+        assertEquals("漫画视觉翻译", record.feature)
+        assertTrue(record.scope.contains("页图像"))
+    }
+
+    @Test
+    fun `视觉模式输出垃圾两次置 failed 且不落盘`() = runTest {
+        server.enqueue(sse("这不是 JSON"))
+        server.enqueue(sse("[{\"box\":[5,5,9,9],\"source\":\"a\",\"translation\":\"b\"}]"))
+
+        val result = newEngine().translatePageVision(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertTrue(result.isFailure)
+        assertEquals(2, server.requestCount)
+        val row = db.comicPageTranslationDao().getForBook(1, "ZH_HANS").single()
+        assertEquals(ComicPageTranslationEntity.STATUS_FAILED, row.status)
+        assertTrue(store.loadOcr(1, 0) == null)
+        assertTrue(store.loadTranslation(1, "ZH_HANS", 0) == null)
+    }
+
+    @Test
+    fun `未配置视觉模型直接失败且不触网`() = runTest {
+        val result = newEngine(visionModel = "")
+            .translatePageVision(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertTrue(result.isFailure)
+        assertEquals(0, server.requestCount)
+    }
+
+    // ---------------------------------------------------------------- M23 跨页气泡合并（R10）
+
+    /** 贴页边的切口气泡（跨页合并的主角）。 */
+    private fun cutBubble(index: Int, rect: OcrRect, text: String) = OcrBubble(
+        index = index,
+        rect = rect,
+        lines = listOf(OcrTextLine(text, rect, 0.9f)),
+        confidence = 0.9f,
+    )
+
+    @Test
+    fun `跨页气泡先合并成整句再翻译`() = runTest {
+        bubbles[0] = listOf(
+            bubble(0, "上部"),
+            cutBubble(1, OcrRect(0.2f, 0.9f, 0.6f, 0.998f), "被切断的"),
+        )
+        bubbles[1] = listOf(
+            cutBubble(0, OcrRect(0.25f, 0.002f, 0.55f, 0.1f), "后半句"),
+            bubble(1, "整气泡"),
+        )
+        server.enqueue(sse(okJson("译上", "整句译")))
+
+        val result = newEngine().translatePage(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertEquals(2, result.getOrThrow())
+        // 发出的第 2 个气泡是合并后的整句
+        assertTrue(takeRequestJson().userContent().contains("被切断的后半句"))
+        // 页 0 缓存：主气泡并入续段文字行并记下续段矩形
+        val owner = store.loadOcr(1, 0)!![1]
+        assertEquals("被切断的后半句", owner.text)
+        assertEquals(OcrRect(0.25f, 0.002f, 0.55f, 0.1f), owner.continuation)
+        // 页 1 缓存：片段移除并重排序，此后翻页 1 时它已不在
+        val next = store.loadOcr(1, 1)!!
+        assertEquals(1, next.size)
+        assertEquals(0, next[0].index)
+        assertEquals("整气泡", next[0].text)
+    }
+
+    @Test
+    fun `下一页已译则不合并`() = runTest {
+        // 页 1 已有译文：合并会改动它的气泡序号，必须跳过
+        store.saveTranslation(1, "ZH_HANS", 1, listOf("已有"))
+        bubbles[0] = listOf(cutBubble(0, OcrRect(0.2f, 0.9f, 0.6f, 0.998f), "被切断的"))
+        bubbles[1] = listOf(cutBubble(0, OcrRect(0.25f, 0.002f, 0.55f, 0.1f), "后半句"))
+        server.enqueue(sse(okJson("半句译")))
+
+        val result = newEngine().translatePage(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertEquals(1, result.getOrThrow())
+        assertFalse(
+            "已译页存在时不应并入下一页片段",
+            takeRequestJson().userContent().contains("后半句"),
+        )
+        // 两页 OCR 缓存都未被改写（merge 才会落缓存）
+        assertTrue(store.loadOcr(1, 0) == null)
+        assertTrue(store.loadOcr(1, 1) == null)
+    }
+
+    @Test
+    fun `覆盖层带上一页续段的抹除条目`() = runTest {
+        val controller = ComicTranslationController(
+            bookId = 1,
+            bookTitleFor = { "测试漫画" },
+            store = store,
+            pageDao = db.comicPageTranslationDao(),
+            engineFor = { null },
+        )
+        // 页 0：被切气泡已合并，续段矩形指向页 1 顶部
+        store.saveOcr(
+            1,
+            0,
+            listOf(
+                cutBubble(0, OcrRect(0.2f, 0.9f, 0.6f, 0.998f), "整句")
+                    .copy(continuation = OcrRect(0.25f, 0.002f, 0.55f, 0.1f)),
+            ),
+        )
+        store.saveOcr(1, 1, listOf(bubble(0, "整气泡")))
+        store.saveTranslation(1, "ZH_HANS", 1, listOf("译"))
+
+        val overlay = controller.overlayFor(AiTargetLang.ZH_HANS, 1)!!
+
+        assertEquals(2, overlay.bubbles.size)
+        val erased = overlay.bubbles.last()
+        assertTrue(erased.erased)
+        assertEquals(OcrRect(0.25f, 0.002f, 0.55f, 0.1f), erased.rect)
+        // 真气泡在前，不受抹除条目影响
+        assertEquals("译", overlay.bubbles[0].text)
+        assertFalse(overlay.bubbles[0].erased)
     }
 }

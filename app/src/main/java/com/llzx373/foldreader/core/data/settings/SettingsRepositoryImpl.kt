@@ -82,6 +82,7 @@ class SettingsRepositoryImpl(
         val AI_CHAPTER_RULE_CONFIRMED = booleanPreferencesKey("ai_chapter_rule_confirmed")
         val AI_TRANSLATION_CONFIRMED = booleanPreferencesKey("ai_translation_confirmed")
         val AI_COMIC_TRANSLATE_CONFIRMED = booleanPreferencesKey("ai_comic_translate_confirmed")
+        val AI_COMIC_VISION_CONFIRMED_BOOKS = stringPreferencesKey("ai_comic_vision_confirmed_books")
         val AI_CLEAN_RECIPE_CONFIRMED = booleanPreferencesKey("ai_clean_recipe_confirmed")
         val AI_METADATA_CONFIRMED = booleanPreferencesKey("ai_metadata_confirmed")
         val TRANSLATION_VIEW_HINT_SHOWN = booleanPreferencesKey("translation_view_hint_shown")
@@ -168,6 +169,8 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiTranslationConfirmed,
                 aiComicTranslateConfirmed = prefs[Keys.AI_COMIC_TRANSLATE_CONFIRMED]
                     ?: defaults.aiComicTranslateConfirmed,
+                aiComicVisionConfirmedBooks = prefs[Keys.AI_COMIC_VISION_CONFIRMED_BOOKS]
+                    ?: defaults.aiComicVisionConfirmedBooks,
                 aiCleanRecipeConfirmed = prefs[Keys.AI_CLEAN_RECIPE_CONFIRMED]
                     ?: defaults.aiCleanRecipeConfirmed,
                 aiMetadataConfirmed = prefs[Keys.AI_METADATA_CONFIRMED]
@@ -444,6 +447,16 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AI_COMIC_TRANSLATE_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun confirmAiComicVisionForBook(bookId: Long) {
+        context.readingPreferencesStore.edit { prefs ->
+            val current = prefs[Keys.AI_COMIC_VISION_CONFIRMED_BOOKS].orEmpty()
+            val ids = current.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toMutableSet()
+            if (ids.add(bookId.toString())) {
+                prefs[Keys.AI_COMIC_VISION_CONFIRMED_BOOKS] = ids.joinToString(",")
+            }
+        }
     }
 
     override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) {

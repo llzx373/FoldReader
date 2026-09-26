@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,14 +48,20 @@ import androidx.compose.ui.unit.IntSize
 import com.llzx373.foldreader.core.paged.PagedPageImage
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.core.ocr.OcrRect
+import com.llzx373.foldreader.core.translate.BubbleAdjust
 import com.llzx373.foldreader.core.translate.BubbleRender
 import com.llzx373.foldreader.core.translate.ComicPageTranslation
 import com.llzx373.foldreader.feature.reader.pageAnnotationsOf
 import com.llzx373.foldreader.feature.reader.pageBookmarksOf
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** 缩放上限：再放大也只是插值出的模糊，还容易把人绕晕。 */
 private const val MAX_ZOOM = 4f
+
+/** 微调模式缩放手柄的热区（屏幕像素）：指尖与气泡右下角的距离在此内即判定为缩放。 */
+private const val ADJUST_HANDLE_PX = 48f
 
 /**
  * 一页的几何变换（适应模式之外的缩放与平移）。
@@ -102,6 +109,13 @@ fun ComicPageView(
     translationTypeface: Typeface? = null,
     /** 对照面板点中的气泡序号（画高亮边框）；-1 = 无。 */
     highlightBubble: Int = -1,
+    /**
+     * 气泡位置微调模式（M23）：开 = 气泡画轮廓、可拖动移动 / 拖右下角手柄缩放，
+     * 页内缩放与锚点手势停用（避免抢手势）。松手定型走 [onBubbleAdjust]。
+     */
+    adjustMode: Boolean = false,
+    /** 微调定型回调：(页序号, 气泡序号, 新矩形)。 */
+    onBubbleAdjust: (pageIndex: Int, bubbleIndex: Int, rect: OcrRect) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     var container by remember { mutableStateOf(IntSize.Zero) }
@@ -113,6 +127,10 @@ fun ComicPageView(
     var dragging by remember(resetKey, fitMode) { mutableStateOf(false) }
     var dragAnchor by remember(resetKey, fitMode) { mutableStateOf<Pair<Float, Float>?>(null) }
     var localSelection by remember(resetKey, fitMode) { mutableStateOf<PageRect?>(null) }
+
+    // 微调拖动中的气泡（序号 + 预览矩形）；松手回调后清空，由外层按新微调重建覆盖层
+    var adjustIndex by remember(resetKey, fitMode) { mutableIntStateOf(-1) }
+    var adjustRect by remember(resetKey, fitMode) { mutableStateOf<OcrRect?>(null) }
 
     val pageBookmarks = remember(host.bookmarks, pageIndex) {
         if (pageIndex < 0) emptyList() else pageBookmarksOf(host.bookmarks, pageIndex.toLong())
@@ -157,12 +175,35 @@ fun ComicPageView(
         )
     }
 
+    /** 归一化页内矩形 → 屏幕矩形（与绘制同一套落位公式）；容器未布局时为 null。 */
+    fun screenRectOf(r: OcrRect): Rect? {
+        val containerW = container.width.toFloat()
+        val containerH = container.height.toFloat()
+        if (containerW <= 0f || containerH <= 0f) return null
+        val (baseW, baseH) = comicBaseSize(imageWidth, imageHeight, containerW, containerH, fitMode)
+        val draw = comicDrawRect(
+            containerW = containerW,
+            containerH = containerH,
+            baseW = baseW,
+            baseH = baseH,
+            scale = transform.scale,
+            offsetX = transform.offsetX,
+            offsetY = transform.offsetY,
+        )
+        return Rect(
+            left = draw.left + r.left * draw.width,
+            top = draw.top + r.top * draw.height,
+            right = draw.left + r.right * draw.width,
+            bottom = draw.top + r.bottom * draw.height,
+        )
+    }
+
     Box(
         modifier = modifier
             .background(background)
             .onSizeChanged { container = it }
-            .pointerInput(zoomEnabled, resetKey, fitMode, imageWidth, imageHeight, container) {
-                if (!zoomEnabled) return@pointerInput
+            .pointerInput(zoomEnabled, adjustMode, resetKey, fitMode, imageWidth, imageHeight, container) {
+                if (!zoomEnabled || adjustMode) return@pointerInput
                 awaitEachGesture {
                     var consuming = false
                     while (true) {
@@ -223,8 +264,8 @@ fun ComicPageView(
                     }
                 }
             }
-            .pointerInput(anchorsEnabled, resetKey, fitMode, imageWidth, imageHeight, container) {
-                if (!anchorsEnabled) return@pointerInput
+            .pointerInput(anchorsEnabled, adjustMode, resetKey, fitMode, imageWidth, imageHeight, container) {
+                if (!anchorsEnabled || adjustMode) return@pointerInput
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offset ->
                         val point = normalizedAt(offset)
@@ -272,6 +313,73 @@ fun ComicPageView(
                         localSelection = null
                     },
                 )
+            }
+            .pointerInput(adjustMode, resetKey, fitMode, imageWidth, imageHeight, container, translation) {
+                if (!adjustMode) return@pointerInput
+                // 微调：命中气泡即接管拖动；右下角手柄区 = 缩放，其余 = 移动。
+                // 没命中不消费事件，外层照常翻页/点按。
+                var startPoint: Pair<Float, Float>? = null
+                var startRect: OcrRect? = null
+                var resizing = false
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val point = normalizedAt(offset) ?: return@detectDragGestures
+                        val bubbles = translation?.bubbles ?: return@detectDragGestures
+                        // 命中多个（气泡重叠）取面积最小的——小气泡不该被大气泡挡住；
+                        // 抹除条目（跨页合并续段）不是真气泡，不可调
+                        val hit = bubbles.mapIndexedNotNull { i, b ->
+                            if (!b.erased && b.rect.containsPoint(point.first, point.second)) {
+                                i to b.rect.area
+                            } else {
+                                null
+                            }
+                        }.minByOrNull { it.second } ?: return@detectDragGestures
+                        val base = bubbles[hit.first].rect
+                        val screen = screenRectOf(base)
+                        resizing = screen != null &&
+                            abs(screen.right - offset.x) <= ADJUST_HANDLE_PX &&
+                            abs(screen.bottom - offset.y) <= ADJUST_HANDLE_PX
+                        startPoint = point
+                        startRect = base
+                        adjustIndex = hit.first
+                        adjustRect = base
+                    },
+                    onDrag = { change, _ ->
+                        val from = startPoint ?: return@detectDragGestures
+                        val base = startRect ?: return@detectDragGestures
+                        if (adjustIndex < 0) return@detectDragGestures
+                        change.consume()
+                        val point = normalizedAt(change.position) ?: return@detectDragGestures
+                        val dx = point.first - from.first
+                        val dy = point.second - from.second
+                        adjustRect = if (resizing) {
+                            BubbleAdjust.resize(base, base.right + dx, base.bottom + dy)
+                        } else {
+                            BubbleAdjust.move(base, dx, dy)
+                        }
+                    },
+                    onDragEnd = {
+                        val index = adjustIndex
+                        val rect = adjustRect
+                        val base = startRect
+                        startPoint = null
+                        startRect = null
+                        resizing = false
+                        adjustIndex = -1
+                        adjustRect = null
+                        // 没实际拖动（只是点了一下）就不写盘
+                        if (index >= 0 && rect != null && rect != base) {
+                            onBubbleAdjust(pageIndex, index, rect)
+                        }
+                    },
+                    onDragCancel = {
+                        startPoint = null
+                        startRect = null
+                        resizing = false
+                        adjustIndex = -1
+                        adjustRect = null
+                    },
+                )
             },
     ) {
         when {
@@ -286,6 +394,9 @@ fun ComicPageView(
                 translation = translation,
                 translationTypeface = translationTypeface,
                 highlightBubble = highlightBubble,
+                adjustMode = adjustMode,
+                adjustIndex = adjustIndex,
+                adjustRect = adjustRect,
             )
 
             // 解码失败要明确说出来：一直转圈的占位比报错更让人以为是自己没等够
@@ -324,6 +435,9 @@ private fun PageContent(
     translation: ComicPageTranslation?,
     translationTypeface: Typeface?,
     highlightBubble: Int,
+    adjustMode: Boolean,
+    adjustIndex: Int,
+    adjustRect: OcrRect?,
 ) {
     when (image) {
         is PagedPageImage.Still -> {
@@ -361,7 +475,21 @@ private fun PageContent(
                             backgrounds = bubbleBackgrounds,
                             typeface = translationTypeface,
                             highlightBubble = highlightBubble,
+                            // 拖动中：被拖气泡按预览矩形画底色与译文，松手才落盘
+                            rectOverride = if (adjustIndex >= 0) adjustIndex to adjustRect else null,
                         )
+                        if (adjustMode) {
+                            drawAdjustOverlay(
+                                baseW = baseW,
+                                baseH = baseH,
+                                scale = transform.scale,
+                                offsetX = transform.offsetX,
+                                offsetY = transform.offsetY,
+                                translation = translation,
+                                activeIndex = adjustIndex,
+                                activeRect = adjustRect,
+                            )
+                        }
                     }
                     drawPageMarks(
                         baseW = baseW,
@@ -568,6 +696,59 @@ private val lowConfidenceBorderColor = Color(0xFFFFA000)
 
 private val highlightBorderColor = Color(0xFF1E88E5)
 
+private val adjustOutlineColor = Color(0x991E88E5)
+
+private val adjustActiveColor = Color(0xFF1E88E5)
+
+/**
+ * 微调模式的轮廓层（M23）：全部气泡画淡蓝描边（含未译出的——微调底图就是无译文覆盖层），
+ * 被拖中的画实色描边 + 右下角缩放手柄；拖动中按预览矩形画。
+ */
+private fun DrawScope.drawAdjustOverlay(
+    baseW: Float,
+    baseH: Float,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    translation: ComicPageTranslation,
+    activeIndex: Int,
+    activeRect: OcrRect?,
+) {
+    val rect = comicDrawRect(size.width, size.height, baseW, baseH, scale, offsetX, offsetY)
+    if (rect.width <= 0f || rect.height <= 0f) return
+    translation.bubbles.forEachIndexed { index, bubble ->
+        if (bubble.erased) return@forEachIndexed // 抹除条目（跨页合并续段）不可调，不画轮廓
+        val active = index == activeIndex
+        val r = if (active && activeRect != null) activeRect else bubble.rect
+        val left = rect.left + r.left * rect.width
+        val top = rect.top + r.top * rect.height
+        val w = (r.right - r.left) * rect.width
+        val h = (r.bottom - r.top) * rect.height
+        if (w <= 4f || h <= 4f) return@forEachIndexed
+        drawRect(
+            color = if (active) adjustActiveColor else adjustOutlineColor,
+            topLeft = Offset(left, top),
+            size = Size(w, h),
+            style = Stroke(width = if (active) 3f else 1.5f),
+        )
+        if (active) {
+            // 缩放手柄：右下角的小方块（固定屏幕像素大小，不随内容缩放）
+            val handle = 14f
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(left + w - handle, top + h - handle),
+                size = Size(handle, handle),
+            )
+            drawRect(
+                color = adjustActiveColor,
+                topLeft = Offset(left + w - handle, top + h - handle),
+                size = Size(handle, handle),
+                style = Stroke(width = 2f),
+            )
+        }
+    }
+}
+
 /**
  * 画翻译覆盖层（视角①）：气泡位铺底色圆角块 + 译文（字号自适应收缩、居中多行）。
  *
@@ -585,6 +766,8 @@ private fun DrawScope.drawTranslationOverlay(
     backgrounds: IntArray,
     typeface: Typeface?,
     highlightBubble: Int,
+    /** 微调拖动预览：(气泡序号, 预览矩形)；该气泡按预览矩形绘制。 */
+    rectOverride: Pair<Int, OcrRect?>? = null,
 ) {
     val rect = comicDrawRect(size.width, size.height, baseW, baseH, scale, offsetX, offsetY)
     if (rect.width <= 0f || rect.height <= 0f) return
@@ -597,20 +780,25 @@ private fun DrawScope.drawTranslationOverlay(
     }
     val rectF = RectF()
     translation.bubbles.forEachIndexed { index, bubble ->
-        val text = bubble.text ?: return@forEachIndexed
-        val left = rect.left + bubble.rect.left * rect.width
-        val top = rect.top + bubble.rect.top * rect.height
-        val right = rect.left + bubble.rect.right * rect.width
-        val bottom = rect.top + bubble.rect.bottom * rect.height
+        // 抹除条目（跨页合并续段）只铺底色；未译出的不画
+        if (!bubble.erased && bubble.text == null) return@forEachIndexed
+        val r = if (rectOverride?.first == index) rectOverride.second ?: bubble.rect else bubble.rect
+        val left = rect.left + r.left * rect.width
+        val top = rect.top + r.top * rect.height
+        val right = rect.left + r.right * rect.width
+        val bottom = rect.top + r.bottom * rect.height
         val w = right - left
         val h = bottom - top
         if (w <= 4f || h <= 4f) return@forEachIndexed
         rectF.set(left, top, right, bottom)
         val bg = backgrounds.getOrNull(index) ?: 0xFFFFFFFF.toInt()
         fillPaint.color = bg
-        fillPaint.alpha = 235
+        // 抹除要盖死原文（不透明）；译文块略透一点，边框/底色与原图融合更自然
+        fillPaint.alpha = if (bubble.erased) 255 else 235
         val corner = minOf(w, h) * 0.12f
         canvas.drawRoundRect(rectF, corner, corner, fillPaint)
+        if (bubble.erased) return@forEachIndexed
+        val text = bubble.text ?: return@forEachIndexed
         val borderColor = when {
             index == highlightBubble -> highlightBorderColor
             bubble.lowConfidence -> lowConfidenceBorderColor

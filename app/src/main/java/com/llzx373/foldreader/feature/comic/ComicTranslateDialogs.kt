@@ -217,6 +217,75 @@ fun ComicVolumeTranslateConfirmDialog(
 }
 
 /**
+ * M23「视觉翻译本页」：页图像直接外发给视觉模型（气泡框与译文一次产出，不经本地 OCR）。
+ *
+ * [firstConfirm] = 该书首次使用：显示图像外发说明（合规：页图像外发逐书明示确认），
+ * 确认按钮文案变为「同意外发并翻译」；确认动作由调用方落账。
+ * [translating] 进行中转圈；[error] 非空显示失败与重试。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ComicVisionTranslateDialog(
+    firstConfirm: Boolean,
+    model: String,
+    translating: Boolean,
+    error: String?,
+    colors: ReaderColors,
+    onStart: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!translating) onDismiss() },
+        containerColor = colors.background,
+        title = { Text("视觉翻译本页") },
+        text = {
+            Column {
+                Text(
+                    text = "范围：当前页。页图像将发送给视觉模型 $model，" +
+                        "由它直接识别气泡并翻译（不经本地 OCR）。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (firstConfirm) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "与「翻译本页」不同：这一步会把整页图片（不只是文字）发送给你配置的 AI 服务。" +
+                            "此确认对本书只出现一次。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.text.copy(alpha = 0.6f),
+                    )
+                }
+                if (translating) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                error?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onStart, enabled = !translating) {
+                Text(
+                    when {
+                        error != null -> "重试"
+                        firstConfirm -> "同意外发并翻译"
+                        else -> "开始翻译"
+                    },
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !translating) { Text("取消") }
+        },
+    )
+}
+
+/**
  * M22 气泡对照面板（视角③）：当前页气泡的原文/译文逐条对照；
  * 点一条高亮页面上对应的气泡（覆盖层画边框），关闭时清除高亮。
  * [pairs] null = 加载中；空列表 = 该页无气泡。

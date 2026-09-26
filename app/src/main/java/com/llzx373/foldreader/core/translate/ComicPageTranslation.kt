@@ -9,6 +9,11 @@ data class TranslatedBubble(
     val text: String?,
     /** 低置信（检测/识别把握不足）：覆盖层给边框标记，提醒人工核对。 */
     val lowConfidence: Boolean,
+    /**
+     * 抹除条目（R10 跨页合并）：只铺底色不写字——上一页被切气泡的续段在本页顶部，
+     * 文字已并入上一页气泡翻译，本页这里用底色把原文续段盖掉。
+     */
+    val erased: Boolean = false,
 )
 
 /**
@@ -20,6 +25,16 @@ data class TranslatedBubble(
 data class ComicPageTranslation(
     val bubbles: List<TranslatedBubble>,
 ) {
+    /** 追加续段抹除条目（R10）：跟在真气泡之后，不占气泡序号语义。 */
+    fun withErasedContinuations(rects: List<OcrRect>): ComicPageTranslation =
+        if (rects.isEmpty()) {
+            this
+        } else {
+            copy(
+                bubbles = bubbles + rects.map { TranslatedBubble(rect = it, text = null, lowConfidence = false, erased = true) },
+            )
+        }
+
     companion object {
         /** 气泡置信度低于此值即标低置信边框。 */
         const val LOW_CONFIDENCE = 0.6f

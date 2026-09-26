@@ -484,9 +484,101 @@ class ComicReaderViewModel(
         Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
     }
 
+    /**
+     * 视觉模式翻译当前跨页的第一页（M23）：气泡框与译文一次产出（无流式），
+     * 成功后自动切覆盖层视角。逐书确认在界面层完成后才调到（页图像外发）。
+     */
+    fun translateCurrentPageVision() {
+        val controller = comicTranslation ?: return
+        val page = currentPages().firstOrNull() ?: return
+        if (_pageTranslating.value) return
+        val lang = _translationLang.value
+        viewModelScope.launch(Dispatchers.IO) {
+            _pageTranslating.value = true
+            _pageTranslateError.value = null
+            try {
+                val result = controller.translatePageVision(page, lang)
+                result.onSuccess {
+                    runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
+                        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                    }
+                    _translationMode.value = ComicTranslationMode.OVERLAY
+                }.onFailure { error ->
+                    _pageTranslateError.value = error.message ?: "翻译失败"
+                }
+            } finally {
+                _pageTranslating.value = false
+            }
+        }
+    }
+
     /** 整卷批量：入队（断点续译由队列负责），前台服务由 AppContainer 一侧拉起。 */
     fun translateVolume() {
         enqueueVolumeTranslation?.invoke(_translationLang.value)
+    }
+
+    // ---- 气泡位置手动微调（M23）----
+
+    /** 微调模式：开 = 页面上可拖动/缩放气泡框（未译页也显示轮廓）。 */
+    private val _bubbleAdjustMode = MutableStateFlow(false)
+    val bubbleAdjustMode: StateFlow<Boolean> = _bubbleAdjustMode.asStateFlow()
+
+    /** 当前页是否已有手动微调（「恢复自动识别位置」按钮的显隐判据）。 */
+    private val _hasPageAdjustments = MutableStateFlow(false)
+    val hasPageAdjustments: StateFlow<Boolean> = _hasPageAdjustments.asStateFlow()
+
+    fun setBubbleAdjustMode(enabled: Boolean) {
+        if (_bubbleAdjustMode.value == enabled) return
+        _bubbleAdjustMode.value = enabled
+        if (enabled) {
+            // 微调要看得见气泡：强制覆盖层视角，并给当前页备底图（无译文也出轮廓）
+            _translationMode.value = ComicTranslationMode.OVERLAY
+            viewModelScope.launch(Dispatchers.IO) { ensureAdjustBase() }
+        }
+    }
+
+    /** 微调底图：当前页还没有覆盖层数据时，用（套过微调的）气泡建一张无译文覆盖层。 */
+    private suspend fun ensureAdjustBase() {
+        val controller = comicTranslation ?: return
+        val page = currentPages().firstOrNull() ?: return
+        _hasPageAdjustments.value = controller.hasAdjustments(page)
+        if (translationOverlays.containsKey(page)) return
+        val bubbles = controller.adjustedBubblesFor(page) ?: return
+        Snapshot.withMutableSnapshot {
+            translationOverlays[page] = ComicPageTranslation.of(bubbles, null)
+        }
+    }
+
+    /** 拖放定型：持久化一个气泡的新矩形，并按最新微调重建该页覆盖层。 */
+    fun saveBubbleAdjustment(page: Int, bubbleIndex: Int, rect: com.llzx373.foldreader.core.ocr.OcrRect) {
+        val controller = comicTranslation ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            controller.saveAdjustment(page, bubbleIndex, rect)
+            _hasPageAdjustments.value = true
+            reloadOverlayWithAdjustments(page)
+        }
+    }
+
+    /** 恢复自动识别位置：作废该页全部微调。 */
+    fun resetBubbleAdjustments(page: Int) {
+        val controller = comicTranslation ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            controller.resetAdjustments(page)
+            _hasPageAdjustments.value = false
+            reloadOverlayWithAdjustments(page)
+        }
+    }
+
+    /** 微调该页是否有手动调整（「恢复自动识别位置」的显隐判据）。 */
+    suspend fun hasBubbleAdjustments(page: Int): Boolean =
+        comicTranslation?.hasAdjustments(page) == true
+
+    private suspend fun reloadOverlayWithAdjustments(page: Int) {
+        val controller = comicTranslation ?: return
+        val overlay = controller.overlayFor(_translationLang.value, page)
+            ?: controller.adjustedBubblesFor(page)?.let { ComicPageTranslation.of(it, null) }
+            ?: return
+        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
     }
 
     /** 对照面板（视角③）：当前页的气泡原文 + 译文对。 */
@@ -640,6 +732,8 @@ class ComicReaderViewModel(
         viewModelScope.launch {
             _uiState.map { it.pageIndex }.distinctUntilChanged().collect {
                 if (_translationMode.value != ComicTranslationMode.OFF) loadTranslationOverlays()
+                // 微调模式翻页：新页也要有（无译文的）轮廓底图才能拖框
+                if (_bubbleAdjustMode.value) ensureAdjustBase()
             }
         }
         // 目标语言初值与设置页口径一致

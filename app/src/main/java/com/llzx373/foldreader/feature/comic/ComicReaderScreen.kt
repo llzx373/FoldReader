@@ -42,6 +42,7 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -91,6 +92,7 @@ import com.llzx373.foldreader.core.data.settings.ComicFitMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.data.settings.PdfReadingMode
+import com.llzx373.foldreader.core.data.settings.aiComicVisionConfirmedFor
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.feature.bookshelf.BookCover
 import com.llzx373.foldreader.feature.reader.AnnotationEditDialog
@@ -188,6 +190,8 @@ fun ComicReaderScreen(
     val pageTranslateError by viewModel.pageTranslateError.collectAsState()
     val translationPageStatus by viewModel.translationPageStatus.collectAsState()
     val highlightBubble by viewModel.highlightBubble.collectAsState()
+    val bubbleAdjustMode by viewModel.bubbleAdjustMode.collectAsState()
+    val hasPageAdjustments by viewModel.hasPageAdjustments.collectAsState()
     val volumeProgress by app.container.comicTranslationQueue.progress.collectAsState()
     // 漫画翻译入口判据（M22）：漫画格式 + AI 已配置 + 气泡与识别模型均已导入
     var translationAvailable by remember { mutableStateOf(false) }
@@ -223,6 +227,9 @@ fun ComicReaderScreen(
     var bubbleCompareVisible by remember { mutableStateOf(false) }
     var firstSendVisible by remember { mutableStateOf(false) }
     var translateStarted by remember { mutableStateOf(false) }
+    // 视觉翻译（M23）：页图像外发的逐书确认 + 进度对话框
+    var visionTranslateVisible by remember { mutableStateOf(false) }
+    var visionTranslateStarted by remember { mutableStateOf(false) }
     var pendingTranslateAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // 同系列的前后卷：直接从状态列表推，避免在组合期调用 ViewModel 函数（那样系列载入后不会重组）
@@ -1214,6 +1221,8 @@ fun ComicReaderScreen(
                             translationFor = translationFor,
                             translationTypeface = translationTypeface,
                             highlightBubble = highlightBubble,
+                            adjustMode = bubbleAdjustMode,
+                            onBubbleAdjust = viewModel::saveBubbleAdjustment,
                         )
                     }
                     val sliding = animPages
@@ -1526,6 +1535,24 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
+                    // 微调手势只在翻页布局（ComicSpread）里接了；滚动模式是另一套坐标，不给入口
+                    onAdjustBubbles = if (translationAvailable && !scrollMode) {
+                        {
+                            menuVisible = false
+                            viewModel.setBubbleAdjustMode(true)
+                        }
+                    } else {
+                        null
+                    },
+                    // 视觉翻译（M23）：仅在配置了视觉模型时给入口；页图像外发在对话框里逐书确认
+                    onTranslatePageVision = if (translationAvailable && prefs.aiModelVision.isNotBlank()) {
+                        {
+                            menuVisible = false
+                            visionTranslateVisible = true
+                        }
+                    } else {
+                        null
+                    },
                     onSelectPageTurnMode = viewModel::setPageTurnMode,
                     onSelectDirection = viewModel::setComicDirection,
                     onSelectFitMode = viewModel::setComicFitMode,
@@ -1539,6 +1566,35 @@ fun ComicReaderScreen(
                     onPickCustomText = { viewModel.setCustomColors(prefs.customBackgroundArgb, it) },
                     onOpenSettings = { exit.leaveTo(onOpenSettings) },
                 )
+            }
+        }
+
+        // 气泡微调模式（M23）：顶部提示条——操作说明 + 恢复自动位置 + 完成退出
+        if (bubbleAdjustMode) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                tonalElevation = 4.dp,
+                shadowElevation = 8.dp,
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "调整气泡：拖动移动，拖右下角手柄缩放",
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (hasPageAdjustments) {
+                        TextButton(onClick = {
+                            viewModel.resetBubbleAdjustments(
+                                viewModel.currentPages().firstOrNull() ?: uiState.pageIndex,
+                            )
+                        }) { Text("恢复自动位置") }
+                    }
+                    TextButton(onClick = { viewModel.setBubbleAdjustMode(false) }) { Text("完成") }
+                }
             }
         }
 
@@ -1591,6 +1647,34 @@ fun ComicReaderScreen(
                 onDismiss = {
                     pageTranslateVisible = false
                     translateStarted = false
+                    viewModel.clearPageTranslateError()
+                },
+            )
+        }
+
+        if (visionTranslateVisible) {
+            // 翻完（非失败）自动收对话框，视角已由 ViewModel 切到覆盖层
+            LaunchedEffect(pageTranslating) {
+                if (visionTranslateStarted && !pageTranslating && pageTranslateError == null) {
+                    visionTranslateVisible = false
+                    visionTranslateStarted = false
+                }
+            }
+            ComicVisionTranslateDialog(
+                firstConfirm = !prefs.aiComicVisionConfirmedFor(bookId),
+                model = prefs.aiModelVision,
+                translating = pageTranslating,
+                error = pageTranslateError,
+                colors = colors,
+                onStart = {
+                    visionTranslateStarted = true
+                    viewModel.clearPageTranslateError()
+                    scope.launch { app.container.settingsRepository.confirmAiComicVisionForBook(bookId) }
+                    viewModel.translateCurrentPageVision()
+                },
+                onDismiss = {
+                    visionTranslateVisible = false
+                    visionTranslateStarted = false
                     viewModel.clearPageTranslateError()
                 },
             )
@@ -1864,6 +1948,10 @@ private fun BoxScope.ComicSpread(
     translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation? = { null },
     translationTypeface: android.graphics.Typeface? = null,
     highlightBubble: Int = -1,
+    /** 气泡微调模式（M23）：开 = 页内可拖动气泡框；滚动模式不支持（那边是另一套坐标）。 */
+    adjustMode: Boolean = false,
+    onBubbleAdjust: (pageIndex: Int, bubbleIndex: Int, rect: com.llzx373.foldreader.core.ocr.OcrRect) -> Unit =
+        { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1881,6 +1969,8 @@ private fun BoxScope.ComicSpread(
             translation = pages.firstOrNull()?.let(translationFor),
             translationTypeface = translationTypeface,
             highlightBubble = highlightBubble,
+            adjustMode = adjustMode,
+            onBubbleAdjust = onBubbleAdjust,
             modifier = modifier.fillMaxSize(),
         )
 
@@ -1898,6 +1988,8 @@ private fun BoxScope.ComicSpread(
                     translation = translationFor(pages[0]),
                     translationTypeface = translationTypeface,
                     highlightBubble = highlightBubble,
+                    adjustMode = adjustMode,
+                    onBubbleAdjust = onBubbleAdjust,
                     modifier = modifier.fillMaxSize(),
                 )
             } else {
@@ -1921,6 +2013,8 @@ private fun BoxScope.ComicSpread(
                                 translation = translationFor(pages[0]),
                                 translationTypeface = translationTypeface,
                                 highlightBubble = highlightBubble,
+                                adjustMode = adjustMode,
+                                onBubbleAdjust = onBubbleAdjust,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -1937,6 +2031,8 @@ private fun BoxScope.ComicSpread(
                                 translation = translationFor(pages[0]),
                                 translationTypeface = translationTypeface,
                                 highlightBubble = highlightBubble,
+                                adjustMode = adjustMode,
+                                onBubbleAdjust = onBubbleAdjust,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -1967,6 +2063,8 @@ private fun BoxScope.ComicSpread(
                         translation = translationFor(leftIndex),
                         translationTypeface = translationTypeface,
                         highlightBubble = highlightBubble,
+                        adjustMode = adjustMode,
+                        onBubbleAdjust = onBubbleAdjust,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1985,6 +2083,8 @@ private fun BoxScope.ComicSpread(
                         translation = translationFor(rightIndex),
                         translationTypeface = translationTypeface,
                         highlightBubble = highlightBubble,
+                        adjustMode = adjustMode,
+                        onBubbleAdjust = onBubbleAdjust,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

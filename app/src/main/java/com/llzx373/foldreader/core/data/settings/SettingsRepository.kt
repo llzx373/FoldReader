@@ -76,6 +76,8 @@ interface SettingsRepository {
     suspend fun setAiChapterRuleConfirmed(confirmed: Boolean)
     suspend fun setAiTranslationConfirmed(confirmed: Boolean)
     suspend fun setAiComicTranslateConfirmed(confirmed: Boolean)
+    /** M23：漫画视觉翻译（页图像外发）对某书的明示确认落账（幂等）。 */
+    suspend fun confirmAiComicVisionForBook(bookId: Long)
     suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean)
     suspend fun setAiMetadataConfirmed(confirmed: Boolean)
     suspend fun setTranslationViewHintShown(shown: Boolean)

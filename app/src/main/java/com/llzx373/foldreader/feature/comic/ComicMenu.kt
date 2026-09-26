@@ -210,6 +210,10 @@ fun ComicMenuPanel(
     onTranslatePage: (() -> Unit)?,
     onTranslateVolume: (() -> Unit)?,
     onOpenBubbleCompare: (() -> Unit)?,
+    /** 气泡位置微调（M23）：进入微调模式。null = 不可用（滚动模式不支持微调手势）。 */
+    onAdjustBubbles: (() -> Unit)? = null,
+    /** 视觉翻译本页（M23）：页图像外发给视觉模型。null = 未配置视觉模型。 */
+    onTranslatePageVision: (() -> Unit)? = null,
     onSelectPageTurnMode: (PageTurnMode) -> Unit,
     onSelectDirection: (ComicDirection) -> Unit,
     onSelectFitMode: (ComicFitMode) -> Unit,
@@ -427,6 +431,12 @@ fun ComicMenuPanel(
                         enabled = !volumeActive,
                     ) { Text(if (volumeActive) "整卷翻译中…" else "翻译整卷") }
                     TextButton(onClick = { onOpenBubbleCompare?.invoke() }) { Text("气泡对照") }
+                    if (onAdjustBubbles != null) {
+                        TextButton(onClick = { onAdjustBubbles.invoke() }) { Text("调整气泡") }
+                    }
+                    if (onTranslatePageVision != null) {
+                        TextButton(onClick = { onTranslatePageVision.invoke() }) { Text("视觉翻译") }
+                    }
                     if (translatedText != null) {
                         Spacer(modifier = Modifier.weight(1f))
                         Text(

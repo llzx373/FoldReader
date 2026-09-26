@@ -1,11 +1,14 @@
 package com.llzx373.foldreader.core.ocr
 
+import kotlinx.serialization.Serializable
+
 /**
  * 归一化矩形（0..1，页图片左上为原点），与 v2.2 页内锚点（feature 侧 PageRect）同一坐标系。
  *
  * core 层不依赖 feature 包，所以这里单独定义；UI 边界处与 PageRect 一一互转。
  * 存归一化的原因与 PageRect 相同：渲染尺寸随适配/缩放变化，锚点必须分辨率无关。
  */
+@Serializable
 data class OcrRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     val width: Float get() = right - left
     val height: Float get() = bottom - top
@@ -57,12 +60,16 @@ data class OcrPage(
  * 气泡检测结果（RT-DETR 检测 + 行归并后）：一个气泡区域 + 归属其中的文字行。
  *
  * [index] 是页内气泡序号（阅读序排序后），作为气泡的稳定标识贯穿翻译与覆盖层。
+ * [continuation] 跨页合并（R10）专用：该气泡在**下一页**顶部的续段矩形
+ * （归一化坐标相对下一页）。续段的文字行已并入 [lines]，下一页对应片段气泡
+ * 已从缓存中移除；渲染下一页时按此矩形铺底色抹掉原文续段。
  */
 data class OcrBubble(
     val index: Int,
     val rect: OcrRect,
     val lines: List<OcrTextLine>,
     val confidence: Float,
+    val continuation: OcrRect? = null,
 ) {
     /** 气泡内文字按阅读序拼接的原文。 */
     val text: String get() = lines.joinToString("") { it.text }

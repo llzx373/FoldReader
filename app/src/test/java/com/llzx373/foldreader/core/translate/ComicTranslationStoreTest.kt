@@ -103,4 +103,25 @@ class ComicTranslationStoreTest {
         assertEquals(0.2f, loaded[0].lines[0].box.left, 0.001f)
         assertEquals(1, loaded[1].index)
     }
+
+    @Test
+    fun `微调随页存取且重建 OCR 缓存时作废`() {
+        store.saveOcr(bookId, 3, bubbles())
+        val adjusted = OcrRect(0.15f, 0.12f, 0.55f, 0.32f)
+        store.saveAdjustments(bookId, 3, BubbleAdjustments(rects = mapOf(0 to adjusted)))
+
+        // 往返：覆盖矩形按气泡序号取回
+        val loaded = store.loadAdjustments(bookId, 3)!!
+        assertEquals(adjusted, loaded.rects[0])
+        assertNull(store.loadAdjustments(bookId, 4))
+
+        // 识别缓存重建后序号可能漂移：重写 OCR 缓存连带作废同页微调
+        store.saveOcr(bookId, 3, bubbles())
+        assertNull(store.loadAdjustments(bookId, 3))
+
+        // 单独作废
+        store.saveAdjustments(bookId, 3, BubbleAdjustments(rects = mapOf(1 to adjusted)))
+        store.deleteAdjustments(bookId, 3)
+        assertNull(store.loadAdjustments(bookId, 3))
+    }
 }

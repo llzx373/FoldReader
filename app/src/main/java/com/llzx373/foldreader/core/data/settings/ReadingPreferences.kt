@@ -137,6 +137,8 @@ data class ReadingPreferences(
     val aiTranslationConfirmed: Boolean = false,
     /** M22：漫画翻译的首次外发一次性确认；确认后不再弹。 */
     val aiComicTranslateConfirmed: Boolean = false,
+    /** M23：漫画视觉翻译（页图像外发）逐书明示确认的书 id（逗号分隔）。 */
+    val aiComicVisionConfirmedBooks: String = "",
     /** M16：AI 清洗配方推荐的首次外发一次性确认；确认后不再弹。 */
     val aiCleanRecipeConfirmed: Boolean = false,
     /** M17：AI 元数据补全的首次外发一次性确认；确认后不再弹。 */
@@ -167,3 +169,7 @@ internal fun decodeCustomChapterRules(raw: String?): List<String> = decodeRuleLi
 
 internal inline fun <reified T : Enum<T>> enumOrDefault(name: String?, default: T): T =
     name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: default
+
+/** M23：漫画视觉翻译（页图像外发）是否已对该书明示确认。 */
+fun ReadingPreferences.aiComicVisionConfirmedFor(bookId: Long): Boolean =
+    aiComicVisionConfirmedBooks.split(',').any { it.trim() == bookId.toString() }

@@ -375,6 +375,27 @@ class AppContainer(context: Context) {
     }
 
     /**
+     * 视觉翻译（M23）取页图像：独立打开内容源取页位图，长边压到 [COMIC_VISION_TARGET_PX]
+     * 后 JPEG(q85) 编码为 base64（不带 `data:` 前缀，前缀由各 Provider 按协议拼）。
+     */
+    private suspend fun comicPageJpegBase64(bookId: Long, pageIndex: Int): String? =
+        withContext(Dispatchers.IO) {
+            val book = bookshelfRepository.getBook(bookId) ?: return@withContext null
+            val source = runCatching { openPagedSource(book, null) }.getOrNull()
+                ?: return@withContext null
+            try {
+                val image = source.loadPage(pageIndex, COMIC_VISION_TARGET_PX, COMIC_VISION_TARGET_PX)
+                val bitmap = (image as? com.llzx373.foldreader.core.paged.PagedPageImage.Still)?.bitmap
+                    ?: return@withContext null
+                val out = java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+            } finally {
+                runCatching { source.close() }
+            }
+        }
+
+    /**
      * 装配漫画翻译引擎（M22）：每次按当前配置新建（同 translateEngine 约定）；
      * 未配置时引擎内 provider 为 null、翻译入口直接失败返回。
      * 系列术语层级：漫画主干 `comicSeriesStem`（跨卷共享，R6）。
@@ -392,6 +413,7 @@ class AppContainer(context: Context) {
                     ?.let { com.llzx373.foldreader.core.comic.comicSeriesStem(it) }
             },
             bubblesFor = { bookId, pageIndex -> comicBubblesFor(bookId, pageIndex) },
+            pageImageBase64For = { bookId, pageIndex -> comicPageJpegBase64(bookId, pageIndex) },
         )
 
     /** 阅读器的漫画翻译门面（ViewModel 只跟它打交道）；实例廉价，随取随建。 */
@@ -934,6 +956,9 @@ class AppContainer(context: Context) {
 
         /** M22 漫画气泡识别的页位图目标边长（px）：OCR 降采样上限。 */
         private const val COMIC_OCR_TARGET_PX = 1600
+
+        /** 视觉翻译的页图像边长上限：再大只是白白烧 token，视觉模型输入本身也会缩放。 */
+        private const val COMIC_VISION_TARGET_PX = 1024
     }
 }
 

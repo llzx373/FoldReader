@@ -732,6 +732,8 @@ class BackupCodecTest {
         override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) =
             update { copy(aiComicTranslateConfirmed = confirmed) }
 
+        override suspend fun confirmAiComicVisionForBook(bookId: Long) = Unit
+
         override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) =
             update { copy(aiCleanRecipeConfirmed = confirmed) }
 

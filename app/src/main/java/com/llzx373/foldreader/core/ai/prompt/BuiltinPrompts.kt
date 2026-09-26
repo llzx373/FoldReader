@@ -16,6 +16,7 @@ object BuiltinPrompts {
     val cleanRecipeRecommendation = BuiltinPrompt("清洗配方推荐", CleanRecipePrompt.SYSTEM_PROMPT)
     val metadataCompletion = BuiltinPrompt("元数据补全", MetadataPrompt.SYSTEM_PROMPT)
     val comicTranslation = BuiltinPrompt("漫画翻译", ComicTranslatePrompt.SYSTEM_PROMPT)
+    val comicVisionTranslation = BuiltinPrompt("漫画视觉翻译", ComicVisionTranslatePrompt.SYSTEM_PROMPT)
 
     val all: List<BuiltinPrompt> =
         listOf(
@@ -26,5 +27,6 @@ object BuiltinPrompts {
             cleanRecipeRecommendation,
             metadataCompletion,
             comicTranslation,
+            comicVisionTranslation,
         )
 }

@@ -31,6 +31,8 @@ object OcrPageCodec {
         val rect: RectDto,
         val lines: List<LineDto>,
         val confidence: Float,
+        /** 跨页合并（R10）：下一页顶部续段矩形；可选字段，旧缓存无此字段按 null 读。 */
+        val continuation: RectDto? = null,
     )
 
     @Serializable
@@ -53,7 +55,7 @@ object OcrPageCodec {
         val dto = json.decodeFromString<BubblesDto>(text)
         if (dto.version != OCR_VERSION) return null
         dto.bubbles.map { b ->
-            OcrBubble(b.index, b.rect.toRect(), b.lines.map { it.toLine() }, b.confidence)
+            OcrBubble(b.index, b.rect.toRect(), b.lines.map { it.toLine() }, b.confidence, b.continuation?.toRect())
         }
     }.getOrNull()
 
@@ -62,5 +64,5 @@ object OcrPageCodec {
     private fun OcrTextLine.toDto() = LineDto(text, box.toDto(), confidence)
     private fun LineDto.toLine() = OcrTextLine(text, box.toRect(), confidence)
     private fun OcrBubble.toDto() =
-        BubbleDto(index, rect.toDto(), lines.map { it.toDto() }, confidence)
+        BubbleDto(index, rect.toDto(), lines.map { it.toDto() }, confidence, continuation?.toDto())
 }

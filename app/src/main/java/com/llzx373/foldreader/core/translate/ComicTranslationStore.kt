@@ -31,12 +31,41 @@ class ComicTranslationStore(private val comicTranslateDir: File) {
         File(bookDir(bookId), "$pageIndex.ocr.json")
     private fun translationFile(bookId: Long, lang: String, pageIndex: Int): File =
         File(bookDir(bookId), "$pageIndex.$lang.json")
+    private fun adjustFile(bookId: Long, pageIndex: Int): File =
+        File(bookDir(bookId), "$pageIndex.adjust.json")
 
     @Synchronized
     fun saveOcr(bookId: Long, pageIndex: Int, bubbles: List<OcrBubble>) {
         val file = ocrFile(bookId, pageIndex)
         file.parentFile?.mkdirs()
         file.writeText(OcrPageCodec.encodeBubbles(bubbles))
+        // 识别缓存重建后气泡序号可能漂移：旧微调一并作废（与缓存同生命周期）
+        adjustFile(bookId, pageIndex).delete()
+    }
+
+    /** 保存一页的气泡微调（M23）：整体覆盖写（调用方合并后传入全量）。 */
+    @Synchronized
+    fun saveAdjustments(bookId: Long, pageIndex: Int, adjustments: BubbleAdjustments) {
+        val file = adjustFile(bookId, pageIndex)
+        file.parentFile?.mkdirs()
+        file.writeText(json.encodeToString(adjustments))
+    }
+
+    /** 读取一页的气泡微调；未调整 / 损坏 / 版本不符返回 null。 */
+    @Synchronized
+    fun loadAdjustments(bookId: Long, pageIndex: Int): BubbleAdjustments? {
+        val file = adjustFile(bookId, pageIndex)
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<BubbleAdjustments>(file.readText())
+                .takeIf { it.version == BubbleAdjustments.ADJUST_VERSION }
+        }.getOrNull()
+    }
+
+    /** 单页微调作废（「恢复自动识别位置」）。 */
+    @Synchronized
+    fun deleteAdjustments(bookId: Long, pageIndex: Int) {
+        adjustFile(bookId, pageIndex).delete()
     }
 
     /** 读取一页的气泡缓存；未缓存 / 损坏 / 版本不符返回 null（调用方重新识别）。 */
