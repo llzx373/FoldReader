@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-26
+
 ### Added
 
 - **双版本发布 + 自定义模型槽位**（M24）：Release 起同时发布两个 flavor——**full** 自带全部 5 个官方模型（43MB，打进 assets，首启自动铺到 `filesDir/models/` 并过一遍清单 SHA-256 防打包损坏，装完即用）；**lite** 不带模型（包小，照旧自行下载导入）。两版本功能完全相同、包名与签名一致，只能装一个、可互相覆盖安装切换；铺底写一次性标记，用户之后手动删除的模型不重铺（尊重删除）。**自定义模型**：私有微调或其他来源的 .onnx 可经「设置 → OCR 模型 → 模型管理 → 导入自定义」进入任意槽位——清单外无法校验故不校验，落 `<id>.custom.onnx` 与官方文件互不覆盖、**优先生效**（`ModelManager.resolvedFileOf`：引擎建会话与就绪判定一律走这里），可单独删除回落官方。注意：rec 槽位的识别词典仍是内置的，自定义 rec 若改了字符集输出即乱码（对话框内已明示）。CI 门禁主跑 `testLiteDebugUnitTest`（full 变体装配由 release 流水线覆盖）；release 流水线对 lite/full 两个 APK 逐一验签，产物与 mapping 按 flavor 成对发布，Release 说明顶部新增「版本选择」对照表。
@@ -147,6 +149,7 @@
 - 日期/时间文案在 Composable 内直接读 `Locale.getDefault()`，不可观察：应用存活期间切换系统语言后，
   书籍详情、书签列表、全书签总览、书架副标题与阅读器时钟的文案不会重排。改为经由配置对象读取语言。
 
-[Unreleased]: https://github.com/llzx373/FoldReader/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/llzx373/FoldReader/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/llzx373/FoldReader/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/llzx373/FoldReader/releases/tag/v1.1.0
 [1.0.0]: https://github.com/llzx373/FoldReader/releases/tag/v1.0.0
