@@ -152,16 +152,24 @@ jobs:
         run: |
           set -euo pipefail
           APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
-          APK="app/build/outputs/apk/release/FoldReader-release.apk"
-          "$APKSIGNER" verify --print-certs "$APK"
+          # M24 起双版本：lite（不带模型）与 full（自带模型）都要验
+          APKS=(
+            "app/build/outputs/apk/lite/release/FoldReader-lite-release.apk"
+            "app/build/outputs/apk/full/release/FoldReader-full-release.apk"
+          )
+          for APK in "${APKS[@]}"; do
+            echo "== 校验 $APK =="
+            "$APKSIGNER" verify --print-certs "$APK"
 
-          if [ "$SIGNING_MODE" = "release" ]; then
-            # 配了正式密钥却打出 debug 证书，说明 key.properties 没生效，必须失败
-            if "$APKSIGNER" verify --print-certs "$APK" | grep -qi "CN=Android Debug"; then
-              echo "::error::已配置正式密钥，但 APK 仍是 debug 签名，请检查 Secrets 是否正确。"
-              exit 1
+            if [ "$SIGNING_MODE" = "release" ]; then
+              # 配了正式密钥却打出 debug 证书，说明 key.properties 没生效，必须失败
+              if "$APKSIGNER" verify --print-certs "$APK" | grep -qi "CN=Android Debug"; then
+                echo "::error::已配置正式密钥，但 $APK 仍是 debug 签名，请检查 Secrets 是否正确。"
+                exit 1
+              fi
             fi
-          else
+          done
+          if [ "$SIGNING_MODE" != "release" ]; then
             echo "::warning::debug 签名模式，跳过后面的「非 debug 证书」断言。"
           fi
 
@@ -171,13 +179,17 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/release/FoldReader-release.apk"
-          AAB="$(find app/build/outputs/bundle/release -name '*.aab' | head -n 1)"
-          MAPPING="app/build/outputs/mapping/release/mapping.txt"
+          # M24 双版本：lite = 不带模型（小包，模型自行下载或导入自定义）；
+          # full = 自带全部官方模型（首启自动铺底，开箱即用）
+          for FLAVOR in lite full; do
+            APK="app/build/outputs/apk/$FLAVOR/release/FoldReader-$FLAVOR-release.apk"
+            AAB="$(find "app/build/outputs/bundle/${FLAVOR}Release" -name '*.aab' | head -n 1)"
+            MAPPING="app/build/outputs/mapping/${FLAVOR}Release/mapping.txt"
 
-          cp "$APK" "FoldReader-$VERSION_NAME.apk"
-          cp "$AAB" "FoldReader-$VERSION_NAME.aab"
-          cp "$MAPPING" "FoldReader-$VERSION_NAME-mapping.txt"
+            cp "$APK" "FoldReader-$VERSION_NAME-$FLAVOR.apk"
+            cp "$AAB" "FoldReader-$VERSION_NAME-$FLAVOR.aab"
+            cp "$MAPPING" "FoldReader-$VERSION_NAME-$FLAVOR-mapping.txt"
+          done
 
           ls -lh "FoldReader-$VERSION_NAME".*
 
@@ -192,6 +204,19 @@ jobs:
           set -euo pipefail
           NOTES="release-notes.md"
           : > "$NOTES"
+
+          # M24 双版本：把「该下哪个包」放在说明最顶上，用户一眼能看到
+          {
+            echo "## 版本选择"
+            echo
+            echo "| 文件 | 说明 |"
+            echo "| --- | --- |"
+            echo "| **FoldReader-$VERSION_NAME-full.apk** | 自带全部 OCR/漫画翻译模型，装完即用（包较大） |"
+            echo "| **FoldReader-$VERSION_NAME-lite.apk** | 不带模型，包小；模型在「设置 → OCR 模型 → 模型管理」里自行下载导入，也可导入自己的微调/自定义 .onnx |"
+            echo
+            echo "两个版本功能完全相同，包名与签名一致，只能安装其中一个，可互相覆盖安装切换。"
+            echo
+          } >> "$NOTES"
 
           # 签名不一致时设备会拒绝覆盖安装，这件事必须写在用户一眼能看到的地方
           if [ "$SIGNING_MODE" = "debug" ]; then
@@ -245,9 +270,12 @@ jobs:
           fi
 
           gh release create "$TAG" \
-            "FoldReader-$VERSION_NAME.apk" \
-            "FoldReader-$VERSION_NAME.aab" \
-            "FoldReader-$VERSION_NAME-mapping.txt" \
+            "FoldReader-$VERSION_NAME-lite.apk" \
+            "FoldReader-$VERSION_NAME-full.apk" \
+            "FoldReader-$VERSION_NAME-lite.aab" \
+            "FoldReader-$VERSION_NAME-full.aab" \
+            "FoldReader-$VERSION_NAME-lite-mapping.txt" \
+            "FoldReader-$VERSION_NAME-full-mapping.txt" \
             "${ARGS[@]}"
 
           echo "已发布：https://github.com/$REPOSITORY/releases/tag/$TAG"

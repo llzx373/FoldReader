@@ -207,6 +207,24 @@
 
 ---
 
+## M24 双版本发布 + 自定义模型
+
+- [x] flavor 双版本：lite（不带模型）/ full（自带全部官方模型）
+- [x] full 版首启自动铺底内置模型（assets → filesDir/models/，过 SHA-256）
+- [x] 自定义模型槽位：任意 .onnx 导入任意槽位、不校验、优先于官方生效
+- [x] release 流水线与发布文档双版本化
+
+验收记录（2026-09-26）：
+
+- flavor：`flavorDimensions "models"` + lite/full，`BuildConfig.BUNDLED_MODELS` 区分；full 的 `sourceSets` 直接指仓库根 `models/`（不复制 43MB）；`aaptOptions.noCompress += "onnx"`（已压缩二进制，免于 APK 内二次压缩与 mmap 障碍）。两 flavor 同 applicationId 同签名——只能装一个、可互相覆盖安装切换。
+- 铺底：`ModelManager.seedBundledModels()` 在 AppContainer 维护协程里首启执行——逐 spec 从 assets 复制 → 清单 SHA-256 校验 → 落位，写 `.bundled_seeded` 一次性标记；用户之后手动删除的模型不重铺（尊重删除）；lite 下恒零成本空转（BuildConfig 门）。
+- 自定义模型：`importCustom` 任意 .onnx 落 `<id>.custom.onnx`（清单外不校验，拒绝空文件），`resolvedFileOf` 自定义优先于官方——OcrEngine 建会话与 isReady/ocrReady/bubbleReady/importedRecs 全部走这里，导入即生效；`deleteCustom` 单独删除回落官方。设置页模型管理对话框每槽位四个操作（导入/重新导入、导入自定义、删除、删自定义），状态文案区分「已导入 / 自定义（未校验，生效中）/ 已导入+自定义（自定义优先）」，并明示 rec 槽位词典不符会乱码。
+- CI/发布：ci.yml 门禁改 `testLiteDebugUnitTest` + `assembleLiteDebug` + `lintLiteDebug`（full 装配由 release 流水线覆盖）；release.yml 对 lite/full 两个 APK 逐一验签、产物与 mapping 按 flavor 成对（`FoldReader-<版本>-{lite,full}.{apk,aab}` + 两份 mapping），Release 说明顶部新增「版本选择」对照表；发布流程.md 同步双版本口径。
+- 测试：`ModelManagerTest` 新增 7 用例（自定义导入任意字节成功/空文件与流失败 IoError 且无残留/resolvedFileOf 自定义优先/deleteCustom 回落官方/ocrReady 接受纯自定义/lite 下 seedBundledModels 恒空转不写标记）；三门禁全绿——`testLiteDebugUnitTest`、`assembleLiteRelease`（21MB）、`assembleFullRelease`（63MB ≈ 21+43 模型）。
+- 真机待验：full 版首启铺底后 5 槽位全部就绪；自定义模型导入后 OCR/漫画翻译全链路可用、删自定义回落官方；full ↔ lite 覆盖安装切换后模型状态符合预期（铺过的不重铺）。已写入 docs/漫画翻译测试指南.md。
+
+---
+
 ## 每个里程碑收尾统一打钩（隐私合规）
 
 - [x] 未配置 key：无 AI 入口、无网络组件、抓包零请求

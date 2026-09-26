@@ -947,6 +947,8 @@ class AppContainer(context: Context) {
                 // 本地副本（local/）是用户显式选择的持久数据，sweep 只清可回收的解压缓存
                 comicExtractionStore.sweep(books.map { it.contentHash }.toSet())
             }
+            // full 变体首启铺底内置模型（M24）：lite 下是零成本空转
+            runCatching { modelManager.seedBundledModels() }
         }
     }
 

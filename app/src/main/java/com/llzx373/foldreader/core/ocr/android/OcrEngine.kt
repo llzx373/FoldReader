@@ -187,16 +187,16 @@ class OcrEngine(
     }
 
     private fun detSession(): OrtSession =
-        detSession ?: env.createSession(modelManager.fileOf(ModelCatalog.DET).absolutePath)
+        detSession ?: env.createSession(modelManager.resolvedFileOf(ModelCatalog.DET).absolutePath)
             .also { detSession = it }
 
     private fun recSession(spec: OcrModelSpec): OrtSession =
         recSessions.getOrPut(spec.id) {
-            env.createSession(modelManager.fileOf(spec).absolutePath)
+            env.createSession(modelManager.resolvedFileOf(spec).absolutePath)
         }
 
     private fun bubbleSession(): OrtSession =
-        bubbleSession ?: env.createSession(modelManager.fileOf(ModelCatalog.BUBBLE).absolutePath)
+        bubbleSession ?: env.createSession(modelManager.resolvedFileOf(ModelCatalog.BUBBLE).absolutePath)
             .also { bubbleSession = it }
 
     override fun close() {

@@ -276,10 +276,10 @@ class SettingsViewModel(
         }
     }
 
-    // ---- OCR 模型（M21）----
+    // ---- OCR 模型（M21/M24）----
 
-    private val _modelStatus = MutableStateFlow(modelManager.status())
-    val modelStatus: StateFlow<List<Pair<com.llzx373.foldreader.core.ocr.OcrModelSpec, Boolean>>> =
+    private val _modelStatus = MutableStateFlow(modelManager.slots())
+    val modelStatus: StateFlow<List<com.llzx373.foldreader.core.ai.android.ModelManager.ModelSlot>> =
         _modelStatus.asStateFlow()
 
     fun importModel(
@@ -289,14 +289,32 @@ class SettingsViewModel(
     ) {
         launch {
             val result = modelManager.import(uri, displayName)
-            _modelStatus.value = modelManager.status()
+            _modelStatus.value = modelManager.slots()
+            onResult(result)
+        }
+    }
+
+    /** 自定义模型导入（M24）：私有微调/其他 .onnx 进指定槽位，不校验清单。 */
+    fun importCustomModel(
+        spec: com.llzx373.foldreader.core.ocr.OcrModelSpec,
+        uri: Uri,
+        onResult: (com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult) -> Unit,
+    ) {
+        launch {
+            val result = modelManager.importCustom(spec, uri)
+            _modelStatus.value = modelManager.slots()
             onResult(result)
         }
     }
 
     fun deleteModel(modelId: String) {
         modelManager.delete(modelId)
-        _modelStatus.value = modelManager.status()
+        _modelStatus.value = modelManager.slots()
+    }
+
+    fun deleteCustomModel(modelId: String) {
+        modelManager.deleteCustom(modelId)
+        _modelStatus.value = modelManager.slots()
     }
 
     fun updateOcrRecLang(modelId: String) = launch { settingsRepository.setOcrRecLang(modelId) }

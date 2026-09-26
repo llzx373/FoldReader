@@ -33,8 +33,10 @@ jobs:
           path: ~/.m2/repository
           key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
 
+      # M24 起按 flavor 出包：单测主门禁跑 lite（无内置模型，资源合并快）；
+      # full 变体的装配在 release 流水线（assembleRelease 覆盖全部 flavor）验证。
       - name: 单元测试
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testLiteDebugUnitTest --stacktrace
 
       # tools/cleaner 复用 app 的清理引擎源码，但不在 :app 的构建图里。
       # 不单独跑的话，它坏了 CI 也不会红（例如 Kotlin 升级波及 Compose Multiplatform）。
@@ -42,13 +44,13 @@ jobs:
         run: ./gradlew :tools:cleaner:test --stacktrace
 
       - name: 构建 Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleLiteDebug --stacktrace
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v7
         with:
           name: FoldReader-debug-apk
-          path: app/build/outputs/apk/debug/FoldReader-debug.apk
+          path: app/build/outputs/apk/lite/debug/FoldReader-lite-debug.apk
           if-no-files-found: error
 
       - name: 上传测试报告
@@ -56,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: unit-test-report
-          path: app/build/reports/tests/testDebugUnitTest
+          path: app/build/reports/tests/testLiteDebugUnitTest
           if-no-files-found: ignore
 
   lint:
@@ -71,12 +73,12 @@ jobs:
         uses: ./.github/actions/setup-build
 
       - name: Lint Debug
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintLiteDebug --stacktrace
 
       - name: 上传 Lint 报告
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: lint-report
-          path: app/build/reports/lint-results-debug.html
+          path: app/build/reports/lint-results-liteDebug.html
           if-no-files-found: ignore

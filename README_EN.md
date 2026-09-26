@@ -42,7 +42,12 @@ Format detection is **magic-bytes first, extension/MIME as fallback** — mislab
 
 ## Install
 
-Download the latest `FoldReader-<version>.apk` from [Releases](https://github.com/llzx373/FoldReader/releases). Requires **Android 13 (API 33) or newer**. The APK is distributed outside any app store, so you must allow installing from unknown sources.
+Download the latest APK from [Releases](https://github.com/llzx373/FoldReader/releases) — pick one of two variants (identical features, same package name and signature; only one can be installed, switching via overwrite install works):
+
+- `FoldReader-<version>-full.apk` — **bundles all OCR / comic-translation models**, ready out of the box (larger download);
+- `FoldReader-<version>-lite.apk` — no bundled models (smaller); import models under "Settings → OCR models → Model manager", including your own fine-tuned / custom .onnx files.
+
+Requires **Android 13 (API 33) or newer**. The APK is distributed outside any app store, so you must allow installing from unknown sources.
 
 Large foldables (Galaxy Z Fold, Huawei Mate X, and equivalents) and wide foldables are the primary targets. Bar phones and flip phones work but fall back to single-page reading.
 

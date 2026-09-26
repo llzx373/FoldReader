@@ -65,6 +65,32 @@ android {
         }
     }
 
+    // ---------------------------------------------------------------------------
+    // 双版本发布（M24）：lite = 不带权重模型（用户自行下载官方模型或导入自定义模型）；
+    // full = 5 个官方模型打进 assets（仓库 models/，与 ModelCatalog 哈希一致），
+    // 首次启动由 ModelManager 自动铺到 filesDir/models/，开箱即用。
+    // 两变体 applicationId 相同、签名相同，只能装一个，覆盖安装随意切换。
+    // ---------------------------------------------------------------------------
+    flavorDimensions += "models"
+    productFlavors {
+        create("lite") {
+            buildConfigField("boolean", "BUNDLED_MODELS", "false")
+        }
+        create("full") {
+            buildConfigField("boolean", "BUNDLED_MODELS", "true")
+        }
+    }
+    sourceSets {
+        // 直接指仓库 models/ 目录（不复制文件）：5 个 .onnx 落在 assets 根
+        getByName("full") {
+            assets.srcDir(rootProject.file("models"))
+        }
+    }
+    aaptOptions {
+        // 模型已压缩过（int8 量化），再压只拖慢读取
+        noCompress += "onnx"
+    }
+
     buildTypes {
         release {
             // 有正式密钥就用正式签名，否则回退 debug 签名（本地开发路径）。

@@ -130,12 +130,37 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 val message = when (result) {
                     is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.Success ->
                         "模型已导入：${result.spec.fileName}"
+                    is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.CustomSuccess ->
+                        "自定义模型已导入：${result.spec.purpose}"
                     is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.HashMismatch ->
                         "校验失败：${result.spec.fileName} 与官方 SHA-256 不符（下错版本或文件损坏）"
                     com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.UnknownFile ->
                         "不是清单内的模型文件（文件名需与下载地址给出的保持一致）"
                     com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.IoError ->
                         "读取文件失败，请重试"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // M24：自定义模型导入——任意 .onnx 进指定槽位，不校验清单。启动前先记住目标槽位。
+    var pendingCustomSpec by remember {
+        mutableStateOf<com.llzx373.foldreader.core.ocr.OcrModelSpec?>(null)
+    }
+    val customModelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val spec = pendingCustomSpec
+        pendingCustomSpec = null
+        if (uri != null && spec != null) {
+            viewModel.importCustomModel(spec, uri) { result ->
+                val message = when (result) {
+                    is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.CustomSuccess ->
+                        "自定义模型已导入并优先生效：${result.spec.purpose}"
+                    is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.IoError ->
+                        "读取文件失败，请重试"
+                    else -> "导入失败"
                 }
                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
@@ -625,9 +650,13 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             ListItem(
                 headlineContent = { Text("模型管理") },
                 supportingContent = {
-                    val ready = modelStatus.count { it.second }
+                    val ready = modelStatus.count { it.ready }
                     Text(
-                        "扫描 PDF 文本层与漫画翻译共用的离线模型（用户自行下载、导入时校验 SHA-256）；已导入 $ready/${modelStatus.size}",
+                        if (com.llzx373.foldreader.BuildConfig.BUNDLED_MODELS) {
+                            "扫描 PDF 文本层与漫画翻译共用的离线模型（本版本已自带，可导入自定义模型覆盖）；已就绪 $ready/${modelStatus.size}"
+                        } else {
+                            "扫描 PDF 文本层与漫画翻译共用的离线模型（自行下载导入、校验 SHA-256，也可导入自定义模型）；已导入 $ready/${modelStatus.size}"
+                        },
                     )
                 },
                 modifier = Modifier.clickable { showModelManagerDialog = true },
@@ -847,11 +876,19 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     }
     if (showModelManagerDialog) {
         ModelManagerDialog(
-            status = modelStatus,
+            slots = modelStatus,
             onImport = { modelPicker.launch(arrayOf("*/*")) },
+            onImportCustom = { spec ->
+                pendingCustomSpec = spec
+                customModelPicker.launch(arrayOf("*/*"))
+            },
             onDelete = { spec ->
                 viewModel.deleteModel(spec.id)
                 Toast.makeText(context, "已删除：${spec.fileName}", Toast.LENGTH_SHORT).show()
+            },
+            onDeleteCustom = { spec ->
+                viewModel.deleteCustomModel(spec.id)
+                Toast.makeText(context, "已删除自定义模型：${spec.purpose}", Toast.LENGTH_SHORT).show()
             },
             onCopyUrl = { url ->
                 clipboard.setText(AnnotatedString(url))

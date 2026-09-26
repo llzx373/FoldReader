@@ -98,7 +98,9 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 
 ## 安装
 
-1. 到 [Releases](https://github.com/llzx373/FoldReader/releases) 下载最新的 `FoldReader-<版本>.apk`。
+1. 到 [Releases](https://github.com/llzx373/FoldReader/releases) 下载最新的 APK，两个版本二选一（功能完全相同，包名与签名一致，只能装一个、可互相覆盖安装切换）：
+   - `FoldReader-<版本>-full.apk` —— **自带全部 OCR/漫画翻译模型**，装完即用（包较大）；
+   - `FoldReader-<版本>-lite.apk` —— 不带模型（包小），模型在「设置 → OCR 模型 → 模型管理」里自行下载导入，也可以导入自己的微调/自定义 .onnx。
 2. 系统要求 **Android 13（API 33）及以上**。
 3. APK 未上架任何应用商店，安装时需允许"安装未知来源的应用"。
 

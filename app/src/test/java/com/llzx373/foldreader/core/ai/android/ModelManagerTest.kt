@@ -99,12 +99,13 @@ class ModelManagerTest {
     }
 
     @Test
-    fun `status 列出全部条目就绪态`() {
+    fun `slots 列出全部条目就绪态`() {
         placeModel("rec_ch")
-        val status = manager.status().toMap()
-        assertEquals(ModelCatalog.ALL.size, status.size)
-        assertTrue(status[ModelCatalog.REC_CH] == true)
-        assertTrue(status[ModelCatalog.DET] == false)
+        val slots = manager.slots().associateBy { it.spec }
+        assertEquals(ModelCatalog.ALL.size, slots.size)
+        assertTrue(slots[ModelCatalog.REC_CH]!!.ready)
+        assertFalse(slots[ModelCatalog.REC_CH]!!.custom)
+        assertFalse(slots[ModelCatalog.DET]!!.ready)
     }
 
     @Test
@@ -115,5 +116,71 @@ class ModelManagerTest {
         assertTrue(manager.delete("det"))
         assertFalse(manager.ocrReady())
         assertFalse(manager.delete("nonexistent"))
+    }
+
+    // ---- M24：自定义模型槽位 + 内置模型铺底 ----
+
+    @Test
+    fun `自定义模型任意字节导入成功且不校验哈希`() = runTest {
+        val spec = ModelCatalog.DET
+        val result = manager.importCustom(spec) { ByteArrayInputStream(byteArrayOf(9, 9, 9)) }
+        assertEquals(ModelManager.ImportResult.CustomSuccess(spec), result)
+        assertTrue(manager.customFileOf(spec).isFile)
+        assertTrue(manager.isReady(spec))
+        assertFalse(manager.fileOf(spec).exists()) // 不动官方文件
+    }
+
+    @Test
+    fun `自定义模型空文件报 IoError 且不留残留`() = runTest {
+        val spec = ModelCatalog.BUBBLE
+        val result = manager.importCustom(spec) { ByteArrayInputStream(ByteArray(0)) }
+        assertEquals(ModelManager.ImportResult.IoError, result)
+        assertFalse(manager.customFileOf(spec).exists())
+        assertFalse(File(File(context.filesDir, "models"), "${spec.id}.custom.importing").exists())
+    }
+
+    @Test
+    fun `自定义模型流打开失败报 IoError`() = runTest {
+        val result = manager.importCustom(ModelCatalog.DET) { null }
+        assertEquals(ModelManager.ImportResult.IoError, result)
+    }
+
+    @Test
+    fun `resolvedFileOf 自定义优先于官方`() = runTest {
+        val spec = ModelCatalog.REC_CH
+        placeModel("rec_ch", byteArrayOf(1, 1, 1))
+        assertEquals(manager.fileOf(spec), manager.resolvedFileOf(spec))
+        manager.importCustom(spec) { ByteArrayInputStream(byteArrayOf(2, 2, 2)) }
+        assertEquals(manager.customFileOf(spec), manager.resolvedFileOf(spec))
+    }
+
+    @Test
+    fun `deleteCustom 只删自定义且状态回落到官方`() = runTest {
+        val spec = ModelCatalog.REC_EN
+        placeModel("rec_en", byteArrayOf(1, 1, 1))
+        manager.importCustom(spec) { ByteArrayInputStream(byteArrayOf(2, 2, 2)) }
+        assertTrue(manager.slots().first { it.spec == spec }.custom)
+        assertTrue(manager.deleteCustom("rec_en"))
+        val slot = manager.slots().first { it.spec == spec }
+        assertFalse(slot.custom)
+        assertTrue(slot.official)
+        assertTrue(slot.ready)
+        assertEquals(manager.fileOf(spec), manager.resolvedFileOf(spec))
+    }
+
+    @Test
+    fun `ocrReady 接受仅有自定义模型的槽位`() = runTest {
+        manager.importCustom(ModelCatalog.DET) { ByteArrayInputStream(byteArrayOf(1)) }
+        manager.importCustom(ModelCatalog.REC_JA) { ByteArrayInputStream(byteArrayOf(1)) }
+        assertTrue(manager.ocrReady())
+        assertEquals(listOf("rec_ja"), manager.importedRecs().map { it.id })
+    }
+
+    @Test
+    fun `lite 变体 seedBundledModels 恒为空转`() = runTest {
+        // 单测跑在 lite 变体下，BuildConfig.BUNDLED_MODELS = false：
+        // 铺底必须零成本返回 0 且不写标记文件
+        assertEquals(0, manager.seedBundledModels())
+        assertFalse(File(File(context.filesDir, "models"), ModelManager.BUNDLED_SEED_MARKER).exists())
     }
 }
