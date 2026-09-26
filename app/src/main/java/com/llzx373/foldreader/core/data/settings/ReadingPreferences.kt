@@ -135,6 +135,8 @@ data class ReadingPreferences(
     val aiChapterRuleConfirmed: Boolean = false,
     /** M18：选中即译的首次外发一次性确认；确认后不再弹。 */
     val aiTranslationConfirmed: Boolean = false,
+    /** M22：漫画翻译的首次外发一次性确认；确认后不再弹。 */
+    val aiComicTranslateConfirmed: Boolean = false,
     /** M16：AI 清洗配方推荐的首次外发一次性确认；确认后不再弹。 */
     val aiCleanRecipeConfirmed: Boolean = false,
     /** M17：AI 元数据补全的首次外发一次性确认；确认后不再弹。 */
@@ -143,6 +145,12 @@ data class ReadingPreferences(
     val translationViewHintShown: Boolean = false,
     /** M20：「翻译全书」成本预估单价（元 / 百万 token），用户在确认页可改并持久化。 */
     val aiPricePerMillion: Double = 2.0,
+    /**
+     * M21：OCR 识别语言（扫描 PDF 文本层与漫画页级 OCR 共用的 rec 模型选择）。
+     * 取值 = ModelCatalog 的 rec 条目 id（"rec_ch"/"rec_en"/"rec_ja"）；
+     * 空串 = 自动（优先中文模型——中日英混排覆盖最好——未导入则取第一个已导入的）。
+     */
+    val ocrRecLang: String = "",
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

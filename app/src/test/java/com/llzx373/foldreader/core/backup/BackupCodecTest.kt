@@ -729,6 +729,9 @@ class BackupCodecTest {
         override suspend fun setAiTranslationConfirmed(confirmed: Boolean) =
             update { copy(aiTranslationConfirmed = confirmed) }
 
+        override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) =
+            update { copy(aiComicTranslateConfirmed = confirmed) }
+
         override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) =
             update { copy(aiCleanRecipeConfirmed = confirmed) }
 
@@ -740,6 +743,9 @@ class BackupCodecTest {
 
         override suspend fun setAiPricePerMillion(price: Double) =
             update { copy(aiPricePerMillion = price) }
+
+        override suspend fun setOcrRecLang(modelId: String) =
+            update { copy(ocrRecLang = modelId) }
 
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()

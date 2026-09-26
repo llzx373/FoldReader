@@ -46,6 +46,8 @@ class SettingsViewModel(
     private val credentialStore: CredentialStore,
     private val aiContentGate: AiContentGate,
     private val aiProvider: suspend () -> AiProvider?,
+    /** M21：OCR/气泡模型管理（导入/校验/删除/就绪状态）。 */
+    private val modelManager: com.llzx373.foldreader.core.ai.android.ModelManager,
     /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
     private val clearAiDataAction: suspend () -> Unit = {},
 ) : ViewModel() {
@@ -274,6 +276,31 @@ class SettingsViewModel(
         }
     }
 
+    // ---- OCR 模型（M21）----
+
+    private val _modelStatus = MutableStateFlow(modelManager.status())
+    val modelStatus: StateFlow<List<Pair<com.llzx373.foldreader.core.ocr.OcrModelSpec, Boolean>>> =
+        _modelStatus.asStateFlow()
+
+    fun importModel(
+        uri: Uri,
+        displayName: String?,
+        onResult: (com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult) -> Unit,
+    ) {
+        launch {
+            val result = modelManager.import(uri, displayName)
+            _modelStatus.value = modelManager.status()
+            onResult(result)
+        }
+    }
+
+    fun deleteModel(modelId: String) {
+        modelManager.delete(modelId)
+        _modelStatus.value = modelManager.status()
+    }
+
+    fun updateOcrRecLang(modelId: String) = launch { settingsRepository.setOcrRecLang(modelId) }
+
     fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
         launch {
             val error = runCatching { backupManager.exportTo(uri) }.exceptionOrNull()?.message
@@ -303,6 +330,7 @@ class SettingsViewModel(
                     credentialStore = container.credentialStore,
                     aiContentGate = container.aiContentGate,
                     aiProvider = container::aiProvider,
+                    modelManager = container.modelManager,
                     clearAiDataAction = container::clearAiData,
                 )
             }

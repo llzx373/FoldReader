@@ -83,6 +83,24 @@ internal val MIGRATION_5_6 = object : Migration(5, 6) {
 }
 
 /**
+ * v7：新建漫画页翻译台账表 `comic_page_translations`（M22）。主键 (bookId, lang, pageIndex)，
+ * 随书级联删除；译文不落库（落 filesDir/comic_translate/），只存状态机与元信息。
+ * 建表语句照 `app/schemas/…/7.json` 快照逐字誊写。
+ */
+internal val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `comic_page_translations` (`bookId` INTEGER NOT NULL, " +
+                "`lang` TEXT NOT NULL, `pageIndex` INTEGER NOT NULL, `status` TEXT NOT NULL, " +
+                "`model` TEXT NOT NULL, `bubbleCount` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookId`, `lang`, `pageIndex`), " +
+                "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -92,4 +110,4 @@ internal val MIGRATION_5_6 = object : Migration(5, 6) {
  * 迁移只做结构变更；要动数据另起一条 Migration，并在上面补注释说明。
  */
 val DATABASE_MIGRATIONS: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)

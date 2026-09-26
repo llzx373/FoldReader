@@ -45,7 +45,12 @@ import com.llzx373.foldreader.core.data.settings.enumOrDefault
 import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
+import com.llzx373.foldreader.core.ai.AiTargetLang
+import com.llzx373.foldreader.core.ocr.OcrBubble
 import com.llzx373.foldreader.core.reader.dayStartMs
+import com.llzx373.foldreader.core.translate.ComicPageTranslation
+import com.llzx373.foldreader.core.translate.TranslatedBubble
+import com.llzx373.foldreader.feature.translate.ComicTranslationController
 import com.llzx373.foldreader.feature.reader.AutoPageClock
 import com.llzx373.foldreader.feature.reader.AutoPageTurnRequests
 import com.llzx373.foldreader.feature.reader.ReadingTimer
@@ -72,6 +77,9 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -125,6 +133,18 @@ class ComicReaderViewModel(
     private val importSeriesEntry: suspend (Uri, Boolean) -> Long? = { _, _ -> null },
     /** 文件大小（MB）：只用于超大文档的性能提示。 */
     private val fileSizeMb: suspend (BookEntity) -> Int? = { null },
+    /**
+     * M21：OCR 文本层是否可用（模型已导入）。扫描 PDF 在 OCR 就绪时不再短路选字/搜索——
+     * 内容源此时已包上 OcrTextLayerSource，能返回 OCR 文本层的结果。
+     */
+    private val ocrTextLayerReady: suspend () -> Boolean = { false },
+    /**
+     * M22：漫画翻译门面（覆盖层数据/单页翻译/页状态流）；null = 功能不可用
+     * （菜单整片隐藏）。首次外发确认与 AI 配置判定由界面层先行处理。
+     */
+    val comicTranslation: ComicTranslationController? = null,
+    /** 整卷批量入队（生产 = ComicTranslationQueue.enqueueBook + 前台服务拉起）。 */
+    private val enqueueVolumeTranslation: ((AiTargetLang) -> Unit)? = null,
     private val initialPage: Int = -1,
 ) : ViewModel() {
 
@@ -337,6 +357,148 @@ class ComicReaderViewModel(
         _search.value = ComicSearchState()
     }
 
+    // ---- 漫画翻译（M22：覆盖层 / 对照 / 批量）----
+
+    /** 译文视角：OFF = 原图；OVERLAY = 气泡覆盖层（视角①）；COMPARE = 双页左原右译（视角②）。 */
+    enum class ComicTranslationMode { OFF, OVERLAY, COMPARE }
+
+    private val _translationMode = MutableStateFlow(ComicTranslationMode.OFF)
+    val translationMode: StateFlow<ComicTranslationMode> = _translationMode.asStateFlow()
+
+    private val _translationLang = MutableStateFlow(AiTargetLang.ZH_HANS)
+    val translationLang: StateFlow<AiTargetLang> = _translationLang.asStateFlow()
+
+    /** 已加载的覆盖层（页序号 → 气泡+译文）；流式翻译中逐气泡就地更新。 */
+    val translationOverlays: SnapshotStateMap<Int, ComicPageTranslation> = mutableStateMapOf()
+
+    /** 对照面板点中的气泡序号（覆盖层高亮边框）；-1 = 无。 */
+    private val _highlightBubble = MutableStateFlow(-1)
+    val highlightBubble: StateFlow<Int> = _highlightBubble.asStateFlow()
+
+    /** 「翻译本页」进行态与失败信息（确认对话框据此转圈/报错重试）。 */
+    private val _pageTranslating = MutableStateFlow(false)
+    val pageTranslating: StateFlow<Boolean> = _pageTranslating.asStateFlow()
+    private val _pageTranslateError = MutableStateFlow<String?>(null)
+    val pageTranslateError: StateFlow<String?> = _pageTranslateError.asStateFlow()
+
+    /** 页状态流（pageIndex → status）：菜单「已译 x/y」与视角可用判据。 */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val translationPageStatus: StateFlow<Map<Int, String>> =
+        _translationLang.flatMapLatest { lang ->
+            comicTranslation?.observePageStatus(lang) ?: flowOf(emptyMap())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(PANEL_SUBSCRIBE_MS), emptyMap())
+
+    private fun loadTranslationOverlays() {
+        val controller = comicTranslation ?: return
+        val lang = _translationLang.value
+        val pages = visiblePages()
+        viewModelScope.launch(Dispatchers.IO) {
+            for (page in pages) {
+                if (translationOverlays.containsKey(page)) continue
+                val overlay = runCatching { controller.overlayFor(lang, page) }.getOrNull() ?: continue
+                if (closed.get()) return@launch
+                Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+            }
+        }
+    }
+
+    fun setTranslationMode(mode: ComicTranslationMode) {
+        _translationMode.value = mode
+        if (mode != ComicTranslationMode.OFF) loadTranslationOverlays()
+    }
+
+    /** 切语言：已加载的覆盖层全部作废（那是另一种语言的译文）。 */
+    fun setTranslationLang(lang: AiTargetLang) {
+        if (_translationLang.value == lang) return
+        _translationLang.value = lang
+        Snapshot.withMutableSnapshot { translationOverlays.clear() }
+        if (_translationMode.value != ComicTranslationMode.OFF) loadTranslationOverlays()
+    }
+
+    fun highlightBubble(index: Int) {
+        _highlightBubble.value = index
+    }
+
+    fun clearBubbleHighlight() {
+        _highlightBubble.value = -1
+    }
+
+    fun clearPageTranslateError() {
+        _pageTranslateError.value = null
+    }
+
+    /**
+     * 翻译当前跨页的第一页：流式逐气泡更新覆盖层，成功后自动切到覆盖层视角。
+     * [force] = 重译（作废旧译文）；重复调用防抖——进行中的那一页翻完才接受下一次。
+     */
+    fun translateCurrentPage(systemOverride: String? = null, force: Boolean = false) {
+        val controller = comicTranslation ?: return
+        val page = currentPages().firstOrNull() ?: return
+        if (_pageTranslating.value) return
+        val lang = _translationLang.value
+        viewModelScope.launch(Dispatchers.IO) {
+            _pageTranslating.value = true
+            _pageTranslateError.value = null
+            try {
+                val onBubble: (Int, String) -> Unit = { index, text ->
+                    viewModelScope.launch { onBubbleTranslated(page, index, text) }
+                }
+                val result = if (force) {
+                    controller.retranslatePage(page, lang, systemOverride, onBubble)
+                } else {
+                    controller.translatePage(page, lang, systemOverride, onBubble)
+                }
+                result.onSuccess {
+                    runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
+                        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                    }
+                    _translationMode.value = ComicTranslationMode.OVERLAY
+                }.onFailure { error ->
+                    _pageTranslateError.value = error.message ?: "翻译失败"
+                }
+            } finally {
+                _pageTranslating.value = false
+            }
+        }
+    }
+
+    /** 流式中途更新一个气泡的译文（其余气泡保留已译出的部分）。 */
+    private suspend fun onBubbleTranslated(page: Int, index: Int, text: String) {
+        val controller = comicTranslation ?: return
+        val bubbles = controller.bubblesFor(page) ?: return
+        val current = translationOverlays[page]
+        val texts = HashMap<Int, String>()
+        current?.bubbles?.forEachIndexed { pos, bubble ->
+            bubble.text?.let { texts[bubbles.getOrNull(pos)?.index ?: pos] = it }
+        }
+        texts[index] = text
+        val overlay = ComicPageTranslation(
+            bubbles.map { bubble ->
+                TranslatedBubble(
+                    rect = bubble.rect,
+                    text = texts[bubble.index],
+                    lowConfidence = bubble.confidence < ComicPageTranslation.LOW_CONFIDENCE,
+                )
+            },
+        )
+        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+    }
+
+    /** 整卷批量：入队（断点续译由队列负责），前台服务由 AppContainer 一侧拉起。 */
+    fun translateVolume() {
+        enqueueVolumeTranslation?.invoke(_translationLang.value)
+    }
+
+    /** 对照面板（视角③）：当前页的气泡原文 + 译文对。 */
+    suspend fun bubblePairsForPanel(page: Int): List<Pair<OcrBubble, String?>>? =
+        comicTranslation?.bubblePairsFor(_translationLang.value, page)
+
+    /** 确认页的范围展示：该页气泡数与原文字数；未识别过（无缓存）返回 null。 */
+    suspend fun bubbleInfoFor(page: Int): Pair<Int, Int>? =
+        comicTranslation?.bubblesFor(page)?.let { bubbles ->
+            bubbles.size to bubbles.sumOf { it.text.length }
+        }
+
     // ---- 同系列（前后卷切换）----
 
     private val _series = MutableStateFlow<List<ComicSeriesCandidate>>(emptyList())
@@ -381,8 +543,8 @@ class ComicReaderViewModel(
      * 这是长按松手后的一次性调用（最多一次 IPC），不在拖动过程中回源。
      */
     suspend fun snapSelectionToText(pageIndex: Int, region: PageRect): PageSelection? {
-        // 已确认是扫描件就别白跑一次 IPC：文档本来就没有可选的字
-        if (features.value.scanned) return null
+        // 已确认是扫描件就别白跑一次 IPC——除非 OCR 文本层可用（M21：模型就绪时来源已装饰）
+        if (features.value.scanned && !ocrTextLayerReady()) return null
         val source = source ?: return null
         val hit = runCatching {
             source.selectText(
@@ -474,6 +636,16 @@ class ComicReaderViewModel(
         openBook()
         loadSeries()
         viewModelScope.launch { autoPageLoop() }
+        // 覆盖层视角下翻页要补齐新可见页的译文（overlayFor 走磁盘缓存，已加载的跳过）
+        viewModelScope.launch {
+            _uiState.map { it.pageIndex }.distinctUntilChanged().collect {
+                if (_translationMode.value != ComicTranslationMode.OFF) loadTranslationOverlays()
+            }
+        }
+        // 目标语言初值与设置页口径一致
+        viewModelScope.launch {
+            _translationLang.value = settingsRepository.preferences.first().aiTargetLang
+        }
     }
 
     private fun openBook(password: String? = null) {
@@ -1167,6 +1339,11 @@ class ComicReaderViewModel(
                     seriesCandidates = container::comicSeriesCandidates,
                     importSeriesEntry = container::importSeriesComic,
                     fileSizeMb = container::fileSizeMb,
+                    ocrTextLayerReady = { container.modelManager.ocrReady() },
+                    comicTranslation = container.comicTranslationController(bookId),
+                    enqueueVolumeTranslation = { lang ->
+                        container.enqueueComicVolumeTranslation(bookId, lang)
+                    },
                     initialPage = initialPage,
                 )
             }

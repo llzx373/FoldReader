@@ -182,6 +182,20 @@ fun ComicReaderScreen(
     val annotations by viewModel.annotations.collectAsState()
     val series by viewModel.series.collectAsState()
     val searchState by viewModel.search.collectAsState()
+    val translationMode by viewModel.translationMode.collectAsState()
+    val translationLang by viewModel.translationLang.collectAsState()
+    val pageTranslating by viewModel.pageTranslating.collectAsState()
+    val pageTranslateError by viewModel.pageTranslateError.collectAsState()
+    val translationPageStatus by viewModel.translationPageStatus.collectAsState()
+    val highlightBubble by viewModel.highlightBubble.collectAsState()
+    val volumeProgress by app.container.comicTranslationQueue.progress.collectAsState()
+    // 漫画翻译入口判据（M22）：漫画格式 + AI 已配置 + 气泡与识别模型均已导入
+    var translationAvailable by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.container) {
+        translationAvailable = uiState.container != null &&
+            app.container.aiConfigured() && app.container.modelManager.bubbleReady()
+    }
+    val translationTypeface = remember(prefs.fontKey) { app.container.fontManager.resolve(prefs.fontKey) }
     val colors = readerColors(prefs.themeId, prefs.customBackgroundArgb, prefs.customTextArgb)
     // 日漫从右往左：点左侧是「下一页」，同一对页里低序号页放右边，
     // 横滑与翻页动画一并左右镜像（下一页从左滑入）——三处方向翻译见 ComicLogic 的纯函数，
@@ -203,6 +217,13 @@ fun ComicReaderScreen(
     var jumpVisible by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var editingAnnotation by remember { mutableStateOf<AnnotationEntity?>(null) }
+    // 漫画翻译（M22）：确认页 / 对照面板 / 首次外发确认；pendingTranslateAction 存确认后要做的动作
+    var pageTranslateVisible by remember { mutableStateOf(false) }
+    var volumeTranslateVisible by remember { mutableStateOf(false) }
+    var bubbleCompareVisible by remember { mutableStateOf(false) }
+    var firstSendVisible by remember { mutableStateOf(false) }
+    var translateStarted by remember { mutableStateOf(false) }
+    var pendingTranslateAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // 同系列的前后卷：直接从状态列表推，避免在组合期调用 ViewModel 函数（那样系列载入后不会重组）
     val seriesIndex = series.indexOfFirst { it.bookId == bookId }
@@ -272,6 +293,32 @@ fun ComicReaderScreen(
         widthPx = size.width.toFloat(),
         heightPx = size.height.toFloat(),
     )
+
+    // 漫画翻译（M22）：功能不可用时视角一律按关闭；对照视角（②）只在双页布局成立，
+    // 其余（单页/滚动/ tabletop）回落为覆盖层——覆盖层本来就能画在任何布局上
+    val effectiveTranslationMode = if (translationAvailable) {
+        translationMode
+    } else {
+        ComicReaderViewModel.ComicTranslationMode.OFF
+    }
+    val compareActive = effectiveTranslationMode == ComicReaderViewModel.ComicTranslationMode.COMPARE &&
+        dual && uiState.dual && !scrollMode
+    val translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation? = { page ->
+        if (effectiveTranslationMode != ComicReaderViewModel.ComicTranslationMode.OFF) {
+            viewModel.translationOverlays[page]
+        } else {
+            null
+        }
+    }
+    /** 首次外发确认（一次性偏好位）：未确认先弹说明，确认后执行动作。 */
+    val withTranslateConfirm: (() -> Unit) -> Unit = { action ->
+        if (prefs.aiComicTranslateConfirmed) {
+            action()
+        } else {
+            pendingTranslateAction = action
+            firstSendVisible = true
+        }
+    }
 
     // 解码目标 = 单页实际可用的槽位尺寸；折叠/旋转改变尺寸时重解码
     val decodeTargetW = (
@@ -1124,6 +1171,8 @@ fun ComicReaderScreen(
                         gap = prefs.comicScrollGapDp.dp,
                         listState = scrollListState,
                         host = anchorHost,
+                        translationFor = translationFor,
+                        translationTypeface = translationTypeface,
                         modifier = Modifier.fillMaxSize(),
                     )
                     return@Box
@@ -1136,22 +1185,23 @@ fun ComicReaderScreen(
                         .clipToBounds(),
                 ) {
                     val currentPages = viewModel.currentPages()
-                    ComicSpread(
-                        pages = currentPages,
-                        viewModel = viewModel,
-                        background = colors.background,
-                        dual = dual && uiState.dual,
-                        rtl = rtl,
-                        fitMode = prefs.comicFitMode,
-                        splitLeftPx = splitLeftPx,
-                        splitRightPx = splitRightPx,
-                        windowWidthPx = contentRect.width,
-                        host = anchorHost,
-                    )
-                    val sliding = animPages
-                    if (sliding != null) {
+                    if (compareActive) {
+                        // 视角②：同一页左原右译（固定左右，不随日漫 RTL 镜像）
+                        ComicCompareSpread(
+                            page = currentPages.first(),
+                            viewModel = viewModel,
+                            background = colors.background,
+                            fitMode = prefs.comicFitMode,
+                            splitLeftPx = splitLeftPx,
+                            splitRightPx = splitRightPx,
+                            windowWidthPx = contentRect.width,
+                            host = anchorHost,
+                            translationFor = translationFor,
+                            translationTypeface = translationTypeface,
+                        )
+                    } else {
                         ComicSpread(
-                            pages = sliding,
+                            pages = currentPages,
                             viewModel = viewModel,
                             background = colors.background,
                             dual = dual && uiState.dual,
@@ -1161,8 +1211,45 @@ fun ComicReaderScreen(
                             splitRightPx = splitRightPx,
                             windowWidthPx = contentRect.width,
                             host = anchorHost,
-                            modifier = Modifier.graphicsLayer { translationX = animX.value },
+                            translationFor = translationFor,
+                            translationTypeface = translationTypeface,
+                            highlightBubble = highlightBubble,
                         )
+                    }
+                    val sliding = animPages
+                    if (sliding != null) {
+                        if (compareActive) {
+                            ComicCompareSpread(
+                                page = sliding.first(),
+                                viewModel = viewModel,
+                                background = colors.background,
+                                fitMode = prefs.comicFitMode,
+                                splitLeftPx = splitLeftPx,
+                                splitRightPx = splitRightPx,
+                                windowWidthPx = contentRect.width,
+                                host = anchorHost,
+                                translationFor = translationFor,
+                                translationTypeface = translationTypeface,
+                                modifier = Modifier.graphicsLayer { translationX = animX.value },
+                            )
+                        } else {
+                            ComicSpread(
+                                pages = sliding,
+                                viewModel = viewModel,
+                                background = colors.background,
+                                dual = dual && uiState.dual,
+                                rtl = rtl,
+                                fitMode = prefs.comicFitMode,
+                                splitLeftPx = splitLeftPx,
+                                splitRightPx = splitRightPx,
+                                windowWidthPx = contentRect.width,
+                                host = anchorHost,
+                                translationFor = translationFor,
+                                translationTypeface = translationTypeface,
+                                highlightBubble = highlightBubble,
+                                modifier = Modifier.graphicsLayer { translationX = animX.value },
+                            )
+                        }
                     }
                     val peelTick = peel.progress.value + peel.touchX.value + peel.touchY.value
                     val peelFrameNow = if (peel.busy) {
@@ -1396,6 +1483,49 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
+                    translationMode = if (translationAvailable) effectiveTranslationMode else null,
+                    onSelectTranslationMode = if (translationAvailable) {
+                        { viewModel.setTranslationMode(it) }
+                    } else {
+                        null
+                    },
+                    translatedText = if (translationAvailable) {
+                        val done = translationPageStatus.count {
+                            it.value == com.llzx373.foldreader.core.data.db.ComicPageTranslationEntity.STATUS_DONE
+                        }
+                        "已译 $done/${uiState.pageCount}"
+                    } else {
+                        null
+                    },
+                    volumeActive = volumeProgress[bookId]?.let {
+                        it.status == com.llzx373.foldreader.feature.translate.ComicTranslationQueue.Status.QUEUED ||
+                            it.status == com.llzx373.foldreader.feature.translate.ComicTranslationQueue.Status.RUNNING ||
+                            it.status == com.llzx373.foldreader.feature.translate.ComicTranslationQueue.Status.PAUSED
+                    } == true,
+                    onTranslatePage = if (translationAvailable) {
+                        {
+                            menuVisible = false
+                            withTranslateConfirm { pageTranslateVisible = true }
+                        }
+                    } else {
+                        null
+                    },
+                    onTranslateVolume = if (translationAvailable) {
+                        {
+                            menuVisible = false
+                            withTranslateConfirm { volumeTranslateVisible = true }
+                        }
+                    } else {
+                        null
+                    },
+                    onOpenBubbleCompare = if (translationAvailable) {
+                        {
+                            menuVisible = false
+                            bubbleCompareVisible = true
+                        }
+                    } else {
+                        null
+                    },
                     onSelectPageTurnMode = viewModel::setPageTurnMode,
                     onSelectDirection = viewModel::setComicDirection,
                     onSelectFitMode = viewModel::setComicFitMode,
@@ -1410,6 +1540,95 @@ fun ComicReaderScreen(
                     onOpenSettings = { exit.leaveTo(onOpenSettings) },
                 )
             }
+        }
+
+        // 漫画翻译（M22）：首次外发一次性确认 → 确认页（范围/语言/当次提示词）→ 对照面板
+        if (firstSendVisible) {
+            ComicTranslateFirstSendDialog(
+                onConfirm = {
+                    firstSendVisible = false
+                    scope.launch {
+                        app.container.settingsRepository.setAiComicTranslateConfirmed(true)
+                    }
+                    pendingTranslateAction?.invoke()
+                    pendingTranslateAction = null
+                },
+                onDismiss = {
+                    firstSendVisible = false
+                    pendingTranslateAction = null
+                },
+            )
+        }
+
+        if (pageTranslateVisible) {
+            var bubbleInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+            var infoLoaded by remember { mutableStateOf(false) }
+            LaunchedEffect(uiState.pageIndex) {
+                infoLoaded = false
+                bubbleInfo = viewModel.bubbleInfoFor(viewModel.currentPages().firstOrNull() ?: 0)
+                infoLoaded = true
+            }
+            // 翻完（非失败）自动收确认页，视角已由 ViewModel 切到覆盖层
+            LaunchedEffect(pageTranslating) {
+                if (translateStarted && !pageTranslating && pageTranslateError == null) {
+                    pageTranslateVisible = false
+                    translateStarted = false
+                }
+            }
+            ComicPageTranslateConfirmDialog(
+                bubbleInfo = bubbleInfo,
+                infoLoaded = infoLoaded,
+                initialLang = translationLang,
+                translating = pageTranslating,
+                error = pageTranslateError,
+                colors = colors,
+                onStart = { lang, prompt ->
+                    translateStarted = true
+                    viewModel.setTranslationLang(lang)
+                    viewModel.clearPageTranslateError()
+                    viewModel.translateCurrentPage(prompt)
+                },
+                onDismiss = {
+                    pageTranslateVisible = false
+                    translateStarted = false
+                    viewModel.clearPageTranslateError()
+                },
+            )
+        }
+
+        if (volumeTranslateVisible) {
+            ComicVolumeTranslateConfirmDialog(
+                totalPages = uiState.pageCount,
+                donePages = translationPageStatus.count {
+                    it.value == com.llzx373.foldreader.core.data.db.ComicPageTranslationEntity.STATUS_DONE
+                },
+                lang = translationLang,
+                colors = colors,
+                onStart = {
+                    volumeTranslateVisible = false
+                    viewModel.translateVolume()
+                },
+                onDismiss = { volumeTranslateVisible = false },
+            )
+        }
+
+        if (bubbleCompareVisible) {
+            var pairs by remember { mutableStateOf<List<Pair<com.llzx373.foldreader.core.ocr.OcrBubble, String?>>?>(null) }
+            LaunchedEffect(uiState.pageIndex, translationLang) {
+                pairs = viewModel.bubblePairsForPanel(
+                    viewModel.currentPages().firstOrNull() ?: 0,
+                ) ?: emptyList()
+            }
+            ComicBubbleComparePanel(
+                pairs = pairs,
+                lang = translationLang,
+                colors = colors,
+                onHighlight = { viewModel.highlightBubble(it) },
+                onDismiss = {
+                    bubbleCompareVisible = false
+                    viewModel.clearBubbleHighlight()
+                },
+            )
         }
 
         if (uiState.passwordRequired) {
@@ -1564,6 +1783,65 @@ fun ComicReaderScreen(
 }
 
 /**
+ * 视角②「双页对照」：同一页左原右译。
+ *
+ * 方向固定（不随日漫 RTL 镜像）：这不是书的页序，而是「原文 | 译文」的语义位置。
+ * 复用双页布局的铰链分区，左页不吃覆盖层、右页只吃覆盖层。
+ */
+@Composable
+private fun ComicCompareSpread(
+    page: Int,
+    viewModel: ComicReaderViewModel,
+    background: Color,
+    fitMode: ComicFitMode,
+    splitLeftPx: Float,
+    splitRightPx: Float,
+    windowWidthPx: Float,
+    host: PageAnchorHost,
+    translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation?,
+    translationTypeface: android.graphics.Typeface?,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val images = viewModel.images
+    val failed = viewModel.failedPages
+    val leftWidth = density.run { splitLeftPx.toDp() }
+    val hingeWidth = density.run { (splitRightPx - splitLeftPx).coerceAtLeast(0f).toDp() }
+    val rightWidth = density.run { (windowWidthPx - splitRightPx).coerceAtLeast(0f).toDp() }
+    Row(modifier = modifier.fillMaxSize()) {
+        Box(modifier = Modifier.width(leftWidth).fillMaxHeight()) {
+            ComicPageView(
+                image = images[page],
+                failed = failed[page] == true,
+                background = background,
+                fitMode = fitMode,
+                resetKey = "orig-$page",
+                pageIndex = page,
+                host = host,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(modifier = Modifier.width(hingeWidth).fillMaxHeight().background(background)) {
+            SpineOverlay(modifier = Modifier.fillMaxSize())
+        }
+        Box(modifier = Modifier.width(rightWidth).fillMaxHeight()) {
+            ComicPageView(
+                image = images[page],
+                failed = failed[page] == true,
+                background = background,
+                fitMode = fitMode,
+                resetKey = "trans-$page",
+                pageIndex = page,
+                host = host,
+                translation = translationFor(page),
+                translationTypeface = translationTypeface,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
  * 一组页在内容区里的摆放。
  *
  * - 单页 / 跨页大图（span）：铺满整宽；
@@ -1582,6 +1860,10 @@ private fun BoxScope.ComicSpread(
     splitRightPx: Float,
     windowWidthPx: Float,
     host: PageAnchorHost,
+    /** 翻译覆盖层（M22）：按页序号取，无译文返回 null。 */
+    translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation? = { null },
+    translationTypeface: android.graphics.Typeface? = null,
+    highlightBubble: Int = -1,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1596,6 +1878,9 @@ private fun BoxScope.ComicSpread(
             resetKey = pages.firstOrNull() ?: -1,
             pageIndex = pages.firstOrNull() ?: -1,
             host = host,
+            translation = pages.firstOrNull()?.let(translationFor),
+            translationTypeface = translationTypeface,
+            highlightBubble = highlightBubble,
             modifier = modifier.fillMaxSize(),
         )
 
@@ -1610,6 +1895,9 @@ private fun BoxScope.ComicSpread(
                     resetKey = pages[0],
                     pageIndex = pages[0],
                     host = host,
+                    translation = translationFor(pages[0]),
+                    translationTypeface = translationTypeface,
+                    highlightBubble = highlightBubble,
                     modifier = modifier.fillMaxSize(),
                 )
             } else {
@@ -1630,6 +1918,9 @@ private fun BoxScope.ComicSpread(
                                 resetKey = pages[0],
                                 pageIndex = pages[0],
                                 host = host,
+                                translation = translationFor(pages[0]),
+                                translationTypeface = translationTypeface,
+                                highlightBubble = highlightBubble,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -1643,6 +1934,9 @@ private fun BoxScope.ComicSpread(
                                 resetKey = pages[0],
                                 pageIndex = pages[0],
                                 host = host,
+                                translation = translationFor(pages[0]),
+                                translationTypeface = translationTypeface,
+                                highlightBubble = highlightBubble,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -1670,6 +1964,9 @@ private fun BoxScope.ComicSpread(
                         resetKey = leftIndex,
                         pageIndex = leftIndex,
                         host = host,
+                        translation = translationFor(leftIndex),
+                        translationTypeface = translationTypeface,
+                        highlightBubble = highlightBubble,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1685,6 +1982,9 @@ private fun BoxScope.ComicSpread(
                         resetKey = rightIndex,
                         pageIndex = rightIndex,
                         host = host,
+                        translation = translationFor(rightIndex),
+                        translationTypeface = translationTypeface,
+                        highlightBubble = highlightBubble,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

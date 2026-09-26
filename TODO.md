@@ -160,31 +160,33 @@
 
 ---
 
-## M21 OCR 引擎 + 扫描 PDF 文本层（可与 M15-17 并行）
+## M21 OCR 引擎 + 扫描 PDF 文本层 ✅ 已完成（2026-09-26）
 
 **验收标准**：中/英扫描 PDF 可全文搜索、可选字复制；日/英/中模型导入/校验/删除全流程，错误文件明确报错。
+**验收记录**：单测全绿 1094（新增 47——`OcrPostprocessTest` 10 用例：热区解码/噪点过滤/外扩夹取/CTC 去重去空白/输入尺寸；`BubbleGroupingTest` 8 用例：归属/孤儿/框扩展/RTL·LTR 阅读序/置信度取小；`RtdetrPostprocessTest` 3 用例；`OcrTextLayerTest` + `PdfOcrStoreTest` 9 用例：选字并集/snippet/搜索计数/缓存往返/版本失效/删书清理/气泡编解码；`ModelCatalogTest` 4 用例（含哈希防呆闸门）；`ModelManagerTest` 9 用例：sha256 工具/未知文件/哈希不符无残留/流失败/就绪判据/删除回落）；`assembleDebug` 与 `assembleRelease`（R8）通过，APK 仅 arm64-v8a+x86_64 两 ABI。模型清单 SHA-256 实算并与 RapidOCR 官方 default_models.yaml（v3.9.2）/ HuggingFace LFS oid 逐一比对一致。**与 TODO 原文的偏差**：①气泡检测模型由 YOLO-seg 改为 RT-DETR-v2（R9 偏差，原因见 CHANGELOG——上游换代 + 唯一 YOLO-seg 候选 GPL/AGPL 且 104MB）；②识别词典（ppocr_keys_v1/en_dict/japan_dict）随 APK 打包进 assets 而非随模型导入（词表必须与模型类别表一致，打包消除错配）；③引入 ABI 过滤（arm64-v8a+x86_64）。真机待验：int8 气泡模型在 onnxruntime-mobile 精简算子包下的兼容性（退路：fp32 自量化或换源）、真实模型识别质量、扫描 PDF 选字手感、全量搜索首次逐页建层的等待观感。
 
-- [ ] 引入 `onnxruntime-mobile`（过依赖评审）；首版只用 CPU 后端
-- [ ] `core/ocr/`：ONNX 会话管理 + det → rec 管线 + 归一化坐标输出
-- [ ] `ModelManager`：模型清单（日/英/中 rec + det + 气泡检测，文件名/SHA-256/用途/官方地址，R7/R8/R9）+ SAF 导入 + 校验 + 删除
-- [ ] 设置页模型管理：清单、下载地址指引、导入入口、就绪状态；未就绪功能入口隐藏
-- [ ] 扫描 PDF 文本层：`PdfPagedSource` 页位图 → OCR → 全文搜索 + 拖框选字（复用 v2.2 归一化坐标）
+- [x] 引入 `onnxruntime-mobile`（过依赖评审）；首版只用 CPU 后端
+- [x] `core/ocr/`：ONNX 会话管理 + det → rec 管线 + 归一化坐标输出
+- [x] `ModelManager`：模型清单（日/英/中 rec + det + 气泡检测，文件名/SHA-256/用途/官方地址，R7/R8/R9）+ SAF 导入 + 校验 + 删除
+- [x] 设置页模型管理：清单、下载地址指引、导入入口、就绪状态；未就绪功能入口隐藏
+- [x] 扫描 PDF 文本层：`PdfPagedSource` 页位图 → OCR → 全文搜索 + 拖框选字（复用 v2.2 归一化坐标）
 
 ---
 
-## M22 漫画翻译 v1
+## M22 漫画翻译 v1 ✅ 已完成（2026-09-26）
 
 **验收标准**：整卷断点续译；覆盖层随缩放/双页/RTL 跟随；译名跨卷一致；临时提示词当次生效。
+**验收记录**：单测全绿 1138（M22 新增——`ComicTranslatePromptTest` 8 用例：消息结构/目标语言注入/术语注入/临时提示词当次替换/畸形 JSON/数量校验/流式部分数组/登记表占位符；`ComicTranslationStoreTest`：OCR 缓存与译文往返/损坏回落/删书清理；`BubbleRenderTest` 9 用例：采样点位裁页内/中位色抗文字噪点/文字色反转/全角半角宽度/折行/字号收缩自洽；`ComicTranslationQueueTest` 5 用例：顺序推进/断点续译跳 done/单页退避失败续译/取消/暂停恢复；`GlossaryRepositoryTest` 6 用例：系列跨书注入/书覆盖系列/系列覆盖全局/未确认不注入/不传 seriesKey 不读系列层/系列间隔离；**E2E `ComicTranslationE2ETest` 8 用例**（真 Room 内存库 v7 + 真 ComicTranslationStore + 真 ChatCompletionsProvider 打 MockWebServer SSE 分块 + 真队列，仅 OCR 注入合成气泡）：全链路单页落盘+台账 done/流式逐气泡按序回调（CountingProvider 硬断言第 N 气泡回调时恰到达 N 个 delta，不依赖墙钟）/数量校验失败整页重试/两次都错置 failed/队列断点续译（503→failed→重入队只重译该页）/临时提示词只当次/三级术语合并与覆盖/未配置零网络请求；`ComicTranslateRealApiTest` 读 .env 真实 API 冒烟——本机 deepseek-flash 实跑通过（2 气泡译文正确，未配置环境 Assume 自动跳过）；`DatabaseMigrationTest` v6→v7）。`assembleDebug` 与 `assembleRelease`（R8）通过。**与 TODO 原文的偏差**：①气泡检测模型为 RT-DETR-v2（M21 已定，R9 偏差同前）；②「调好可带同一提示词发起整卷」未做——整卷走默认注入（书>系列>全局术语），临时提示词仅按页当次（整卷确认页明示范围/断点续译/成本口径，不编 token 数）；③系列 Tab 因 GlossaryDialog 唯一调用点在全局设置页（无当前书上下文），改为对话框内自 deriv 书架漫画主干系列清单（与单书表同款自治模式），未新增漫画侧入口。真机待验：int8 气泡模型在 onnxruntime-mobile 精简算子包下的兼容性、真实页气泡检测质量、覆盖层随缩放/掀页观感、双页对照翻页同步、竖排日漫译文横排呈现的观感。
 
-- [ ] DB 迁移：`comic_page_translations` 表
-- [ ] 气泡检测模型（YOLO-seg，R9）接入：文字块归并为气泡
-- [ ] 页级管线：OCR 缓存 `.ocr.json` 与翻译结果 `.json` 分文件（`filesDir/comic_translate/<bookId>/`）
-- [ ] `ComicPageView` 加 `TranslationOverlay`：归一化坐标气泡，随缩放/双页/RTL/条漫自动跟随
-- [ ] 按页翻译：「翻译本页」+ 临时提示词（R11），气泡译文逐个流式出现；调好可带同一提示词发起整卷
-- [ ] 批量翻译：后台队列 + 前台服务 + 通知；逐页状态；断点续译
-- [ ] 三视角：①覆盖层显隐 ②双页左原图右译文 ③气泡对照面板（点条目高亮气泡）
-- [ ] 系列术语表：`ComicSeriesMatch` 主干产出 `seriesKey`，`scope=series` 跨卷共享（复用 M20 表）
-- [ ] 气泡底色采样覆盖原文（不做 inpainting）；字体复用字体导入机制
+- [x] DB 迁移：`comic_page_translations` 表
+- [x] 气泡检测模型（RT-DETR-v2，R9 偏差见 M21）接入：文字块归并为气泡
+- [x] 页级管线：OCR 缓存 `.ocr.json` 与翻译结果 `.json` 分文件（`filesDir/comic_translate/<bookId>/`）
+- [x] `ComicPageView` 加 `TranslationOverlay`：归一化坐标气泡，随缩放/双页/RTL/条漫自动跟随
+- [x] 按页翻译：「翻译本页」+ 临时提示词（R11），气泡译文逐个流式出现
+- [x] 批量翻译：后台队列 + 前台服务 + 通知；逐页状态；断点续译
+- [x] 三视角：①覆盖层显隐 ②双页左原图右译文 ③气泡对照面板（点条目高亮气泡）
+- [x] 系列术语表：`ComicSeriesMatch` 主干产出 `seriesKey`，`scope=series` 跨卷共享（复用 M20 表）
+- [x] 气泡底色采样覆盖原文（不做 inpainting）；字体复用字体导入机制
 
 ---
 

@@ -39,6 +39,11 @@ pdfboxAndroid = "2.0.27.0"
 robolectric = "4.17"
 # AI 底座（M14）：OkHttp 传输与 SSE 流式；MockWebServer 仅为 test 依赖
 okhttp = "4.12.0"
+# OCR 引擎（M21，依赖评审见 docs/AI功能需求与实施.md §2.4）：钉 mobile 版而非 android 版——
+# mobile 全 ABI AAR 约 7MB（android 版 1.30 已涨到 53MB），符合 ~10MB 评审预算。
+# 上游 mobile 线停在 1.18.0（后续只维护 onnxruntime-android），首版只用 CPU 后端的
+# det/rec/YOLO-seg 推理不需要新特性；若将来需要再换线并重新过评审。
+onnxruntime = "1.18.0"
 kotlinxSerializationJson = "1.8.1"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
@@ -95,6 +100,8 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+# OCR 引擎（M21）
+onnxruntime-mobile = { group = "com.microsoft.onnxruntime", name = "onnxruntime-mobile", version.ref = "onnxruntime" }
 # 桌面清理工具（tools/cleaner）
 compose-material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "composeMaterial3" }
 

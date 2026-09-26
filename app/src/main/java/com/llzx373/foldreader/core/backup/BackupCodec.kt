@@ -440,6 +440,8 @@ class BackupCodec(
         .put("comicSpreadAutoDetect", p.comicSpreadAutoDetect)
         .put("comicFitMode", p.comicFitMode.name)
         .put("comicScrollGapDp", p.comicScrollGapDp)
+        // M21：OCR 识别语言（无隐私含量的界面偏好；AI 服务配置与凭据依旧不进备份）
+        .put("ocrRecLang", p.ocrRecLang)
 
     private suspend fun applyPreferences(json: JSONObject) {
         val current = settingsRepository.preferences.first()
@@ -591,6 +593,9 @@ class BackupCodec(
         }
         if (json.has("comicScrollGapDp")) {
             settingsRepository.setComicScrollGapDp(json.optInt("comicScrollGapDp"))
+        }
+        if (json.has("ocrRecLang")) {
+            settingsRepository.setOcrRecLang(json.optString("ocrRecLang"))
         }
     }
 

@@ -86,6 +86,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(app.container))
     val prefs by viewModel.preferences.collectAsState()
     val importedFonts by viewModel.importedFonts.collectAsState()
+    val modelStatus by viewModel.modelStatus.collectAsState()
     val readingStats by viewModel.readingStats.collectAsState()
     var showChapterRulesDialog by remember { mutableStateOf(false) }
     var showAdRulesDialog by remember { mutableStateOf(false) }
@@ -102,6 +103,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showGlossaryDialog by remember { mutableStateOf(false) }
     var showAiClearKeyConfirm by remember { mutableStateOf(false) }
     var showAiClearDataConfirm by remember { mutableStateOf(false) }
+    var showModelManagerDialog by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
     val clipboard = LocalClipboardManager.current
@@ -114,6 +116,28 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             viewModel.importFont(uri, name) { ok ->
                 val message = if (ok) "字体已导入并应用" else "字体导入失败"
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // M21：OCR 模型 SAF 导入。按文件名匹配清单条目，结果以 Toast 明确反馈（R7）。
+    val modelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val name = UriChannels.displayName(context, uri)
+            viewModel.importModel(uri, name) { result ->
+                val message = when (result) {
+                    is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.Success ->
+                        "模型已导入：${result.spec.fileName}"
+                    is com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.HashMismatch ->
+                        "校验失败：${result.spec.fileName} 与官方 SHA-256 不符（下错版本或文件损坏）"
+                    com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.UnknownFile ->
+                        "不是清单内的模型文件（文件名需与下载地址给出的保持一致）"
+                    com.llzx373.foldreader.core.ai.android.ModelManager.ImportResult.IoError ->
+                        "读取文件失败，请重试"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -593,6 +617,48 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("OCR 模型（离线识别）")
+            ListItem(
+                headlineContent = { Text("模型管理") },
+                supportingContent = {
+                    val ready = modelStatus.count { it.second }
+                    Text(
+                        "扫描 PDF 文本层与漫画翻译共用的离线模型（用户自行下载、导入时校验 SHA-256）；已导入 $ready/${modelStatus.size}",
+                    )
+                },
+                modifier = Modifier.clickable { showModelManagerDialog = true },
+            )
+            SegmentedSetting(
+                label = "OCR 识别语言",
+                options = listOf("自动", "中文", "English", "日本語"),
+                selectedIndex = when (prefs.ocrRecLang) {
+                    "rec_ch" -> 1
+                    "rec_en" -> 2
+                    "rec_ja" -> 3
+                    else -> 0
+                },
+                onSelect = { index ->
+                    viewModel.updateOcrRecLang(
+                        when (index) {
+                            1 -> "rec_ch"
+                            2 -> "rec_en"
+                            3 -> "rec_ja"
+                            else -> ""
+                        },
+                    )
+                },
+            )
+            ListItem(
+                headlineContent = { Text("关于 OCR") },
+                supportingContent = {
+                    Text(
+                        "识别完全在本机离线运行，不产生任何网络请求；" +
+                            "扫描版 PDF 在模型就绪后可全文搜索、可拖框选字。",
+                    )
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("外观与书架")
             SegmentedSetting(
                 label = "夜间模式",
@@ -774,6 +840,21 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     }
     if (showGlossaryDialog) {
         GlossaryDialog(onDismiss = { showGlossaryDialog = false })
+    }
+    if (showModelManagerDialog) {
+        ModelManagerDialog(
+            status = modelStatus,
+            onImport = { modelPicker.launch(arrayOf("*/*")) },
+            onDelete = { spec ->
+                viewModel.deleteModel(spec.id)
+                Toast.makeText(context, "已删除：${spec.fileName}", Toast.LENGTH_SHORT).show()
+            },
+            onCopyUrl = { url ->
+                clipboard.setText(AnnotatedString(url))
+                Toast.makeText(context, "下载地址已复制", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showModelManagerDialog = false },
+        )
     }
     if (showAiClearKeyConfirm) {
         AlertDialog(

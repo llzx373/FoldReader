@@ -33,21 +33,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.comic.comicSeriesStem
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.GlossaryTermEntity
 import kotlinx.coroutines.launch
 
 /**
- * 术语表对话框（M20，R6）：三个分区 ——
+ * 术语表对话框（M20 + M22-2.5，R6）：四个分区 ——
  *
  * - 候选：人物索引 TopN 与模型回填的自动候选，确认后（空译法须补填）才参与注入；
  * - 全局表：对所有书生效的手动词条，可添加/删除；
+ * - 系列表（M22-2.5）：漫画系列共享词条（scope=series，ownerKey=漫画主干 seriesKey），
+ *   漫画翻译注入时跨卷生效；[seriesKey] 非空时锁定该系列，否则从书架漫画主干 +
+ *   已有系列行汇总出可选清单，两者皆空时该 Tab 不显示；
  * - 单书表：按书查看与维护本书词条；选中书时顺带触发人物候选生成
  *   （[FoldReaderApplication.container] 的 seedGlossaryCandidatesFromPersons）。
  *
  * 自治组件：直接从容器取 DAO/仓库，不进 SettingsViewModel。
  */
 @Composable
-fun GlossaryDialog(onDismiss: () -> Unit) {
+fun GlossaryDialog(onDismiss: () -> Unit, seriesKey: String? = null) {
     val context = LocalContext.current
     val container = remember(context) {
         (context.applicationContext as? FoldReaderApplication)?.container
@@ -60,6 +65,8 @@ fun GlossaryDialog(onDismiss: () -> Unit) {
     val globalTerms by dao.observeFor(GlossaryTermEntity.SCOPE_GLOBAL, "")
         .collectAsState(initial = emptyList())
     val allTerms by dao.observeAll().collectAsState(initial = emptyList())
+    val shelfBooks by container.bookshelfRepository.observeBookshelf()
+        .collectAsState(initial = emptyList())
 
     // 单书表：从全表取 book 行的 ownerKey 去重作为选书清单
     val bookOwnerKeys = remember(allTerms) {
@@ -91,6 +98,28 @@ fun GlossaryDialog(onDismiss: () -> Unit) {
         effectiveBookKey?.toLongOrNull()?.let { container.seedGlossaryCandidatesFromPersons(it) }
     }
 
+    // 系列表（M22-2.5）：锁定传入的 seriesKey，否则汇总书架漫画主干与已有系列行；
+    // 清单为空时该 Tab 不显示（没有任何可归属的系列）
+    val seriesKeys = remember(shelfBooks, allTerms, seriesKey) {
+        val fromShelf = shelfBooks.filter { it.format == BookFormat.COMIC }
+            .map { comicSeriesStem(it.title) }.filter { it.isNotEmpty() }
+        val fromRows = allTerms.filter { it.scope == GlossaryTermEntity.SCOPE_SERIES }
+            .map { it.ownerKey }
+        (listOfNotNull(seriesKey) + fromShelf + fromRows).distinct()
+    }
+    val visibleTabs = remember(seriesKeys) {
+        if (seriesKeys.isEmpty()) GlossaryTab.entries.filter { it != GlossaryTab.SERIES }
+        else GlossaryTab.entries
+    }
+    var selectedSeriesKey by remember { mutableStateOf<String?>(null) }
+    val effectiveSeriesKey = seriesKey ?: selectedSeriesKey ?: seriesKeys.firstOrNull()
+    val seriesTerms = remember(allTerms, effectiveSeriesKey) {
+        allTerms.filter {
+            it.scope == GlossaryTermEntity.SCOPE_SERIES && it.ownerKey == effectiveSeriesKey
+        }
+    }
+    val effectiveTab = if (tab in visibleTabs) tab else visibleTabs.first()
+
     var editingTarget by remember { mutableStateOf<GlossaryTermEntity?>(null) }
     var targetInput by remember { mutableStateOf("") }
 
@@ -100,19 +129,19 @@ fun GlossaryDialog(onDismiss: () -> Unit) {
         text = {
             Column(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    GlossaryTab.entries.forEachIndexed { index, entry ->
+                    visibleTabs.forEachIndexed { index, entry ->
                         SegmentedButton(
-                            selected = tab == entry,
+                            selected = effectiveTab == entry,
                             onClick = { tab = entry },
                             shape = SegmentedButtonDefaults.itemShape(
                                 index = index,
-                                count = GlossaryTab.entries.size,
+                                count = visibleTabs.size,
                             ),
                         ) { Text(entry.label) }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                when (tab) {
+                when (effectiveTab) {
                     GlossaryTab.CANDIDATES -> CandidatesPane(
                         unconfirmed = unconfirmed,
                         bookTitles = bookTitles,
@@ -136,6 +165,30 @@ fun GlossaryDialog(onDismiss: () -> Unit) {
                                     GlossaryTermEntity(
                                         scope = GlossaryTermEntity.SCOPE_GLOBAL,
                                         ownerKey = "",
+                                        source = source.trim(),
+                                        target = target.trim(),
+                                        origin = GlossaryTermEntity.ORIGIN_USER,
+                                        confirmed = true,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+
+                    GlossaryTab.SERIES -> SeriesPane(
+                        seriesKeys = seriesKeys,
+                        pinned = seriesKey != null,
+                        selectedKey = effectiveSeriesKey,
+                        onSelect = { selectedSeriesKey = it },
+                        terms = seriesTerms,
+                        onDelete = { term -> scope.launch { dao.delete(term.id) } },
+                        onAdd = add@{ source, target ->
+                            val key = effectiveSeriesKey ?: return@add
+                            scope.launch {
+                                dao.upsert(
+                                    GlossaryTermEntity(
+                                        scope = GlossaryTermEntity.SCOPE_SERIES,
+                                        ownerKey = key,
                                         source = source.trim(),
                                         target = target.trim(),
                                         origin = GlossaryTermEntity.ORIGIN_USER,
@@ -218,6 +271,7 @@ fun GlossaryDialog(onDismiss: () -> Unit) {
 private enum class GlossaryTab(val label: String) {
     CANDIDATES("候选"),
     GLOBAL("全局表"),
+    SERIES("系列表"),
     BOOK("单书表"),
 }
 
@@ -380,6 +434,49 @@ private fun BookPane(
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,
                     )
+                }
+            }
+        }
+        TermListPane(terms = terms, onDelete = onDelete, onAdd = onAdd)
+    }
+}
+
+/**
+ * 系列分区（M22-2.5）：选系列 + 词条维护（scope=series，ownerKey=seriesKey）。
+ * [pinned] = true 时系列由调用方锁定，不显示选择行。
+ */
+@Composable
+private fun SeriesPane(
+    seriesKeys: List<String>,
+    pinned: Boolean,
+    selectedKey: String?,
+    onSelect: (String) -> Unit,
+    terms: List<GlossaryTermEntity>,
+    onDelete: (GlossaryTermEntity) -> Unit,
+    onAdd: (String, String) -> Unit,
+) {
+    if (seriesKeys.isEmpty()) {
+        Text(
+            text = "书架上还没有漫画，导入漫画后这里会出现对应的系列。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    Column {
+        if (!pinned && seriesKeys.size > 1) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                seriesKeys.forEach { key ->
+                    TextButton(onClick = { onSelect(key) }) {
+                        Text(
+                            text = if (key == selectedKey) "【$key】" else key,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }

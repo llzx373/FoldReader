@@ -405,4 +405,75 @@ class DatabaseMigrationTest {
             assertEquals("genre:ai", c.getString(0))
         }
     }
+
+    /** 建一个 v6 形态的库（`books` 含一行老数据），之后手动跑 v6→v7 迁移。 */
+    private fun openV6(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(6) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`title` TEXT NOT NULL, `genreTag` TEXT, `metaSource` TEXT NOT NULL DEFAULT '')",
+                )
+                db.execSQL("INSERT INTO `books` (`id`, `title`) VALUES (7, '老漫画')")
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v6 升到 v7 建漫画页翻译台账且老数据不动`() {
+        val migrated = openV6()
+
+        MIGRATION_6_7.migrate(migrated)
+
+        // 老表老行原样还在
+        migrated.query("SELECT `title` FROM `books` WHERE `id` = 7").use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals("老漫画", c.getString(0))
+        }
+        // 新表列结构与 Room 期望逐项一致（照 7.json 快照）
+        assertEquals(
+            listOf(
+                Column("bookId", "INTEGER", true, null),
+                Column("lang", "TEXT", true, null),
+                Column("pageIndex", "INTEGER", true, null),
+                Column("status", "TEXT", true, null),
+                Column("model", "TEXT", true, null),
+                Column("bubbleCount", "INTEGER", true, null),
+                Column("updatedAt", "INTEGER", true, null),
+            ),
+            columns(migrated, "comic_page_translations"),
+        )
+        // 主键 (bookId, lang, pageIndex)：同键二插必败、不同语言同页共存
+        migrated.execSQL(
+            "INSERT INTO `comic_page_translations` (`bookId`, `lang`, `pageIndex`, `status`, `model`, " +
+                "`bubbleCount`, `updatedAt`) VALUES (7, 'ZH_HANS', 3, 'done', 'm', 5, 1)",
+        )
+        migrated.execSQL(
+            "INSERT INTO `comic_page_translations` (`bookId`, `lang`, `pageIndex`, `status`, `model`, " +
+                "`bubbleCount`, `updatedAt`) VALUES (7, 'EN', 3, 'pending', '', 0, 1)",
+        )
+        var duplicateRejected = false
+        try {
+            migrated.execSQL(
+                "INSERT INTO `comic_page_translations` (`bookId`, `lang`, `pageIndex`, `status`, `model`, " +
+                    "`bubbleCount`, `updatedAt`) VALUES (7, 'ZH_HANS', 3, 'failed', '', 0, 2)",
+            )
+        } catch (_: android.database.SQLException) {
+            duplicateRejected = true
+        }
+        assertTrue("主键约束未生效", duplicateRejected)
+        migrated.query("SELECT COUNT(*) FROM `comic_page_translations`").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
+        }
+    }
 }

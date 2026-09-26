@@ -24,6 +24,9 @@
 # 这只影响封面观感，不影响能不能读。
 -dontwarn com.gemalto.jp2.**
 
+# ONNX Runtime（M21）：Java 类经 JNI 与 native 侧互调，类名/方法名必须原样保留。
+-keep class ai.onnxruntime.** { *; }
+
 # 关于「把仪器化测试跑到 release 包上」这条路（曾尝试用 testBuildType=release 验证
 # R8 产物）：被测包一旦开 minify，androidTest APK 也会被 R8 压缩，而 AGP 的
 # src/androidTestRelease/keepRules/*.keep 在这个版本里并不生效，测试脚手架会被一轮轮裁掉

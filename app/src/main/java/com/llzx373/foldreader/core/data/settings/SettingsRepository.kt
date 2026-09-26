@@ -75,8 +75,11 @@ interface SettingsRepository {
     suspend fun setAiTargetLang(targetLang: AiTargetLang)
     suspend fun setAiChapterRuleConfirmed(confirmed: Boolean)
     suspend fun setAiTranslationConfirmed(confirmed: Boolean)
+    suspend fun setAiComicTranslateConfirmed(confirmed: Boolean)
     suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean)
     suspend fun setAiMetadataConfirmed(confirmed: Boolean)
     suspend fun setTranslationViewHintShown(shown: Boolean)
     suspend fun setAiPricePerMillion(price: Double)
+    /** M21：OCR 识别语言（rec 模型 id；空串 = 自动）。 */
+    suspend fun setOcrRecLang(modelId: String)
 }

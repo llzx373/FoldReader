@@ -3,6 +3,7 @@ package com.llzx373.foldreader.feature.comic
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -197,6 +198,18 @@ fun ComicMenuPanel(
      * 配合 [PagedReaderFeatures.scanned] 决定是给开关还是给一句说明。
      */
     onSwitchToTextMode: (() -> Unit)?,
+    /**
+     * 漫画翻译组（M22）：整组为 null = 不可用（非漫画格式 / AI 未配置 / 气泡模型未导入），整片隐藏。
+     * [translationMode] 当前译文视角；[translatedText] 形如「已译 12/240」的进度；
+     * [volumeActive] 整卷队列进行中（按钮置灰防重入）。
+     */
+    translationMode: ComicReaderViewModel.ComicTranslationMode?,
+    onSelectTranslationMode: ((ComicReaderViewModel.ComicTranslationMode) -> Unit)?,
+    translatedText: String?,
+    volumeActive: Boolean,
+    onTranslatePage: (() -> Unit)?,
+    onTranslateVolume: (() -> Unit)?,
+    onOpenBubbleCompare: (() -> Unit)?,
     onSelectPageTurnMode: (PageTurnMode) -> Unit,
     onSelectDirection: (ComicDirection) -> Unit,
     onSelectFitMode: (ComicFitMode) -> Unit,
@@ -375,6 +388,54 @@ fun ComicMenuPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+            }
+
+            // 漫画翻译（M22）：视角切换 + 按页/整卷 + 气泡对照。模型未导入或 AI 未配置时整组不出现
+            if (onSelectTranslationMode != null && translationMode != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text("译文", style = MaterialTheme.typography.labelMedium)
+                    val modes = ComicReaderViewModel.ComicTranslationMode.entries
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.padding(start = 12.dp)) {
+                        modes.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = translationMode == mode,
+                                onClick = { onSelectTranslationMode(mode) },
+                                shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                            ) {
+                                Text(
+                                    when (mode) {
+                                        ComicReaderViewModel.ComicTranslationMode.OFF -> "关闭"
+                                        ComicReaderViewModel.ComicTranslationMode.OVERLAY -> "覆盖"
+                                        ComicReaderViewModel.ComicTranslationMode.COMPARE -> "对照"
+                                    },
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    TextButton(onClick = { onTranslatePage?.invoke() }) { Text("翻译本页") }
+                    TextButton(
+                        onClick = { onTranslateVolume?.invoke() },
+                        enabled = !volumeActive,
+                    ) { Text(if (volumeActive) "整卷翻译中…" else "翻译整卷") }
+                    TextButton(onClick = { onOpenBubbleCompare?.invoke() }) { Text("气泡对照") }
+                    if (translatedText != null) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = translatedText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
 
             Row(

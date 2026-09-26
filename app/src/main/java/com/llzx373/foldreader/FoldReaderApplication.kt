@@ -83,6 +83,37 @@ class AppContainer(context: Context) {
     /** 译本副本目录（M19）：`<bookId>/<lang>/` 下 units.json + unit_*.json + content.txt/.toc。 */
     val translationsDir = File(context.filesDir, "translations").apply { mkdirs() }
     val translationStore = com.llzx373.foldreader.core.translate.TranslationStore(translationsDir)
+    /** OCR 模型管理（M21，R7）：模型用户自行下载 + SAF 导入 + 全量 SHA-256 校验，落 filesDir/models/。 */
+    val modelManager = com.llzx373.foldreader.core.ai.android.ModelManager(appContext)
+    /** 扫描 PDF 的 OCR 文本层缓存目录（M21）：`<bookId>/<pageIndex>.ocr.json`。 */
+    val pdfOcrDir = File(context.filesDir, "pdf_ocr")
+    val pdfOcrStore = com.llzx373.foldreader.core.ocr.PdfOcrStore(pdfOcrDir)
+    /** 漫画翻译产物目录（M22）：`<bookId>/<page>.ocr.json`（气泡缓存）+ `<page>.<lang>.json`（译文）。 */
+    val comicTranslateDir = File(context.filesDir, "comic_translate")
+    val comicTranslationStore = com.llzx373.foldreader.core.translate.ComicTranslationStore(comicTranslateDir)
+    /**
+     * ONNX 会话层（M21）。对象本身很轻（会话全部惰性：模型未导入不创建 OrtEnvironment），
+     * 但进程级共享一把锁，必须与阅读器同生命周期，所以挂容器单例。
+     */
+    val ocrEngine: com.llzx373.foldreader.core.ocr.android.OcrEngine by lazy {
+        com.llzx373.foldreader.core.ocr.android.OcrEngine(appContext, modelManager)
+    }
+
+    /**
+     * 当前 OCR 识别语言（M21）：设置值是 ModelCatalog 的 rec 条目 id；空串自动 =
+     * 优先中文（中日英混排覆盖最好），未导入则取第一个已导入的。模型未就绪返回 null。
+     */
+    suspend fun ocrRecSpec(): com.llzx373.foldreader.core.ocr.OcrModelSpec? {
+        val pref = settingsRepository.preferences.first().ocrRecLang
+        val imported = modelManager.importedRecs()
+        if (imported.isEmpty()) return null
+        if (pref.isNotBlank()) {
+            com.llzx373.foldreader.core.ocr.ModelCatalog.byId(pref)
+                ?.takeIf { modelManager.isReady(it) }?.let { return it }
+        }
+        return imported.firstOrNull { it.id == "rec_ch" } ?: imported.first()
+    }
+
     val bookshelfRepository: BookshelfRepository = BookshelfRepositoryImpl(
         bookDao = database.bookDao(),
         progressDao = database.readingProgressDao(),
@@ -99,6 +130,8 @@ class AppContainer(context: Context) {
         translationStore = translationStore,
         translationDao = database.translationDao(),
         glossaryTermDao = database.glossaryTermDao(),
+        pdfOcrStore = pdfOcrStore,
+        comicTranslationStore = comicTranslationStore,
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     /** AI API key 加密存储（AndroidKeyStore AES/GCM）；明文不出存储边界。 */
@@ -197,12 +230,16 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * 设置页「清除全部 AI 数据」（M19/M20）：译本副本目录整体清空 + 翻译台账与术语表清零。
-     * 不影响 API 凭据与外发历史（各有独立入口）；清完后所有书的翻译入口回到「未译」。
+     * 设置页「清除全部 AI 数据」（M19/M20/M21/M22）：译本副本目录整体清空 + 翻译台账与术语表清零 +
+     * 扫描 PDF 的 OCR 文本层缓存与漫画翻译产物（气泡缓存 + 译文 + 页台账）清空。不影响 API 凭据与外发历史（各有独立入口），
+     * 也不删除 OCR 模型本体（filesDir/models/ 在设置页「模型管理」单独删除）。
      */
     suspend fun clearAiData() = withContext(Dispatchers.IO) {
         translationsDir.listFiles()?.forEach { it.deleteRecursively() }
+        pdfOcrStore.deleteAll()
+        comicTranslationStore.deleteAll()
         database.translationDao().deleteAll()
+        database.comicPageTranslationDao().deleteAll()
         database.glossaryTermDao().deleteAll()
     }
 
@@ -297,6 +334,101 @@ class AppContainer(context: Context) {
             Intent(appContext, com.llzx373.foldreader.feature.translate.TranslationService::class.java),
         )
         return true
+    }
+
+    // ---- 漫画翻译（M22）----
+
+    /**
+     * 一页漫画的气泡供给（引擎/队列共用）：缓存优先——`.ocr.json` 在就直接用
+     * （换模型/改提示词重译不重跑 OCR）；缺失才打开内容源取页位图跑
+     * 「RT-DETR 气泡检测 + 页级 OCR + 行归并」并落缓存。
+     * 模型未就绪（气泡或识别任一缺失）返回空表 = 该页无文字，调用方按失败处理。
+     */
+    private suspend fun comicBubblesFor(
+        bookId: Long,
+        pageIndex: Int,
+    ): List<com.llzx373.foldreader.core.ocr.OcrBubble> = withContext(Dispatchers.IO) {
+        comicTranslationStore.loadOcr(bookId, pageIndex)?.let { return@withContext it }
+        if (!modelManager.bubbleReady()) return@withContext emptyList()
+        val recSpec = ocrRecSpec() ?: return@withContext emptyList()
+        val book = bookshelfRepository.getBook(bookId) ?: return@withContext emptyList()
+        val rtl = runCatching {
+            bookPrefsRepository.observe(bookId).first().comicDirection ==
+                com.llzx373.foldreader.core.data.settings.ComicDirection.RTL
+        }.getOrDefault(false)
+        // 每次独立打开来源：队列路径没有阅读器代持的位图。OCR 目标分辨率按长边 1600px
+        // （再低小字识别率掉得快，再高 RT-DETR 输入也是 640 无益）
+        val source = runCatching { openPagedSource(book, null) }.getOrNull()
+            ?: return@withContext emptyList()
+        try {
+            val image = source.loadPage(pageIndex, COMIC_OCR_TARGET_PX, COMIC_OCR_TARGET_PX)
+            val bitmap = (image as? com.llzx373.foldreader.core.paged.PagedPageImage.Still)?.bitmap
+                ?: return@withContext emptyList()
+            val bubbles = ocrEngine.detectBubbles(bitmap, recSpec, rtl)
+            if (bubbles.isNotEmpty()) {
+                runCatching { comicTranslationStore.saveOcr(bookId, pageIndex, bubbles) }
+            }
+            bubbles
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
+    /**
+     * 装配漫画翻译引擎（M22）：每次按当前配置新建（同 translateEngine 约定）；
+     * 未配置时引擎内 provider 为 null、翻译入口直接失败返回。
+     * 系列术语层级：漫画主干 `comicSeriesStem`（跨卷共享，R6）。
+     */
+    suspend fun comicTranslateEngine(): com.llzx373.foldreader.feature.translate.ComicTranslateEngine =
+        com.llzx373.foldreader.feature.translate.ComicTranslateEngine(
+            provider = aiProvider(),
+            contentGate = aiContentGate,
+            store = comicTranslationStore,
+            pageDao = database.comicPageTranslationDao(),
+            preferences = { settingsRepository.preferences.first() },
+            glossaryRepository = glossaryRepository,
+            seriesKeyFor = { bookId ->
+                bookshelfRepository.getBook(bookId)?.title
+                    ?.let { com.llzx373.foldreader.core.comic.comicSeriesStem(it) }
+            },
+            bubblesFor = { bookId, pageIndex -> comicBubblesFor(bookId, pageIndex) },
+        )
+
+    /** 阅读器的漫画翻译门面（ViewModel 只跟它打交道）；实例廉价，随取随建。 */
+    fun comicTranslationController(bookId: Long): com.llzx373.foldreader.feature.translate.ComicTranslationController =
+        com.llzx373.foldreader.feature.translate.ComicTranslationController(
+            bookId = bookId,
+            bookTitleFor = { bookshelfRepository.getBook(bookId)?.title ?: "" },
+            store = comicTranslationStore,
+            pageDao = database.comicPageTranslationDao(),
+            engineFor = {
+                if (aiConfigured()) comicTranslateEngine() else null
+            },
+        )
+
+    /** 漫画整卷翻译队列（M22）：AppContainer 单例，断点续译/退避/暂停/取消与全书翻译同一骨架。 */
+    val comicTranslationQueue = com.llzx373.foldreader.feature.translate.ComicTranslationQueue(
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        bookFor = { bookId ->
+            bookshelfRepository.getBook(bookId)
+                ?.let { it.title to (it.comicPageCount ?: 0) }
+        },
+        pageDao = database.comicPageTranslationDao(),
+        translatePageCall = { bookId, title, pageIndex, lang ->
+            comicTranslateEngine().translatePage(bookId, title, pageIndex, lang)
+        },
+    )
+
+    /**
+     * 漫画整卷入队（阅读器菜单入口）：断点续译由队列负责；前台服务托住进程。
+     * AI 配置判定在界面层（入口不可见时本不该被调到，队列本身幂等兜底）。
+     */
+    fun enqueueComicVolumeTranslation(bookId: Long, lang: com.llzx373.foldreader.core.ai.AiTargetLang) {
+        comicTranslationQueue.enqueueBook(bookId, lang)
+        ContextCompat.startForegroundService(
+            appContext,
+            Intent(appContext, com.llzx373.foldreader.feature.translate.ComicTranslationService::class.java),
+        )
     }
 
     /** 清洗配方组装：导入对话框、浏览打开、批量导入共用同一份规则。 */
@@ -495,11 +627,24 @@ class AppContainer(context: Context) {
         password: String? = null,
     ): com.llzx373.foldreader.core.paged.PagedImageSource =
         if (book.format == BookFormat.PDF) {
-            com.llzx373.foldreader.core.pdf.PdfPagedSource.open(
+            val pdf = com.llzx373.foldreader.core.pdf.PdfPagedSource.open(
                 context = appContext,
                 uri = Uri.parse(book.fileUri),
                 password = password,
             )
+            // M21：OCR 模型就绪时给 PDF 包上 OCR 文本层——有内嵌文本层的照样先走原生，
+            // 扫描件则补上可搜索/可选字的 OCR 文本层（结果按页缓存到 filesDir/pdf_ocr/）。
+            if (modelManager.ocrReady()) {
+                com.llzx373.foldreader.core.ocr.android.OcrTextLayerSource(
+                    delegate = pdf,
+                    bookId = book.id,
+                    store = pdfOcrStore,
+                    recSpecProvider = { ocrRecSpec() },
+                    recognize = { bitmap, spec -> ocrEngine.recognizePage(bitmap, spec) },
+                )
+            } else {
+                pdf
+            }
         } else {
             val container = book.comicContainer
                 ?: throw java.io.IOException("缺少漫画容器信息")
@@ -786,6 +931,9 @@ class AppContainer(context: Context) {
     companion object {
         /** M20 人物术语候选：按提及次数取 Top N 落未确认候选。 */
         private const val PERSON_CANDIDATE_LIMIT = 20
+
+        /** M22 漫画气泡识别的页位图目标边长（px）：OCR 降采样上限。 */
+        private const val COMIC_OCR_TARGET_PX = 1600
     }
 }
 

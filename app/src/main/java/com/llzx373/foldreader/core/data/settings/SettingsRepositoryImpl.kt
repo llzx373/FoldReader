@@ -81,10 +81,12 @@ class SettingsRepositoryImpl(
         val AI_TARGET_LANG = stringPreferencesKey("ai_target_lang")
         val AI_CHAPTER_RULE_CONFIRMED = booleanPreferencesKey("ai_chapter_rule_confirmed")
         val AI_TRANSLATION_CONFIRMED = booleanPreferencesKey("ai_translation_confirmed")
+        val AI_COMIC_TRANSLATE_CONFIRMED = booleanPreferencesKey("ai_comic_translate_confirmed")
         val AI_CLEAN_RECIPE_CONFIRMED = booleanPreferencesKey("ai_clean_recipe_confirmed")
         val AI_METADATA_CONFIRMED = booleanPreferencesKey("ai_metadata_confirmed")
         val TRANSLATION_VIEW_HINT_SHOWN = booleanPreferencesKey("translation_view_hint_shown")
         val AI_PRICE_PER_MILLION = doublePreferencesKey("ai_price_per_million")
+        val OCR_REC_LANG = stringPreferencesKey("ocr_rec_lang")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -164,6 +166,8 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiChapterRuleConfirmed,
                 aiTranslationConfirmed = prefs[Keys.AI_TRANSLATION_CONFIRMED]
                     ?: defaults.aiTranslationConfirmed,
+                aiComicTranslateConfirmed = prefs[Keys.AI_COMIC_TRANSLATE_CONFIRMED]
+                    ?: defaults.aiComicTranslateConfirmed,
                 aiCleanRecipeConfirmed = prefs[Keys.AI_CLEAN_RECIPE_CONFIRMED]
                     ?: defaults.aiCleanRecipeConfirmed,
                 aiMetadataConfirmed = prefs[Keys.AI_METADATA_CONFIRMED]
@@ -171,6 +175,7 @@ class SettingsRepositoryImpl(
                 translationViewHintShown = prefs[Keys.TRANSLATION_VIEW_HINT_SHOWN]
                     ?: defaults.translationViewHintShown,
                 aiPricePerMillion = prefs[Keys.AI_PRICE_PER_MILLION] ?: defaults.aiPricePerMillion,
+                ocrRecLang = prefs[Keys.OCR_REC_LANG] ?: defaults.ocrRecLang,
             )
         }
 
@@ -437,6 +442,10 @@ class SettingsRepositoryImpl(
         context.readingPreferencesStore.edit { it[Keys.AI_TRANSLATION_CONFIRMED] = confirmed }
     }
 
+    override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_COMIC_TRANSLATE_CONFIRMED] = confirmed }
+    }
+
     override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AI_CLEAN_RECIPE_CONFIRMED] = confirmed }
     }
@@ -451,5 +460,9 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiPricePerMillion(price: Double) {
         context.readingPreferencesStore.edit { it[Keys.AI_PRICE_PER_MILLION] = price }
+    }
+
+    override suspend fun setOcrRecLang(modelId: String) {
+        context.readingPreferencesStore.edit { it[Keys.OCR_REC_LANG] = modelId }
     }
 }

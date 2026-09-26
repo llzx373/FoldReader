@@ -43,6 +43,10 @@ class BookshelfRepositoryImpl(
     private val translationDao: com.llzx373.foldreader.core.data.db.TranslationDao? = null,
     /** M20 术语表；单书术语随「删除本地数据」按 (scope=book, ownerKey=bookId) 定点清。 */
     private val glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
+    /** M21 扫描 PDF 的 OCR 文本层缓存；随「删除本地数据」按 bookId 清理。 */
+    private val pdfOcrStore: com.llzx373.foldreader.core.ocr.PdfOcrStore? = null,
+    /** 漫画翻译产物（M22）：删书连带清 `<bookId>/` 目录；台账行走外键级联。 */
+    private val comicTranslationStore: com.llzx373.foldreader.core.translate.ComicTranslationStore? = null,
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -98,6 +102,8 @@ class BookshelfRepositoryImpl(
             annotationDao.deleteByBookIds(bookIds)
             translationDao?.let { dao -> bookIds.forEach { dao.deleteForBook(it) } }
             translationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+            pdfOcrStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+            comicTranslationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
             glossaryTermDao?.let { dao ->
                 bookIds.forEach {
                     dao.deleteFor(

@@ -46,6 +46,12 @@ android {
         // 版本号默认值来自 gradle.properties，发布流水线用 -PfoldReader.* 覆盖。
         versionCode = providers.gradleProperty("foldReader.versionCode").getOrElse("1").toInt()
         versionName = providers.gradleProperty("foldReader.versionName").getOrElse("1.0")
+        ndk {
+            // M21：onnxruntime-mobile 携带各 ABI 的原生 .so。只保留 64 位架构
+            // （arm64-v8a 真机 + x86_64 模拟器），放弃 32 位老设备以控制 APK 体积；
+            // 这是项目首次引入 ABI 过滤。
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     signingConfigs {
@@ -167,6 +173,8 @@ dependencies {
     // AI 底座（M14）：OkHttp 传输与 SSE 流式 + 请求/响应 JSON
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    // OCR 引擎（M21）：ONNX Runtime mobile，CPU 后端跑 det/rec/气泡检测
+    implementation(libs.onnxruntime.mobile)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
     // JVM 单测用的 XmlPullParser 实现（生产用 android.util.Xml）

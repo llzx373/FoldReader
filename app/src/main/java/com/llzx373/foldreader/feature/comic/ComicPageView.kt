@@ -1,5 +1,9 @@
 package com.llzx373.foldreader.feature.comic
 
+import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -35,6 +39,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
@@ -42,6 +47,8 @@ import androidx.compose.ui.unit.IntSize
 import com.llzx373.foldreader.core.paged.PagedPageImage
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.core.translate.BubbleRender
+import com.llzx373.foldreader.core.translate.ComicPageTranslation
 import com.llzx373.foldreader.feature.reader.pageAnnotationsOf
 import com.llzx373.foldreader.feature.reader.pageBookmarksOf
 import kotlin.math.roundToInt
@@ -89,6 +96,12 @@ fun ComicPageView(
     anchorsEnabled: Boolean = true,
     /** 页内锚点的显示与交互上下文（书签、高亮、选区与回调）。 */
     host: PageAnchorHost = PageAnchorHost(),
+    /** 翻译覆盖层（视角①）：null = 不画。动图页不画覆盖层（无静态位图可取底色）。 */
+    translation: ComicPageTranslation? = null,
+    /** 覆盖层译文字体（设置页正文字体）；null = 系统默认。 */
+    translationTypeface: Typeface? = null,
+    /** 对照面板点中的气泡序号（画高亮边框）；-1 = 无。 */
+    highlightBubble: Int = -1,
     modifier: Modifier = Modifier,
 ) {
     var container by remember { mutableStateOf(IntSize.Zero) }
@@ -270,6 +283,9 @@ fun ComicPageView(
                 highlights = highlights,
                 selection = effectiveSelection,
                 selectionCommitted = localSelection == null && effectiveSelection != null,
+                translation = translation,
+                translationTypeface = translationTypeface,
+                highlightBubble = highlightBubble,
             )
 
             // 解码失败要明确说出来：一直转圈的占位比报错更让人以为是自己没等够
@@ -305,10 +321,18 @@ private fun PageContent(
     highlights: List<PageRegionMark>,
     selection: PageRect?,
     selectionCommitted: Boolean,
+    translation: ComicPageTranslation?,
+    translationTypeface: Typeface?,
+    highlightBubble: Int,
 ) {
     when (image) {
         is PagedPageImage.Still -> {
             val bitmap = remember(image) { image.bitmap.asImageBitmap() }
+            // 气泡底色按页图片现算：键只取几何（流式追加译文不重采样）
+            val bubbleRects = translation?.bubbles?.map { it.rect }
+            val bubbleBackgrounds = remember(image.bitmap, bubbleRects) {
+                sampleBubbleBackgrounds(image.bitmap, translation)
+            }
             Box(
                 modifier = Modifier.fillMaxSize().drawBehind {
                     if (transform.redraw < 0) return@drawBehind
@@ -326,6 +350,19 @@ private fun PageContent(
                         offsetX = transform.offsetX,
                         offsetY = transform.offsetY,
                     )
+                    if (translation != null) {
+                        drawTranslationOverlay(
+                            baseW = baseW,
+                            baseH = baseH,
+                            scale = transform.scale,
+                            offsetX = transform.offsetX,
+                            offsetY = transform.offsetY,
+                            translation = translation,
+                            backgrounds = bubbleBackgrounds,
+                            typeface = translationTypeface,
+                            highlightBubble = highlightBubble,
+                        )
+                    }
                     drawPageMarks(
                         baseW = baseW,
                         baseH = baseH,
@@ -509,4 +546,98 @@ private fun DrawScope.drawScaledBitmap(
         ),
         filterQuality = FilterQuality.Medium,
     )
+}
+
+/**
+ * 在页图片上采气泡底色：气泡外周一圈像素取逐通道中位数（见 BubbleRender.samplePoints）。
+ * 采不到（越界等）回落白底。返回与气泡一一对应的 ARGB 数组；translation 为 null 时为空数组。
+ */
+private fun sampleBubbleBackgrounds(bitmap: Bitmap, translation: ComicPageTranslation?): IntArray {
+    val bubbles = translation?.bubbles ?: return IntArray(0)
+    return IntArray(bubbles.size) { i ->
+        val colors = BubbleRender.samplePoints(bubbles[i].rect).mapNotNull { (nx, ny) ->
+            val x = (nx * bitmap.width).roundToInt().coerceIn(0, bitmap.width - 1)
+            val y = (ny * bitmap.height).roundToInt().coerceIn(0, bitmap.height - 1)
+            runCatching { bitmap.getPixel(x, y) }.getOrNull()
+        }
+        BubbleRender.medianColor(colors) ?: 0xFFFFFFFF.toInt()
+    }
+}
+
+private val lowConfidenceBorderColor = Color(0xFFFFA000)
+
+private val highlightBorderColor = Color(0xFF1E88E5)
+
+/**
+ * 画翻译覆盖层（视角①）：气泡位铺底色圆角块 + 译文（字号自适应收缩、居中多行）。
+ *
+ * 与 [drawPageMarks] 同一套落位公式，缩放/平移后仍贴在气泡上。
+ * 文字走 nativeCanvas（Compose 的 drawText 不接自定义 Typeface）。
+ * 低置信气泡画琥珀色边框提醒人工核对；对照面板点中的气泡画蓝色高亮边框。
+ */
+private fun DrawScope.drawTranslationOverlay(
+    baseW: Float,
+    baseH: Float,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    translation: ComicPageTranslation,
+    backgrounds: IntArray,
+    typeface: Typeface?,
+    highlightBubble: Int,
+) {
+    val rect = comicDrawRect(size.width, size.height, baseW, baseH, scale, offsetX, offsetY)
+    if (rect.width <= 0f || rect.height <= 0f) return
+    val canvas = drawContext.canvas.nativeCanvas
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        this.typeface = typeface
+    }
+    val rectF = RectF()
+    translation.bubbles.forEachIndexed { index, bubble ->
+        val text = bubble.text ?: return@forEachIndexed
+        val left = rect.left + bubble.rect.left * rect.width
+        val top = rect.top + bubble.rect.top * rect.height
+        val right = rect.left + bubble.rect.right * rect.width
+        val bottom = rect.top + bubble.rect.bottom * rect.height
+        val w = right - left
+        val h = bottom - top
+        if (w <= 4f || h <= 4f) return@forEachIndexed
+        rectF.set(left, top, right, bottom)
+        val bg = backgrounds.getOrNull(index) ?: 0xFFFFFFFF.toInt()
+        fillPaint.color = bg
+        fillPaint.alpha = 235
+        val corner = minOf(w, h) * 0.12f
+        canvas.drawRoundRect(rectF, corner, corner, fillPaint)
+        val borderColor = when {
+            index == highlightBubble -> highlightBorderColor
+            bubble.lowConfidence -> lowConfidenceBorderColor
+            else -> null
+        }
+        if (borderColor != null) {
+            borderPaint.color = borderColor.toArgb()
+            borderPaint.strokeWidth = if (index == highlightBubble) 3f else 2f
+            canvas.drawRoundRect(rectF, corner, corner, borderPaint)
+        }
+        // 排版：纯逻辑折行与字号收缩，算出来的就是画出来的
+        val layout = BubbleRender.layout(
+            text = text,
+            rectWidth = w,
+            rectHeight = h,
+            maxFont = h * 0.5f,
+        )
+        textPaint.color = BubbleRender.textColorFor(bg)
+        textPaint.textSize = layout.fontSize
+        val blockTop = top + (h - layout.textHeight) / 2f
+        layout.lines.forEachIndexed { lineIndex, line ->
+            canvas.drawText(
+                line,
+                (left + right) / 2f,
+                blockTop + lineIndex * layout.lineHeight + layout.fontSize * 0.85f,
+                textPaint,
+            )
+        }
+    }
 }
