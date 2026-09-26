@@ -128,6 +128,7 @@ class ComicTranslationE2ETest {
     private fun newEngine(
         provider: AiProvider? = this.provider,
         visionModel: String = "vision-model",
+        generalModel: String = "general-model",
     ) = ComicTranslateEngine(
         provider = provider,
         contentGate = gate,
@@ -135,6 +136,7 @@ class ComicTranslationE2ETest {
         pageDao = db.comicPageTranslationDao(),
         preferences = {
             ReadingPreferences(
+                aiModelGeneral = generalModel,
                 aiModelTranslation = "test-model",
                 aiModelVision = visionModel,
                 aiTargetLang = AiTargetLang.ZH_HANS,
@@ -488,8 +490,19 @@ class ComicTranslationE2ETest {
     }
 
     @Test
-    fun `未配置视觉模型直接失败且不触网`() = runTest {
+    fun `视觉模型未配时回落通用模型`() = runTest {
+        server.enqueue(sse(visionJson(visionBubble(0.1, 0.2, 0.5, 0.4, "行くぞ", "走吧"))))
+
         val result = newEngine(visionModel = "")
+            .translatePageVision(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertEquals(1, result.getOrThrow())
+        assertEquals("general-model", takeRequestJson().getString("model"))
+    }
+
+    @Test
+    fun `视觉与通用模型都未配直接失败且不触网`() = runTest {
+        val result = newEngine(visionModel = "", generalModel = "")
             .translatePageVision(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
 
         assertTrue(result.isFailure)

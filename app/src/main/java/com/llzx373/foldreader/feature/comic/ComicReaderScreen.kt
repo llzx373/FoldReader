@@ -1544,8 +1544,10 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
-                    // 视觉翻译（M23）：仅在配置了视觉模型时给入口；页图像外发在对话框里逐书确认
-                    onTranslatePageVision = if (translationAvailable && prefs.aiModelVision.isNotBlank()) {
+                    // 视觉翻译（M23）：视觉模型未配时回落通用模型，两者皆空不给入口；页图像外发在对话框里逐书确认
+                    onTranslatePageVision = if (translationAvailable &&
+                        prefs.aiModelVision.ifBlank { prefs.aiModelGeneral }.isNotBlank()
+                    ) {
                         {
                             menuVisible = false
                             visionTranslateVisible = true
@@ -1662,7 +1664,7 @@ fun ComicReaderScreen(
             }
             ComicVisionTranslateDialog(
                 firstConfirm = !prefs.aiComicVisionConfirmedFor(bookId),
-                model = prefs.aiModelVision,
+                model = prefs.aiModelVision.ifBlank { prefs.aiModelGeneral },
                 translating = pageTranslating,
                 error = pageTranslateError,
                 colors = colors,

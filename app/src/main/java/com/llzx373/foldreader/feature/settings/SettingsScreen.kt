@@ -539,12 +539,16 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 )
                 ListItem(
                     headlineContent = { Text("翻译模型") },
-                    supportingContent = { Text(prefs.aiModelTranslation.ifBlank { "未配置" }) },
+                    supportingContent = {
+                        Text(prefs.aiModelTranslation.ifBlank { "未配置（回落通用模型）" })
+                    },
                     modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.MODEL_TRANSLATION },
                 )
                 ListItem(
                     headlineContent = { Text("视觉模型") },
-                    supportingContent = { Text(prefs.aiModelVision.ifBlank { "未配置" }) },
+                    supportingContent = {
+                        Text(prefs.aiModelVision.ifBlank { "未配置（回落通用模型）" })
+                    },
                     modifier = Modifier.clickable { aiTextFieldDialog = AiTextFieldDialog.MODEL_VISION },
                 )
                 ListItem(

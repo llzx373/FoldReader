@@ -146,7 +146,8 @@ class ComicTranslateEngine(
     /**
      * 视觉模式翻译一页（M23）：页图像直接发给视觉模型，一次产出气泡框 + 原文 + 译文，
      * 跳过本地 OCR；识别产物照常落 `.ocr.json`（confidence=1f，原文单行），
-     * 覆盖层/对照面板/微调与文本链路完全复用。模型取「视觉模型」配置（无回落）。
+     * 覆盖层/对照面板/微调与文本链路完全复用。模型取「视觉模型」配置、未配时回落通用模型
+     * （与翻译模型同一约定）；回落的通用模型不支持图像输入时由服务商报错、按失败呈现。
      *
      * [onBubble] 无流式（数组元素级流式解析不划算）：全部译出后按序一次性回调。
      */
@@ -160,9 +161,10 @@ class ComicTranslateEngine(
         val provider = provider
             ?: return Result.failure(IllegalStateException("AI 服务未配置"))
         val prefs = preferences()
-        val model = prefs.aiModelVision
+        // 视觉模型未配时回落通用模型（与翻译模型同一约定）：多模态通用模型一次配置全场景可用
+        val model = prefs.aiModelVision.ifBlank { prefs.aiModelGeneral }
         if (model.isBlank()) {
-            return Result.failure(IllegalStateException("未配置视觉模型"))
+            return Result.failure(IllegalStateException("未配置视觉模型（且通用模型也未配置）"))
         }
         val imageBase64 = pageImageBase64For(bookId, pageIndex)
             ?: return Result.failure(IllegalStateException("无法读取页面图像"))
