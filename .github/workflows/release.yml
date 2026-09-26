@@ -191,7 +191,7 @@ jobs:
             cp "$MAPPING" "FoldReader-$VERSION_NAME-$FLAVOR-mapping.txt"
           done
 
-          ls -lh "FoldReader-$VERSION_NAME".*
+          ls -lh "FoldReader-$VERSION_NAME"-*
 
       - name: 生成 Release 说明
         shell: bash
