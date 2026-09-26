@@ -81,6 +81,8 @@ class SettingsRepositoryImpl(
         val AI_TARGET_LANG = stringPreferencesKey("ai_target_lang")
         val AI_CHAPTER_RULE_CONFIRMED = booleanPreferencesKey("ai_chapter_rule_confirmed")
         val AI_TRANSLATION_CONFIRMED = booleanPreferencesKey("ai_translation_confirmed")
+        val AI_CLEAN_RECIPE_CONFIRMED = booleanPreferencesKey("ai_clean_recipe_confirmed")
+        val AI_METADATA_CONFIRMED = booleanPreferencesKey("ai_metadata_confirmed")
         val TRANSLATION_VIEW_HINT_SHOWN = booleanPreferencesKey("translation_view_hint_shown")
         val AI_PRICE_PER_MILLION = doublePreferencesKey("ai_price_per_million")
     }
@@ -162,6 +164,10 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiChapterRuleConfirmed,
                 aiTranslationConfirmed = prefs[Keys.AI_TRANSLATION_CONFIRMED]
                     ?: defaults.aiTranslationConfirmed,
+                aiCleanRecipeConfirmed = prefs[Keys.AI_CLEAN_RECIPE_CONFIRMED]
+                    ?: defaults.aiCleanRecipeConfirmed,
+                aiMetadataConfirmed = prefs[Keys.AI_METADATA_CONFIRMED]
+                    ?: defaults.aiMetadataConfirmed,
                 translationViewHintShown = prefs[Keys.TRANSLATION_VIEW_HINT_SHOWN]
                     ?: defaults.translationViewHintShown,
                 aiPricePerMillion = prefs[Keys.AI_PRICE_PER_MILLION] ?: defaults.aiPricePerMillion,
@@ -429,6 +435,14 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiTranslationConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AI_TRANSLATION_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_CLEAN_RECIPE_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setAiMetadataConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_METADATA_CONFIRMED] = confirmed }
     }
 
     override suspend fun setTranslationViewHintShown(shown: Boolean) {

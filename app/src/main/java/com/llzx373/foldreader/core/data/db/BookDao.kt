@@ -142,4 +142,49 @@ interface BookDao {
 
     @Query("DELETE FROM books WHERE id IN (:bookIds)")
     suspend fun deleteByIds(bookIds: List<Long>)
+
+    /**
+     * AI 元数据补全回写（M17）：**只填空值**——目标列已有内容（非 NULL 非空串）一律不动，
+     * 传 null 的列也不动；「哪些字段允许 AI 写」由调用方按 metaSource 快照先行决策
+     * （见 `core/metadata/BookMetaSources.planAiMetadataWrite`），这里的 CASE WHEN 是
+     * 决策之外的兜底，保证 AI 路径无论如何都覆盖不了已有值（含用户刚改完的竞态）。
+     * [metaSource] 整体替换为决策后的新标记。
+     */
+    @Query(
+        "UPDATE books SET " +
+            "author = CASE WHEN :author IS NOT NULL AND (author IS NULL OR author = '') THEN :author ELSE author END, " +
+            "description = CASE WHEN :description IS NOT NULL AND (description IS NULL OR description = '') THEN :description ELSE description END, " +
+            "genreTag = CASE WHEN :genreTag IS NOT NULL AND (genreTag IS NULL OR genreTag = '') THEN :genreTag ELSE genreTag END, " +
+            "metaSource = :metaSource WHERE id = :bookId",
+    )
+    suspend fun applyAiMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
+    /**
+     * 用户编辑元数据（M17）：三列无条件覆盖（允许清空），
+     * [metaSource] 由调用方按「值发生变化的字段打 user 标」算出（BookMetaSources.planUserEdit）。
+     */
+    @Query(
+        "UPDATE books SET author = :author, description = :description, " +
+            "genreTag = :genreTag, metaSource = :metaSource WHERE id = :bookId",
+    )
+    suspend fun updateUserMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
+    /**
+     * 规则版按题材自动分组（M17）：有题材标签的书 `groupName` 落题材名（覆盖原分组），
+     * 无标签的书保持原样。返回归入分组的本数。
+     */
+    @Query("UPDATE books SET groupName = genreTag WHERE genreTag IS NOT NULL AND genreTag != ''")
+    suspend fun groupByGenreTag(): Int
 }

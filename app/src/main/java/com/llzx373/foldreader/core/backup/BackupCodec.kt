@@ -72,6 +72,9 @@ class BackupCodec(
                 .put("identifier", book.identifier ?: JSONObject.NULL)
                 .put("seriesName", book.seriesName ?: JSONObject.NULL)
                 .put("seriesIndex", book.seriesIndex ?: JSONObject.NULL)
+                // M17（v7 起）：题材标签与逐字段来源标记（「AI 生成」/用户锁定的语义随备份走）
+                .put("genreTag", book.genreTag ?: JSONObject.NULL)
+                .put("metaSource", book.metaSource)
 
             val progress = bookshelfRepository.getProgress(book.id)
             bookJson.put(
@@ -215,12 +218,13 @@ class BackupCodec(
                 bookshelfRepository.updateGroup(listOf(local.id), groupName)
             }
 
-            // v4 起备份 EPUB 扩展元数据；字段缺省（旧版本备份）时保持本地值
+            // v4 起备份 EPUB 扩展元数据，v7 起加 genreTag / metaSource（M17）；
+            // 字段缺省（旧版本备份）时保持本地值
             val metaKeys = listOf(
                 "description", "publisher", "language", "pubDate",
-                "subjects", "identifier", "seriesName", "seriesIndex",
+                "subjects", "identifier", "seriesName", "seriesIndex", "genreTag",
             )
-            if (metaKeys.any { bookJson.has(it) }) {
+            if (metaKeys.any { bookJson.has(it) } || bookJson.has("metaSource")) {
                 fun opt(key: String, current: String?): String? =
                     if (!bookJson.has(key)) {
                         current
@@ -239,6 +243,12 @@ class BackupCodec(
                         identifier = opt("identifier", local.identifier),
                         seriesName = opt("seriesName", local.seriesName),
                         seriesIndex = opt("seriesIndex", local.seriesIndex),
+                        genreTag = opt("genreTag", local.genreTag),
+                        metaSource = when {
+                            !bookJson.has("metaSource") -> local.metaSource
+                            bookJson.isNull("metaSource") -> ""
+                            else -> bookJson.optString("metaSource")
+                        },
                     ),
                 )
             }

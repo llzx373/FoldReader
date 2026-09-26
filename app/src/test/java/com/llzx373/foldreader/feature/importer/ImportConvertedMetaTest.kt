@@ -66,6 +66,21 @@ class ImportConvertedMetaTest {
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) =
             throw UnsupportedOperationException()
         override suspend fun clearGroup(groupName: String) = throw UnsupportedOperationException()
+        override suspend fun applyAiMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = throw UnsupportedOperationException()
+        override suspend fun updateUserMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = throw UnsupportedOperationException()
+        override suspend fun groupBooksByGenreTag(): Int = throw UnsupportedOperationException()
         override fun observeProgress(bookId: Long) = throw UnsupportedOperationException()
         override suspend fun getProgress(bookId: Long) = throw UnsupportedOperationException()
         override suspend fun saveProgress(progress: com.llzx373.foldreader.core.data.db.ReadingProgressEntity) =

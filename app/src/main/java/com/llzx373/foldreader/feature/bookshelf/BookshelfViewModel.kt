@@ -19,6 +19,8 @@ import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.format.clean.CleanReport
 import com.llzx373.foldreader.core.format.txt.UriChannels
+import com.llzx373.foldreader.core.metadata.BookMetaSnapshot
+import com.llzx373.foldreader.core.metadata.BookMetaSources
 import com.llzx373.foldreader.feature.importer.BatchImportUseCase
 import com.llzx373.foldreader.feature.importer.CleanProfileFactory
 import com.llzx373.foldreader.feature.importer.ComicImportUseCase
@@ -279,6 +281,23 @@ class BookshelfViewModel(
     ): CleanProfile = cleanProfileFactory.forLevel(cleanLevel, convertTraditional)
 
     /**
+     * M16「AI 推荐配方」的预览：配方由调用方直接给定（不走档位/设置组装），
+     * 报告与档位预览共用同一 [cleanPreview] 通道，样式不变。
+     */
+    fun previewReclean(bookId: Long, profile: CleanProfile) {
+        _cleanPreview.value = CleanPreview(loading = true, report = null)
+        viewModelScope.launch {
+            val book = bookshelfRepository.getBook(bookId)
+            val report = if (book == null) {
+                null
+            } else {
+                importBook.preview(book.fileUri, profile)
+            }
+            _cleanPreview.value = CleanPreview(loading = false, report = report)
+        }
+    }
+
+    /**
      * 「智能整理」的预览：按 [cleanLevel] 只跑清洗、不落盘，报告走 [cleanPreview] 状态。
      * [cleanLevel] 为 null 表示「撤销清理」，此时没有可预览的改动。
      */
@@ -321,6 +340,31 @@ class BookshelfViewModel(
                     } else if (cleanLevel == null) {
                         rebuildBookChapters(bookId)
                         "已撤销清理，阅读器恢复读取原文件；目录已重建"
+                    } else {
+                        rebuildBookChapters(bookId)
+                        "智能整理完成：${outcome.report.summary()}。目录已重建，进度与书签位置可能变化"
+                    }
+
+                is RecleanBookUseCase.Outcome.Failure -> "智能整理失败：${outcome.message}"
+            }
+            onResult(message)
+        }
+    }
+
+    /**
+     * M16「AI 推荐配方」的物化：配方由调用方直接给定，执行路径与档位重洗完全是同一条
+     * （同一个 [RecleanBookUseCase]、同样重建目录），AI 不引入新执行路径。
+     */
+    fun recleanBook(
+        bookId: Long,
+        profile: CleanProfile,
+        onResult: (String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val message = when (val outcome = reclean.reclean(bookId, profile)) {
+                is RecleanBookUseCase.Outcome.Done ->
+                    if (!outcome.changed) {
+                        "按推荐配方没有需要改动的内容"
                     } else {
                         rebuildBookChapters(bookId)
                         "智能整理完成：${outcome.report.summary()}。目录已重建，进度与书签位置可能变化"
@@ -414,6 +458,37 @@ class BookshelfViewModel(
 
     fun deleteGroup(groupName: String) {
         viewModelScope.launch { bookshelfRepository.clearGroup(groupName) }
+    }
+
+    /** M17 规则版按题材自动分组：有题材标签的书 groupName 落题材名；回传归入分组的本数。 */
+    fun groupBooksByGenre(onResult: (Int) -> Unit) {
+        viewModelScope.launch { onResult(bookshelfRepository.groupBooksByGenreTag()) }
+    }
+
+    /**
+     * M17 用户编辑元数据：值发生变化的字段打 user 标（此后 AI 不改写，含主动清空），
+     * 未动的字段保留原来源标记。
+     */
+    fun updateBookMetadata(
+        bookId: Long,
+        author: String?,
+        synopsis: String?,
+        genreTag: String?,
+        onDone: () -> Unit,
+    ) {
+        viewModelScope.launch {
+            val book = bookshelfRepository.getBook(bookId) ?: return@launch
+            val write = BookMetaSources.planUserEdit(
+                BookMetaSnapshot(book.author, book.description, book.genreTag, book.metaSource),
+                author,
+                synopsis,
+                genreTag,
+            )
+            bookshelfRepository.updateUserMetadata(
+                bookId, write.author, write.synopsis, write.genreTag, write.metaSource,
+            )
+            onDone()
+        }
     }
 
     /** [charsetName] 为 null 表示恢复自动检测（库存空串）。 */

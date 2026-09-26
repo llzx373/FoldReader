@@ -516,6 +516,72 @@ class BackupCodecTest {
         assertEquals(listOf(listOf(7L) to "科幻"), targetBooks.groupCalls)
     }
 
+    @Test
+    fun `v7 备份恢复题材标签与来源标记且源端无值时清掉本地值`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 1, hash = "hashA").copy(genreTag = "科幻", metaSource = "author:ai,genre:ai"),
+                book(id = 2, hash = "hashB"),
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 7, hash = "hashA"),
+                book(id = 8, hash = "hashB").copy(genreTag = "旧题材", metaSource = "genre:user"),
+            ),
+        )
+        BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(json)
+
+        val restored = targetBooks.books.first { it.id == 7L }
+        assertEquals("科幻", restored.genreTag)
+        assertEquals("author:ai,genre:ai", restored.metaSource)
+        // 源书无题材/标记 → 导出为 null/"" → 恢复时清掉本地值
+        val cleared = targetBooks.books.first { it.id == 8L }
+        assertNull(cleared.genreTag)
+        assertEquals("", cleared.metaSource)
+    }
+
+    @Test
+    fun `v6 旧备份无题材与来源字段时保持本地值`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 6,
+              "books": [
+                {"title": "书hashA", "contentHash": "hashA", "description": "备份简介"}
+              ]
+            }
+        """.trimIndent()
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 7, hash = "hashA").copy(genreTag = "本地题材", metaSource = "genre:user"),
+            ),
+        )
+        BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(legacy)
+
+        val restored = targetBooks.books.single()
+        assertEquals("备份简介", restored.description) // 老字段照常恢复
+        assertEquals("本地题材", restored.genreTag) // 新字段缺省保持本地
+        assertEquals("genre:user", restored.metaSource)
+    }
+
     private fun book(id: Long, hash: String) = BookEntity(
         id = id,
         title = "书$hash",
@@ -663,6 +729,12 @@ class BackupCodecTest {
         override suspend fun setAiTranslationConfirmed(confirmed: Boolean) =
             update { copy(aiTranslationConfirmed = confirmed) }
 
+        override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) =
+            update { copy(aiCleanRecipeConfirmed = confirmed) }
+
+        override suspend fun setAiMetadataConfirmed(confirmed: Boolean) =
+            update { copy(aiMetadataConfirmed = confirmed) }
+
         override suspend fun setTranslationViewHintShown(shown: Boolean) =
             update { copy(translationViewHintShown = shown) }
 
@@ -718,6 +790,21 @@ class BackupCodecTest {
             groupCalls += bookIds to groupName
         }
         override suspend fun clearGroup(groupName: String) = Unit
+        override suspend fun applyAiMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+        override suspend fun updateUserMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+        override suspend fun groupBooksByGenreTag(): Int = 0
 
         override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
             flowOf(progress.find { it.bookId == bookId })

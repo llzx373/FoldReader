@@ -57,6 +57,19 @@ data class BookEntity(
     val comicPageCount: Int? = null,
     /** 用户选择「复制到本地」后的页目录（filesDir/comics/local/<hash>/pages）；null = 引用外部源。 */
     val comicLocalPath: String? = null,
+    /** 以下为 M17「元数据补全 + 智能分组」字段。 */
+    /**
+     * 题材标签：固定枚举 `com.llzx373.foldreader.core.metadata.GenreTags` 的中文标签，
+     * 规则版「按题材分组」直接把它落成 `groupName`；null/空 = 未标注。
+     */
+    val genreTag: String? = null,
+    /**
+     * 元数据逐字段来源标记：记录 author/description/genreTag 各字段是 AI 填的还是用户改的，
+     * 编解码见 `com.llzx373.foldreader.core.metadata.BookMetaSources`（形如 "author:ai,genre:user"）。
+     * 空串 = 无 AI/用户标记（EPUB 等导入期元数据不打标，天然视为非 AI）。
+     * 语义：AI 只补「空值且未被用户锁定」的字段；用户改动某字段即锁定该字段，AI 永不再写。
+     */
+    @ColumnInfo(defaultValue = "") val metaSource: String = "",
 )
 
 /** 需要先解压才知道内容的容器（zip 可直接按条目随机读，目录可直接列）。 */

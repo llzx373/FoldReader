@@ -75,6 +75,8 @@ interface SettingsRepository {
     suspend fun setAiTargetLang(targetLang: AiTargetLang)
     suspend fun setAiChapterRuleConfirmed(confirmed: Boolean)
     suspend fun setAiTranslationConfirmed(confirmed: Boolean)
+    suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean)
+    suspend fun setAiMetadataConfirmed(confirmed: Boolean)
     suspend fun setTranslationViewHintShown(shown: Boolean)
     suspend fun setAiPricePerMillion(price: Double)
 }

@@ -61,6 +61,30 @@ interface BookshelfRepository {
     /** 删除分组：把该分组下所有书移出分组。 */
     suspend fun clearGroup(groupName: String)
 
+    /**
+     * AI 元数据补全回写（M17）：只填空值（DAO 层 CASE WHEN 兜底，已有内容一律不动）；
+     * 可写字段由 BookMetaSources.planAiMetadataWrite 决策，[metaSource] 为决策后的新标记。
+     */
+    suspend fun applyAiMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
+    /** 用户编辑元数据（M17）：三列无条件覆盖（允许清空），[metaSource] 已按改动字段打 user 标。 */
+    suspend fun updateUserMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
+    /** 规则版按题材自动分组（M17）：有题材标签的书 groupName 落题材名；返回归入分组的本数。 */
+    suspend fun groupBooksByGenreTag(): Int
+
     fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?>
     suspend fun getProgress(bookId: Long): ReadingProgressEntity?
     suspend fun saveProgress(progress: ReadingProgressEntity)

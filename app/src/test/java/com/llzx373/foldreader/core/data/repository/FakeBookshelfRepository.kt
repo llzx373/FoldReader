@@ -125,6 +125,51 @@ class FakeBookshelfRepository : BookshelfRepository {
         books.value = books.value.map { if (it.groupName == groupName) it.copy(groupName = null) else it }
     }
 
+    override suspend fun applyAiMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) {
+        books.value = books.value.map {
+            if (it.id == bookId) {
+                it.copy(
+                    author = author ?: it.author,
+                    description = description ?: it.description,
+                    genreTag = genreTag ?: it.genreTag,
+                    metaSource = metaSource,
+                )
+            } else {
+                it
+            }
+        }
+    }
+
+    override suspend fun updateUserMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) {
+        books.value = books.value.map {
+            if (it.id == bookId) {
+                it.copy(author = author, description = description, genreTag = genreTag, metaSource = metaSource)
+            } else {
+                it
+            }
+        }
+    }
+
+    override suspend fun groupBooksByGenreTag(): Int {
+        val tagged = books.value.filter { !it.genreTag.isNullOrEmpty() }
+        books.value = books.value.map {
+            if (it.genreTag.isNullOrEmpty()) it else it.copy(groupName = it.genreTag)
+        }
+        return tagged.size
+    }
+
     override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
         MutableStateFlow(progress.value[bookId])
 

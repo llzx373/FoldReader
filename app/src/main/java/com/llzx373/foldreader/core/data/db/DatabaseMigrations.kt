@@ -72,6 +72,17 @@ internal val MIGRATION_4_5 = object : Migration(4, 5) {
 }
 
 /**
+ * v6：`books` 加元数据补全字段（M17）——题材标签 `genreTag`（可空，老行落 NULL）与
+ * 逐字段来源标记 `metaSource`（非空，老行取 DEFAULT ''）。只做结构变更，不回填数据。
+ */
+internal val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `genreTag` TEXT")
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `metaSource` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -81,4 +92,4 @@ internal val MIGRATION_4_5 = object : Migration(4, 5) {
  * 迁移只做结构变更；要动数据另起一条 Migration，并在上面补注释说明。
  */
 val DATABASE_MIGRATIONS: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)

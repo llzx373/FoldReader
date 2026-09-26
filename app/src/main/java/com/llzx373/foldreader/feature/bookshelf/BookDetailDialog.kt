@@ -19,6 +19,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,10 +37,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
 import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanProfile
+import com.llzx373.foldreader.core.metadata.BookMetaSources
 import com.llzx373.foldreader.core.reader.averageCharsPerMinute
 import com.llzx373.foldreader.core.reader.formatDurationZh
 import com.llzx373.foldreader.ui.EncodingPickerDialog
@@ -60,6 +64,8 @@ fun BookDetailDialog(
     val scope = rememberCoroutineScope()
     var refreshTick by remember { mutableIntStateOf(0) }
     var showEncodingPicker by remember { mutableStateOf(false) }
+    // M17：「编辑信息」对话框开关
+    var showEditMetadata by remember { mutableStateOf(false) }
     // 导出走系统的「另存为」：默认文件名按内容标记，方便两份并排比
     var exportCleanedCopy by remember { mutableStateOf(true) }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -117,7 +123,7 @@ fun BookDetailDialog(
                             if (book.comicLocalPath != null) "已复制到本地" else "引用外部文件",
                         )
                     } else {
-                        DetailRow("作者", book.author ?: "未知作者")
+                        DetailRow("作者", book.author ?: "未知作者", badge = aiBadge(book, BookMetaSources.FIELD_AUTHOR))
                     }
                     book.seriesName?.let { series ->
                         DetailRow(
@@ -133,7 +139,10 @@ fun BookDetailDialog(
                     book.subjects?.let { subjects ->
                         DetailRow("标签", subjects.split("\n").joinToString("、"))
                     }
-                    book.description?.let { DetailRow("简介", it) }
+                    book.description?.let {
+                        DetailRow("简介", it, badge = aiBadge(book, BookMetaSources.FIELD_SYNOPSIS))
+                    }
+                    DetailRow("题材", book.genreTag ?: "未标注", badge = aiBadge(book, BookMetaSources.FIELD_GENRE))
                     DetailRow("分组", book.groupName ?: "未分组")
                     if (!isComic) {
                         DetailRow("总字数", "%,d 字".format(book.totalChars))
@@ -177,6 +186,11 @@ fun BookDetailDialog(
                             },
                         )
                     }
+                    // M17：手动改正元数据（改动字段打 user 标，AI 不再改写）
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { showEditMetadata = true }) {
+                        Text("编辑信息")
+                    }
                     if (isComic) {
                         Spacer(modifier = Modifier.height(8.dp))
                         // 「复制到本地」让漫画脱离 SAF 授权：源被移动/删除也还能读
@@ -216,6 +230,8 @@ fun BookDetailDialog(
                         }
                         // M15：仅 TXT + AI 已配置时渲染（组件内部自查）
                         ChapterRuleAiEntry(bookId)
+                        // M17：仅 TXT + AI 已配置时渲染（组件内部自查）；补全后刷新详情行
+                        MetadataAiEntry(bookId, onApplied = { refreshTick++ })
                         // M20：全文本书籍 + AI 已配置时渲染（组件内部自查），确认页含成本预估
                         com.llzx373.foldreader.feature.translate.BookTranslateEntry(bookId)
                         if (book.format == BookFormat.TXT) {
@@ -227,6 +243,7 @@ fun BookDetailDialog(
                             }
                             if (showReclean) {
                                 RecleanConfirmDialog(
+                                    bookId = bookId,
                                     alreadyCleaned = book.cleanedFilePath != null,
                                     defaultLevel = cleanDefaults.level,
                                     defaultConvertTraditional = cleanDefaults.convertTraditional,
@@ -234,10 +251,21 @@ fun BookDetailDialog(
                                     onPreview = { level, convert ->
                                         viewModel.previewReclean(bookId, level, convert)
                                     },
+                                    onPreviewProfile = { profile ->
+                                        viewModel.previewReclean(bookId, profile)
+                                    },
                                     onConfirm = { level, convert ->
                                         showReclean = false
                                         viewModel.consumeCleanPreview()
                                         viewModel.recleanBook(bookId, level, convert) { message ->
+                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                            refreshTick++
+                                        }
+                                    },
+                                    onConfirmProfile = { profile ->
+                                        showReclean = false
+                                        viewModel.consumeCleanPreview()
+                                        viewModel.recleanBook(bookId, profile) { message ->
                                             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                             refreshTick++
                                         }
@@ -275,6 +303,18 @@ fun BookDetailDialog(
             }
         },
     )
+    if (showEditMetadata && book != null) {
+        EditBookMetadataDialog(
+            book = book,
+            onSave = { author, synopsis, genreTag ->
+                showEditMetadata = false
+                viewModel.updateBookMetadata(bookId, author, synopsis, genreTag) {
+                    refreshTick++
+                }
+            },
+            onDismiss = { showEditMetadata = false },
+        )
+    }
     if (showEncodingPicker && book != null) {
         EncodingPickerDialog(
             currentEncoding = book.encoding,
@@ -297,21 +337,43 @@ fun BookDetailDialog(
  * 档位在这里**当场可选**（不必先去设置页改全局），且每次改动都会重新采样预览——
  * 重洗每次都是从原始源文件跑，所以反复换档位是安全的，结果只取决于「原文 + 本次配方」。
  * 「不清理」这一项就是**撤销清理**：删掉副本、恢复原始编码，回到直接读原文件。
+ *
+ * M16：「AI 推荐配方」入口仅 AI 服务已配置时渲染（未配置零 UI 变化）。AI 给出的
+ * [CleanProfile] 载入后走**同一条**预览/确认链路——预览报告照常展示，确认按钮照常物化；
+ * 手动改选档位或繁简即放弃该配方。
  */
 @Composable
 private fun RecleanConfirmDialog(
+    bookId: Long,
     alreadyCleaned: Boolean,
     defaultLevel: CleanLevel,
     defaultConvertTraditional: Boolean,
     preview: BookshelfViewModel.CleanPreview?,
     onPreview: (CleanLevel?, Boolean) -> Unit,
+    onPreviewProfile: (CleanProfile) -> Unit,
     onConfirm: (level: CleanLevel?, convertTraditional: Boolean) -> Unit,
+    onConfirmProfile: (CleanProfile) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var level by remember { mutableStateOf<CleanLevel?>(defaultLevel) }
     var convertTraditional by remember { mutableStateOf(defaultConvertTraditional) }
-    LaunchedEffect(level, convertTraditional) { onPreview(level, convertTraditional) }
+    // AI 推荐配方：非空时预览/确认都以它为准，手动改选档位或繁简即放弃
+    var aiProfile by remember { mutableStateOf<CleanProfile?>(null) }
+    var showAiRecipe by remember { mutableStateOf(false) }
+    LaunchedEffect(level, convertTraditional, aiProfile) {
+        val profile = aiProfile
+        if (profile == null) onPreview(level, convertTraditional) else onPreviewProfile(profile)
+    }
     val report = preview?.report
+
+    val context = LocalContext.current
+    val container = remember(context) {
+        (context.applicationContext as? FoldReaderApplication)?.container
+    }
+    // 一次性检查（produceState 缓存），不在重组路径上反复做 suspend 判据
+    val aiRecipeAvailable by produceState(initialValue = false) {
+        value = container?.aiConfigured() == true
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -333,21 +395,48 @@ private fun RecleanConfirmDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
+                if (aiRecipeAvailable) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(onClick = { showAiRecipe = true }) {
+                        Text("AI 推荐配方（采样原文，推荐开关与广告正则）")
+                    }
+                }
+                if (aiProfile != null) {
+                    Text(
+                        text = "已载入 AI 推荐配方，预览如下；手动改选档位或繁简即放弃该配方。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                ImportLevelOption("不清理（撤销清理）", "删掉副本、恢复原始编码，回到直接读原文件", level == null) {
+                ImportLevelOption(
+                    "不清理（撤销清理）",
+                    "删掉副本、恢复原始编码，回到直接读原文件",
+                    level == null && aiProfile == null,
+                ) {
                     level = null
+                    aiProfile = null
                 }
                 CleanLevel.entries.forEach { candidate ->
                     if (candidate == CleanLevel.CUSTOM) return@forEach
                     ImportLevelOption(
                         label = importLevelLabel(candidate),
                         hint = importLevelHint(candidate),
-                        selected = level == candidate,
-                        onSelect = { level = candidate },
+                        selected = aiProfile == null && level == candidate,
+                        onSelect = {
+                            level = candidate
+                            aiProfile = null
+                        },
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = convertTraditional, onCheckedChange = { convertTraditional = it })
+                    Checkbox(
+                        checked = convertTraditional,
+                        onCheckedChange = {
+                            convertTraditional = it
+                            aiProfile = null
+                        },
+                    )
                     Text("繁体转简体")
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -360,7 +449,10 @@ private fun RecleanConfirmDialog(
 
                     report == null -> Text("预览不可用，仍可继续。", style = MaterialTheme.typography.labelSmall)
 
-                    level == null -> Text("将撤销清理。", style = MaterialTheme.typography.labelSmall)
+                    level == null && aiProfile == null -> Text(
+                        "将撤销清理。",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
 
                     !report.changed -> Text(
                         text = "与当前内容一致，无需改动。",
@@ -381,18 +473,39 @@ private fun RecleanConfirmDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(level, convertTraditional) }, enabled = preview?.loading != true) {
-                Text(if (level == null) "撤销清理" else "开始整理")
+            TextButton(
+                onClick = {
+                    val profile = aiProfile
+                    if (profile == null) onConfirm(level, convertTraditional) else onConfirmProfile(profile)
+                },
+                enabled = preview?.loading != true,
+            ) {
+                Text(if (level == null && aiProfile == null) "撤销清理" else "开始整理")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+    if (showAiRecipe) {
+        CleanRecipeAiDialog(
+            bookId = bookId,
+            onApply = { profile ->
+                aiProfile = profile
+                showAiRecipe = false
+            },
+            onDismiss = { showAiRecipe = false },
+        )
+    }
 }
 
 @Composable
-private fun DetailRow(label: String, value: String, onClick: (() -> Unit)? = null) {
+private fun DetailRow(
+    label: String,
+    value: String,
+    badge: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -405,14 +518,43 @@ private fun DetailRow(label: String, value: String, onClick: (() -> Unit)? = nul
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(0.35f),
         )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (onClick != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+        Row(
             modifier = Modifier.weight(0.65f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (onClick != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (badge != null) {
+                Spacer(modifier = Modifier.width(6.dp))
+                AiSourceBadge(badge)
+            }
+        }
+    }
+}
+
+/** 「AI 生成」徽标：M17 起，metaSource 标记为 AI 填入的元数据字段旁展示。 */
+@Composable
+private fun AiSourceBadge(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )
     }
 }
+
+/** 该字段当前值是 AI 填入的 → 返回「AI 生成」徽标文案，否则 null。 */
+private fun aiBadge(book: BookEntity, field: String): String? =
+    if (BookMetaSources.isAiGenerated(book.metaSource, field)) "AI 生成" else null
 
 /** 非法文件名字符（各平台通用的一套）与导出默认名。 */
 private val ILLEGAL_FILE_NAME_CHARS = Regex("[\\\\/:*?\"<>|]")

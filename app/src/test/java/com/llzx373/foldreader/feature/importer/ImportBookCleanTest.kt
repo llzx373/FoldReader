@@ -278,6 +278,21 @@ class ImportBookCleanTest {
             flowOf(emptyList())
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) = Unit
         override suspend fun clearGroup(groupName: String) = Unit
+        override suspend fun applyAiMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+        override suspend fun updateUserMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+        override suspend fun groupBooksByGenreTag(): Int = 0
         override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> = flowOf(null)
         override suspend fun getProgress(bookId: Long): ReadingProgressEntity? = null
         override suspend fun saveProgress(progress: ReadingProgressEntity) = Unit

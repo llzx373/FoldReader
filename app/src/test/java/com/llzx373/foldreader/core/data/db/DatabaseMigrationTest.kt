@@ -350,4 +350,59 @@ class DatabaseMigrationTest {
             assertEquals(2, c.getInt(0))
         }
     }
+
+    /** 建一个 v5 形态的库（`books` 含一行老数据），之后手动跑 v5→v6 迁移。 */
+    private fun openV5(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(5) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`title` TEXT NOT NULL)",
+                )
+                db.execSQL("INSERT INTO `books` (`id`, `title`) VALUES (7, '老书')")
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v5 升到 v6 books 加题材与来源标记列且老行取默认值`() {
+        val v5 = openV5()
+        val migrated = openV5()
+
+        MIGRATION_5_6.migrate(migrated)
+
+        // 老行原样还在；genreTag 默认 NULL，metaSource 按 DEFAULT '' 落地
+        migrated.query(
+            "SELECT `title`, `genreTag`, `metaSource` FROM `books` WHERE `id` = 7",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals("老书", c.getString(0))
+            assertTrue("genreTag 应默认 NULL", c.isNull(1))
+            assertEquals("", c.getString(2))
+        }
+        // 列结构 = v5 的全部列 + 两个新列（名字/类型/非空/默认值逐项一致，顺序无关）
+        assertEquals(
+            columns(v5, "books") +
+                Column("genreTag", "TEXT", false, null) +
+                Column("metaSource", "TEXT", true, "''"),
+            columns(migrated, "books"),
+        )
+        // 新列可写：AI 补全 / 用户编辑各写一次抽查
+        migrated.execSQL(
+            "UPDATE `books` SET `genreTag` = '科幻', `metaSource` = 'genre:ai' WHERE `id` = 7",
+        )
+        migrated.query("SELECT `metaSource` FROM `books` WHERE `id` = 7").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("genre:ai", c.getString(0))
+        }
+    }
 }

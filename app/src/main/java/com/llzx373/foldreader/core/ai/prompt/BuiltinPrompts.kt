@@ -13,7 +13,16 @@ object BuiltinPrompts {
     val selectionTranslation = BuiltinPrompt("选中即译", SelectionTranslatePrompt.SYSTEM_PROMPT)
     val unitTranslation = BuiltinPrompt("章节翻译", UnitTranslatePrompt.SYSTEM_PROMPT)
     val glossaryBackfill = BuiltinPrompt("术语回填", GlossaryBackfillPrompt.SYSTEM_PROMPT)
+    val cleanRecipeRecommendation = BuiltinPrompt("清洗配方推荐", CleanRecipePrompt.SYSTEM_PROMPT)
+    val metadataCompletion = BuiltinPrompt("元数据补全", MetadataPrompt.SYSTEM_PROMPT)
 
     val all: List<BuiltinPrompt> =
-        listOf(chapterRuleGeneration, selectionTranslation, unitTranslation, glossaryBackfill)
+        listOf(
+            chapterRuleGeneration,
+            selectionTranslation,
+            unitTranslation,
+            glossaryBackfill,
+            cleanRecipeRecommendation,
+            metadataCompletion,
+        )
 }

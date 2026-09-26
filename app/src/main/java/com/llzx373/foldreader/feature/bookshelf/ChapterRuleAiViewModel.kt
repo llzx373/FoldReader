@@ -216,8 +216,9 @@ class ChapterRuleAiViewModel(
          *
          * 只按 charOffset 坐标取文本——页式 PDF 的目录锚点是页序号，规则切分对它没有意义，
          * 入口侧已限制 TXT，这里再兜一层「读不出就当不支持」。
+         * M16 清洗配方推荐复用同一份加载逻辑（`fileUri` 指向原始源文件，读到的正是待洗的脏文本）。
          */
-        private suspend fun loadBookFullText(container: AppContainer, bookId: Long): String? =
+        internal suspend fun loadBookFullText(container: AppContainer, bookId: Long): String? =
             withContext(Dispatchers.IO) {
                 val book = container.bookshelfRepository.getBook(bookId) ?: return@withContext null
                 val parser = runCatching { container.bookParsers.parserFor(book.format) }.getOrNull()

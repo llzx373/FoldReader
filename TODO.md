@@ -88,26 +88,34 @@
 
 ---
 
-## M16 AI 清洗配方推荐
+## M16 AI 清洗配方推荐 ✅ 已完成（2026-09-24）
 
 **验收标准**：推荐配方走预览报告确认后物化；`novel-corpus` 全语料测试集全绿（AI 不进执行路径，理应零影响）。
+**验收记录**：单测全绿 1014（新增 24——`CleanSampleSamplerTest` 6 用例：头尾广告高发区必含 / 小文本原样返回 / 确定性 / 整行对齐；`CleanRecipePromptTest` 12 用例：散文与代码围栏包裹、畸形 JSON 返回 null、未知开关 key 丢弃、坏正则丢弃、广告正则截断 3 条、buildProfile 标准档基线 + 覆盖 + CUSTOM 档、清单覆盖全部开关、BuiltinPrompts 登记；`CleanRecipeAiViewModelTest` 6 用例：首次外发一次性确认闸门、全局广告正则并入、无效响应可重试、AiException 文案透传、台账 feature=清洗配方）；`novel-corpus` 全语料零改动全绿，`tools:cleaner` 同步绿（采样器属共享源码）；`assembleDebug` 通过。AI 只推荐不执行：配方落成普通 `CleanProfile` 后走既有预览报告 → 确认 → 物化链路，`NovelCleaner` 与规则文件零改动。真机待验：真实服务商下的建议质量与采样外发确认弹窗。
 
-- [ ] 脏文本采样策略（含头尾广告高发区）
-- [ ] prompt：返回建议开关列表（映射 `CleanToggles.ENTRIES`）+ 0~3 条自定义广告正则 + 问题说明
-- [ ] 产出 `CleanProfile` → 现有清洗预览报告 → 确认 → 物化（不新增执行路径）
-- [ ] 入口：「智能整理」对话框「AI 推荐配方」
+- [x] 脏文本采样策略（含头尾广告高发区）
+- [x] prompt：返回建议开关列表（映射 `CleanToggles.ENTRIES`）+ 0~3 条自定义广告正则 + 问题说明
+- [x] 产出 `CleanProfile` → 现有清洗预览报告 → 确认 → 物化（不新增执行路径）
+- [x] 入口：「智能整理」对话框「AI 推荐配方」
 
 ---
 
-## M17 元数据补全 + 智能分组
+## M17 元数据补全 + 智能分组 ✅ 已完成（2026-09-24）
 
 **验收标准**：DB 迁移通过；AI 值标「AI 生成」；用户编辑后不被覆盖；可按题材分组。
+**验收记录**：单测全绿 1050（新增 36——`MetadataPromptTest` 8 用例：规整/围栏容忍/畸形 null/空白归一/未知题材丢弃/简介截断/消息结构与题材清单/登记表；`BookMetaSourcesTest` 10 用例：编解码往返、畸形丢弃、来源查询打标、AI 只补空字段、不覆盖含自身旧值、锁定字段不补、全满返回 null、用户编辑打标含清空锁定、清空后不再回填、枚举归一化；`MetadataHeadSamplerTest` 3 用例；迁移 v5→v6 1 用例；`BookDaoMetadataTest` 3 用例（真 Room 库：DAO 只填空值兜底/用户覆盖可清空/分组只动有标签）；`MetadataAiViewModelTest` 9 用例：首次确认闸门、只补空且未锁定、已完整不打 AI、非 TXT 降级、无效响应重试、批量失败跳过汇总、批量首次确认、批量中途取消——台账 feature=元数据补全；`BackupCodecTest` +2 用例：v7 题材与来源标记往返、v6 旧备份缺省保持本地）；`assembleDebug` 通过；schema 快照 `6.json` 已生成且与迁移 SQL 逐字一致。真机待验：真实服务商下的归纳质量与批量进度观感。
+**与 TODO 原文的偏差**（均已在实现注释与 CHANGELOG 说明）：
+- 「简介」复用既有 `description` 列、「作者」复用既有 `author` 列——迁移只新增 `genreTag` + `metaSource` 两列；
+- `metaSource` 采用**逐字段**来源标记（编码 `author:ai,genre:user`），而非整书一把锁：用户改过作者后 AI 仍可补题材；用户编辑（含清空）即锁定该字段，AI 单本/批量都永不改写——诚实满足「用户编辑后不被覆盖」且粒度更细；
+- 书名不进 AI 输出契约、不回写——书架标题以导入文件名为准，AI 改书名风险大于收益；
+- AI 补全仅支持 TXT（EPUB/FB2 元数据来自容器、PDF 有预热回填；漫画无正文可采）；
+- 「按题材分组」为全局动作（书架溢出菜单），批量 AI 补全在多选模式触发。
 
-- [ ] DB 迁移：`books` 加 `author` / `synopsis` / `genreTag` / `metaSource`（升 version + `DatabaseMigrations.kt` + schemas 快照）
-- [ ] 采样开头几 KB → 结构化书名/作者/简介/题材标签（固定枚举）
-- [ ] 详情页展示 + 用户编辑覆盖（`metaSource=user` 后 AI 不改写）
-- [ ] 规则版按题材自动分组
-- [ ] 书架批量触发：进度 + 可取消
+- [x] DB 迁移：`books` 加 `genreTag` / `metaSource`（升 v6 + `DatabaseMigrations.kt` + schemas 快照 `6.json`；`author`/`synopsis` 复用既有列，见偏差说明）
+- [x] 采样开头几 KB → 结构化作者/简介/题材标签（固定枚举 `GenreTags` 十项；书名不回写）
+- [x] 详情页展示 + 用户编辑覆盖（逐字段 `metaSource`：AI 值标「AI 生成」，user 标字段 AI 不改写）
+- [x] 规则版按题材自动分组（书架溢出菜单「按题材分组」，`groupName` 落题材名）
+- [x] 书架批量触发：多选「AI 补全信息」串行执行，进度 N/M + 当前书名 + 可取消
 
 ---
 

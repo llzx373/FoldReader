@@ -164,6 +164,24 @@ class BookshelfRepositoryGroupTest {
         override suspend fun deleteByIds(bookIds: List<Long>) {
             books.removeAll { it.id in bookIds }
         }
+
+        override suspend fun applyAiMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+
+        override suspend fun updateUserMetadata(
+            bookId: Long,
+            author: String?,
+            description: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
+
+        override suspend fun groupByGenreTag(): Int = 0
     }
 
     private class FakeProgressDao : ReadingProgressDao {

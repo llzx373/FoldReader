@@ -163,6 +163,24 @@ class BookshelfRepositoryImpl(
 
     override suspend fun clearGroup(groupName: String) = bookDao.clearGroup(groupName)
 
+    override suspend fun applyAiMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) = bookDao.applyAiMetadata(bookId, author, description, genreTag, metaSource)
+
+    override suspend fun updateUserMetadata(
+        bookId: Long,
+        author: String?,
+        description: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) = bookDao.updateUserMetadata(bookId, author, description, genreTag, metaSource)
+
+    override suspend fun groupBooksByGenreTag(): Int = bookDao.groupByGenreTag()
+
     override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
         progressDao.observe(bookId)
 

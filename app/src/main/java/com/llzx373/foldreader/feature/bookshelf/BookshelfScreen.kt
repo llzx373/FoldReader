@@ -41,7 +41,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -76,6 +78,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -158,6 +161,8 @@ fun BookshelfScreen(
     var detailBookId by rememberSaveable { mutableStateOf(0L) }
     var showBookmarkOverview by rememberSaveable { mutableStateOf(false) }
     var showMoveToGroupDialog by rememberSaveable { mutableStateOf(false) }
+    /** M17：批量 AI 补全的书单快照（点开动作时取定，不受后续选择变化影响）；null = 未在跑。 */
+    var metadataBatchIds by remember { mutableStateOf<List<Long>?>(null) }
     var importRequest by remember { mutableStateOf<Pair<Uri, Boolean>?>(null) }
     /** 外部一次可能送来多个文件（分享多选），排在这里逐个确认；只排不消费。 */
     val importQueue = remember { mutableStateListOf<Uri>() }
@@ -175,6 +180,10 @@ fun BookshelfScreen(
             importDetecting = false
             if (!direct) importRequest = uri to openAfter
         }
+    }
+    // 一次性检查（produceState 缓存）：AI 服务已配置才露出批量补全入口（未配置零 UI 变化）
+    val aiAvailable by produceState(initialValue = false) {
+        value = app.container.aiConfigured()
     }
     // null = 全部；"" = 未分组；其余为分组名
     var groupFilter by rememberSaveable { mutableStateOf<String?>(null) }
@@ -310,6 +319,12 @@ fun BookshelfScreen(
                         IconButton(onClick = { showMoveToGroupDialog = true }) {
                             FolderIcon(contentDescription = "移动到分组")
                         }
+                        // M17：批量 AI 补全信息（仅 AI 已配置时显示）
+                        if (aiAvailable) {
+                            IconButton(onClick = { metadataBatchIds = selectedIds.toList() }) {
+                                Icon(Icons.Filled.Star, contentDescription = "AI 补全信息")
+                            }
+                        }
                         IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Filled.Delete, contentDescription = "删除")
                         }
@@ -378,6 +393,35 @@ fun BookshelfScreen(
                                 )
                             } else {
                                 GridViewIcon(contentDescription = "切换为网格视图")
+                            }
+                        }
+                        // M17 规则版智能分组等低频动作收进溢出菜单
+                        var moreMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { moreMenuExpanded = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                            }
+                            DropdownMenu(
+                                expanded = moreMenuExpanded,
+                                onDismissRequest = { moreMenuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("按题材分组") },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        viewModel.groupBooksByGenre { count ->
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    if (count > 0) {
+                                                        "已按题材归入分组：$count 本"
+                                                    } else {
+                                                        "还没有带题材标签的书——可在书籍详情用「AI 补全信息」或「编辑信息」补上"
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    },
+                                )
                             }
                         }
                     },
@@ -655,6 +699,16 @@ fun BookshelfScreen(
             },
             onDeleteGroup = viewModel::deleteGroup,
             onDismiss = { showMoveToGroupDialog = false },
+        )
+    }
+
+    metadataBatchIds?.let { ids ->
+        BatchMetadataAiDialog(
+            bookIds = ids,
+            onDismiss = {
+                metadataBatchIds = null
+                viewModel.clearSelection()
+            },
         )
     }
 
