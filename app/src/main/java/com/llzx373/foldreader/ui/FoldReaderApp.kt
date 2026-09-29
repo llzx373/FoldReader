@@ -36,6 +36,9 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -74,12 +77,18 @@ fun FoldReaderApp() {
 
     // 外部「打开方式」/「分享」送文件进来时，App 可能正停在浏览或设置页。导入对话框长在书架上，
     // 不切回去用户只会看到"什么都没发生"——这一步就是那个"没有其他东西"的补丁。
+    // repeatOnLifecycle(STARTED)：intent 可能在后台（STOPPED）到达，此时 Compose 效果协程的
+    // 调度没有帧时钟托底、时序不可靠；改成只在界面可见时收集，URI 先留在 StateFlow 里，
+    // 回到前台时重放出来再导航——否则用户看到的是「下次打开 App 才弹导入框」。
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
-        container.pendingImportUris.collect { incoming ->
-            val route = navController.currentBackStackEntry?.destination?.route
-            if (incoming.isNotEmpty() && route != Routes.BOOKSHELF) {
-                ReturnTrace.log("open-with: 收到外部文件，切回书架（当前 $route）")
-                navController.navigateTopLevel(Routes.BOOKSHELF)
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            container.pendingImportUris.collect { incoming ->
+                val route = navController.currentBackStackEntry?.destination?.route
+                if (incoming.isNotEmpty() && route != Routes.BOOKSHELF) {
+                    ReturnTrace.log("open-with: 收到外部文件，切回书架（当前 $route）")
+                    navController.navigateTopLevel(Routes.BOOKSHELF)
+                }
             }
         }
     }

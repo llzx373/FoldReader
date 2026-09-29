@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **App 在后台时收到「打开方式 / 分享」，导入弹窗有时不立即出现、要等到下次打开 App 才弹**：URI 消费方（切回书架、书架弹导入框）原先是不感知生命周期的常驻 `LaunchedEffect`，后台（STOPPED）送达的 intent 会撞上 Compose 效果协程在后台不可靠的调度时序。两处收集器改为 `repeatOnLifecycle(STARTED)` 驱动——只在界面可见时消费，后台到达的 URI 留在 StateFlow 里，回到前台重放出来立刻导航 + 弹窗；书架消费时补一条诊断日志，真机可在「设置 → 诊断」对齐「intent 到达 / 切回书架 / 消费弹窗」三条记录。
+
+### Added
+
+- 应用内「设置 → 关于 → 开源许可」补上 M21 起引入的署名：ONNX Runtime（MIT）与 OCR / 气泡检测模型（PaddleOCR PP-OCRv4、RT-DETR-v2，Apache-2.0）。
+
 ## [1.2.0] - 2026-09-26
 
 ### Added
