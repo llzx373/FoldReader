@@ -9,11 +9,11 @@
 | JDK | 25 |
 | Android SDK Platform | `android-37.0` |
 | Android SDK Build-Tools | `36.0.0` |
-| Gradle | 9.6.0（使用仓库内置 wrapper，勿单独安装） |
+| Gradle | 9.7.1（使用仓库内置 wrapper，勿单独安装） |
 
 1. 用 Android Studio 或命令行打开仓库。
 2. 在仓库根目录创建 `local.properties`，写明 `sdk.dir=/path/to/Android/Sdk`。
-3. `./gradlew :app:assembleDebug` 能出包即为环境就绪。
+3. `./gradlew :app:assembleLiteDebug` 能出包即为环境就绪（flavor 说明与更多命令见 [docs/构建与打包.md](docs/构建与打包.md)）。
 
 构建 release 包不需要任何签名密钥——`app/build.gradle.kts` 会在缺少正式密钥时回退 debug 签名。
 
@@ -58,8 +58,8 @@ feat(format): FB2 支持、目录成组导入与 EPUB 深度支持
 **每一个改动都要带上测试。** 本项目不把测试当作后续补充项。
 
 ```bash
-./gradlew :app:testDebugUnitTest            # 全部单元测试
-./gradlew :app:testDebugUnitTest --tests "com.llzx373.foldreader.core.reader.PaginatorTest"
+./gradlew :app:testLiteDebugUnitTest            # 全部单元测试（CI 门禁跑的就是这个）
+./gradlew :app:testLiteDebugUnitTest --tests "com.llzx373.foldreader.core.reader.PaginatorTest"
 ```
 
 - 纯逻辑用 JVM 单测即可。
@@ -90,7 +90,8 @@ feat(format): FB2 支持、目录成组导入与 EPUB 深度支持
 
 改动若影响以下任一内容，请在同一个 PR 里同步更新：
 
-- 功能、支持格式、系统要求、构建步骤 → `README.md` 与 `README_EN.md`
+- 功能、支持格式、系统要求 → `README.md` 与 `README_EN.md`
+- 构建步骤、flavor、签名与版本号流程 → `docs/构建与打包.md`（README 只留入口链接）
 - 版本可见的变化 → `CHANGELOG.md`
 - 第三方依赖增删 → 应用内「设置 → 开源许可」的 `OpenSourceLicenses.kt`（有单测兜底）与 README 的许可表
 - 产品设计层面的变更 → `docs/需求与设计说明书.md`

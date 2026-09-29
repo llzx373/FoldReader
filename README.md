@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/llzx373/FoldReader?sort=semver)](https://github.com/llzx373/FoldReader/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-13%2B%20(API%2033)-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3%20Expressive-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 
 **专为折叠屏打造的本地电子书 / 漫画 / PDF 阅读器。**
@@ -36,10 +36,10 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 
 ### 折叠屏形态适配
 
-- **单页 → 双页书模式 → 桌面模式**：折起时单页阅读，展开时自动进入双页书模式，半开时进入桌面模式（上半正文、下半控制面板）。
+- **单页 → 双页书模式 → 桌面模式**：折起时单页阅读，展开时自动进入双页书模式，半开时进入桌面模式（上半正文、下半控制面板）。自动模式下窗口竖持（高 > 宽）一律退回单页，横持才进双页。
 - **铰链即书脊**：按铰链位置切分布局，避开物理折痕区域，并在中缝渲染书脊阴影；靠书脊一侧的页边距自动加宽。
 - **姿态连续性**：折叠、展开、旋转、进入桌面模式，阅读位置与分页状态连续保持，不会跳回章节开头。
-- **双页策略可覆盖**：自动判断 / 强制双页 / 强制单页（`DualPageMode`）。
+- **双页策略可覆盖**：自动判断 / 强制双页 / 强制单页（`DualPageMode`）；强制双页不受窗口方向限制。
 
 ### 排版引擎
 
@@ -52,7 +52,7 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 
 - **100MB+ TXT 窗口化读取**：按字节偏移窗口读取，绝不把整本文件读进内存；章节索引与预热在后台队列完成。
 - **编码自动识别**：UTF-8（含/不含 BOM）、UTF-16 LE/BE、GBK、GB18030、Big5，并支持手动指定。
-- **章节规则库**：正则规则识别章节标题，可自定义增删；识别不出时退化为按进度跳转。
+- **章节规则库**：正则规则识别章节标题，可自定义增删；识别不出时退化为按进度跳转，也可用 AI 归纳规则（见下）。
 
 ### 阅读辅助
 
@@ -65,10 +65,35 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 - 页内锚点：书签与批注可精确到页内位置（点或矩形），漫画 / PDF 同理。
 - 中间点击区可配置：单击与双击各自绑定动作（切换菜单 / 上一页 / 下一页 / 书签 / 缩放 / 无）。
 
+### TTS 听书
+
+- 系统 TTS 引擎朗读：从当前位置 / 朗读整章，逐句推进，翻页随朗读进度联动。
+- **前台服务 + MediaSession**：锁屏、退桌面不中断；通知栏与耳机按键可暂停 / 继续 / 停止。
+- 目前按中文引擎朗读；语速调节与按书语言切换是后续扩展点。
+
+### AI 翻译与辅助（自配服务商，未配置零网络）
+
+AI 功能全部依赖用户在「设置 → AI 服务」自行配置的服务商（OpenAI Chat / OpenAI Responses / Anthropic 三种协议，通用 / 翻译 / 视觉模型分别配置）。未配置时相关入口一律隐藏，应用不产生任何网络请求。
+
+- **翻译族**：长按选中即译（可一键存为批注）、翻译本页（原文/译文逐段对照的流式面板）、翻译本章/本节、**全书翻译**（批量队列、断点续译、前台服务进度通知、读到未译段自动插队）。
+- **三种译文视角**：原文/译文切换、双页对照（左原右译）、滚动段落对照。
+- **漫画翻译**：气泡检测与 OCR 完全本地离线，只把识别出的文字发给 AI 翻译；覆盖层 / 双页对照 / 气泡对照三种视角；跨页气泡合并、气泡位置手动微调；可选视觉模型整页直译（整页图片外发，逐书单独确认）。
+- **术语表**：「原文 → 固定译法」词条，全局 / 漫画系列 / 单书三级作用域，翻译时自动注入，保证人名与术语译法一致；候选由人物索引与模型回填生成，确认后才生效。
+- **AI 辅助**：AI 识别章节规则（TXT，采样标题行归纳正则并本地试切预览）、AI 推荐清洗配方（只推荐不执行，照常走预览确认）、AI 补全书籍元数据（只填空不覆盖，支持批量，AI 填的字段有标记）。
+- **合规口径**：API key 经 Android Keystore 加密存储；每类功能首次外发前一次性明示确认；「外发历史」台账记录每次发出的内容与 token 估算；内置提示词全文只读可查；一键清除全部 AI 数据。
+
+### OCR 与离线模型
+
+- 本地 ONNX 推理（CPU 后端），识别词典随包携带；支持中 / 英 / 日三种识别语言。
+- **扫描版 PDF 文本层**：无内嵌文本层的扫描件经 OCR 生成文本层，可全文搜索、可拖框选字。
+- **漫画气泡识别**：RT-DETR 气泡检测 + PP-OCRv4 文字识别，为漫画翻译提供离线前段。
+- **模型管理**：官方模型按清单全量 SHA-256 校验导入；也可导入自己的微调 / 自定义 `.onnx`（优先生效，可单独删除回落官方）。full 包自带全部 5 个官方模型，lite 包自行导入（见「安装」）。
+
 ### 导入与书架
 
 - 书架支持网格 / 列表视图、分组、自动生成的书籍封面与漫画封面。
-- 支持 **TXT / EPUB / FB2 / PDF** 与漫画容器（**CBZ / CBR / CBT / CB7**，以及直接当作容器的 zip / rar / tar / 7z，还有图片目录）；批量导入、内置文件浏览器；也支持从其他 App 或文件管理器用"打开方式"送入，以及从系统分享面板**分享**给本 App（`VIEW` + `SEND` / `SEND_MULTIPLE`）。
+- 支持 **TXT / EPUB / FB2 / PDF** 与漫画容器（**CBZ / CBR / CBT / CB7**，以及直接当作容器的 zip / rar / tar / 7z，还有图片目录）；批量导入；也支持从其他 App 或文件管理器用"打开方式"送入，以及从系统分享面板**分享**给本 App（`VIEW` + `SEND` / `SEND_MULTIPLE`）。
+- **内置文件浏览器**（底部「浏览」页）：用 SAF 授权外置文件夹后直接浏览其中的书——单本打开即按「外置来源」入库、整个目录导入为分组、图片目录直接当漫画打开；书架上有外置来源角标。
 - **同系列上下卷切换**：自动在当前目录/分组中匹配同名（同系列）书籍，一键切上一卷 / 下一卷。
 - 导入时可选**智能清理**（离线规则引擎）：三档预设（保守/标准/激进）+ 14 项细粒度开关，覆盖空白混掺、行尾空格、段中空行、硬换行拆段、章节名不顶格、章节命名混乱、引号内被拆开、星号遮蔽、网站宣传语、论坛残留等；可先看**清洗预览报告**再决定，已导入的书也能「智能整理」；另可自定义广告行正则与繁简转换。档位**三处入口同一份规则**：书架导入对话框按当次选择，「浏览」打开与「导入目录为分组」跟随设置页的档位与繁简偏好。
 - 导入时选了清理，**原版与清洗版会各占一个书架条目**（两本共用同一份源副本，不额外占空间），书架上用「已清洗」角标区分，详情页写明读的是原文件还是清洗副本——想对照或回读原文，不必重新导入一次。
@@ -77,7 +102,7 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 ### 数据与隐私
 
 - **本地优先**：无账号、无官方云服务、无统计上报。书架、进度、书签与标注全部存储在本机。
-- **网络仅用于用户显式配置的功能**：`INTERNET` 权限已随 AI 功能引入（设置页「AI 服务」，用户自带 API key、自配服务商端点，应用直连其配置的服务商）；未配置 AI 服务时，应用不产生任何网络请求。WebDAV 备份/恢复（用户自托管服务器）仍属规划。
+- **网络仅用于用户显式配置的功能**：`INTERNET` 权限随 AI 功能引入（设置页「AI 服务」，用户自带 API key、自配服务商端点，应用直连其配置的服务商）；未配置 AI 服务时，应用不产生任何网络请求。WebDAV 备份/恢复（用户自托管服务器）仍属规划。
 - 备份与恢复：本地 JSON 导出/导入（WebDAV 远程备份规划中）。
 - 诊断日志：崩溃与返回栈追踪可导出，便于报 issue 时附上。
 
@@ -88,76 +113,29 @@ FoldReader 不把展开态当成一块更宽的画布来硬塞内容，而是按
 | 纯文本 | `.txt` | 主力格式，支持超大文件与多种编码 |
 | EPUB | `.epub` | 目录支持 EPUB3 NAV 与 EPUB2 NCX |
 | FictionBook | `.fb2`、`.fb2.zip` | 支持裸 XML 与 zip 打包两种形态 |
-| PDF | `.pdf` | 文本型可按普通电子书阅读（含排版与搜索），扫描件走页式渲染 |
+| PDF | `.pdf` | 文本型可按普通电子书阅读（含排版与搜索）；扫描件走页式渲染，可经本地 OCR 生成文本层（搜索 / 选字） |
 | 漫画 | `.cbz` `.zip`、`.cbr` `.rar`、`.cbt` `.tar`、`.cb7` `.7z` | 按真实魔数判容器，扩展名错标也能正确解开 |
 | 漫画 | 图片文件夹 | 通过系统文件选择器（SAF）直接选择一个图片目录 |
 
 格式识别采用 **magic bytes 优先、扩展名/MIME 兜底** 的策略：`.cbr` 实际是 zip 这类错标在漫画资源里相当常见，按真实字节判定才解得开。
 
-漫画阅读额外支持：从右往左（日漫）方向、适应整页/宽度/高度/原始尺寸四种缩放、缩略图快速跳页、页内锚点书签。漫画不依赖目录结构，而是通过文件名规则自动排序并识别同系列。
+漫画阅读额外支持：从右往左（日漫）方向、适应整页/宽度/高度/原始尺寸四种缩放、缩略图快速跳页、页内锚点书签，以及离线气泡识别 + AI 翻译（见「AI 翻译与辅助」）。漫画不依赖目录结构，而是通过文件名规则自动排序并识别同系列。
 
 ## 安装
 
 1. 到 [Releases](https://github.com/llzx373/FoldReader/releases) 下载最新的 APK，两个版本二选一（功能完全相同，包名与签名一致，只能装一个、可互相覆盖安装切换）：
    - `FoldReader-<版本>-full.apk` —— **自带全部 OCR/漫画翻译模型**，装完即用（包较大）；
    - `FoldReader-<版本>-lite.apk` —— 不带模型（包小），模型在「设置 → OCR 模型 → 模型管理」里自行下载导入，也可以导入自己的微调/自定义 .onnx。
-2. 系统要求 **Android 13（API 33）及以上**。
+2. 系统要求 **Android 13（API 33）及以上**（仅 arm64-v8a 与 x86_64）。
 3. APK 未上架任何应用商店，安装时需允许"安装未知来源的应用"。
 
 **设备说明**：大折叠屏（华为 Mate X 系列、三星 Z Fold 系列、荣耀/OPPO/vivo/小米折叠屏）与阔折叠（16:10 内屏，如华为 Pura X）是主要目标形态。直板机与竖折机可正常使用，但会退化为单页阅读，体验不到双页书模式。
 
 ## 从源码构建
 
-### 前置要求
+构建环境、flavor 说明、常用命令、签名与版本号规则见 **[docs/构建与打包.md](docs/构建与打包.md)**。
 
-| 依赖 | 版本 |
-| --- | --- |
-| JDK | **25**（`gradle/gradle-daemon-jvm.properties` 固定了 daemon toolchain 为 25） |
-| Android SDK Platform | `android-37.0` |
-| Android SDK Build-Tools | `36.0.0` |
-| Gradle | 9.6.0（wrapper 已内置，无需单独安装） |
-
-在仓库根目录创建 `local.properties` 指向本地 SDK：
-
-```properties
-sdk.dir=/path/to/Android/Sdk
-```
-
-### 常用命令
-
-```bash
-./gradlew :app:assembleDebug        # 构建 debug APK
-./gradlew :app:testDebugUnitTest    # 运行全部单元测试（600+ 用例）
-./gradlew :app:lintDebug            # Lint
-./gradlew :app:assembleRelease      # 构建 release APK（R8 + 资源压缩）
-./gradlew :app:bundleRelease        # 构建 AAB
-```
-
-### 发布签名
-
-release 构建的签名密钥按以下优先级读取：
-
-1. 环境变量：`FOLDREADER_KEYSTORE_FILE`、`FOLDREADER_KEYSTORE_PASSWORD`、`FOLDREADER_KEY_ALIAS`、`FOLDREADER_KEY_PASSWORD`
-2. 仓库根目录的 `key.properties`：
-
-   ```properties
-   storeFile=/absolute/path/to/release.jks
-   storePassword=****
-   keyAlias=****
-   keyPassword=****
-   ```
-
-两者都不完整时会**回退到 debug 签名**，因此贡献者无需任何密钥即可构建 release 包做性能验证。正式发布流水线则会强制要求正式密钥（见 [docs/发布流程.md](docs/发布流程.md)）。
-
-> `key.properties`、`*.jks`、`*.keystore` 已在 `.gitignore` 中，请勿提交密钥。
-
-### 版本号
-
-`gradle.properties` 中的 `foldReader.versionCode` / `foldReader.versionName` 是本地默认值，发布流水线会用 `-P` 覆盖：
-
-```bash
-./gradlew :app:assembleRelease -PfoldReader.versionCode=10001 -PfoldReader.versionName=1.0.1
-```
+快速开始：安装 JDK 25 与 Android SDK，在仓库根目录建 `local.properties` 写上 `sdk.dir=...`，然后 `./gradlew :app:assembleLiteDebug`。
 
 ## 项目结构与架构
 
@@ -176,9 +154,13 @@ com.llzx373.foldreader
 │   ├── comic/      # 漫画容器（zip/rar/tar/7z）、切页、图片解码、封面、系列匹配
 │   ├── paged/      # PagedImageSource：漫画与 PDF 共用的页式读取接缝
 │   ├── pdf/        # PDF 渲染与元数据
+│   ├── ocr/        # OCR 管线（检测/识别/气泡）与模型清单；android/ 下为 ONNX 会话与文本层
+│   ├── translate/  # 译本存储、术语合并、气泡渲染等翻译纯逻辑
+│   ├── ai/         # AI 服务商协议（OpenAI Chat/Responses、Anthropic）、外发台账、提示词
+│   ├── tts/        # TTS 切句器；android/ 下为引擎控制器与前台播放服务
 │   ├── backup/     # 备份导出 / 导入编解码
 │   └── debug/      # 诊断日志、返回栈追踪
-└── feature/        # 界面层：bookshelf / reader / comic / importer / filebrowser / settings
+└── feature/        # 界面层：bookshelf / reader / comic / importer / filebrowser / translate / settings
 ```
 
 三条贯穿全局的设计主线：
@@ -191,22 +173,23 @@ com.llzx373.foldreader
 
 | 层 | 选型 |
 | --- | --- |
-| 语言 | Kotlin 2.2.10（AGP 9 内置 Kotlin 编译器 + Compose 编译器插件） |
-| UI | Jetpack Compose（BOM 2026.02.01）、Material 3 Expressive（1.5.0-alpha28）、Material3 Adaptive |
+| 语言 | Kotlin 2.4.20（AGP 9 内置 Kotlin 编译器 + Compose 编译器插件） |
+| UI | Jetpack Compose（BOM 2026.09.00）、Material 3 Expressive（1.5.0-alpha28）、Material3 Adaptive |
 | 折叠屏 | `androidx.window` 1.5.0 + `FoldingFeature` |
 | 架构 | MVVM + 单向数据流，仓库暴露 `Flow` |
-| 持久化 | Room 2.8.4（KSP）、DataStore Preferences 1.2.0 |
-| 导航 | Navigation Compose 2.9.6 |
-| 并发 | kotlinx-coroutines 1.10.2 |
-| 漫画容器 | Apache Commons Compress 1.28.0、XZ for Java 1.10、junrar 7.6.0 |
+| 持久化 | Room 2.8.5（KSP）、DataStore Preferences 1.2.0 |
+| 导航 | Navigation Compose 2.10.1 |
+| 并发 | kotlinx-coroutines 1.11.0 |
+| 漫画容器 | Apache Commons Compress 1.28.0、XZ for Java 1.12、junrar 8.1.1 |
 | PDF | androidx.pdf 1.0.0-beta01（沙箱文档服务）、PDFBox-Android 2.0.27.0 |
-| 构建 | Gradle 9.6.0、AGP 9.4.0、KSP 2.2.10-2.0.2、JDK toolchain 25 |
+| OCR 推理 | onnxruntime-mobile 1.18.0（CPU 后端；ABI 限 arm64-v8a + x86_64） |
+| 构建 | Gradle 9.7.1、AGP 9.4.1、KSP 2.3.12、JDK toolchain 25 |
 | 测试 | JUnit4、Robolectric 4.17、kotlinx-coroutines-test、Compose UI Test |
 
 ## 已知限制
 
 - **数据库向前兼容**。自 `v1.0.0` 起的已发布版本都能原地升级：改 schema 必须同时升 `version` 并在 `core/data/db/DatabaseMigrations.kt` 补一条迁移，`app/schemas/` 下各版本的快照一律保留、不重置基线；也不启用破坏性降级（对不上宁可报错，不静默清库）。跨大版本升级前仍建议先导出一次应用内备份。
-- **不做 OCR**。扫描版 PDF 只能按图片页式阅读，不能提取文字或对其做全文搜索。
+- **OCR 完全离线、需模型**。扫描版 PDF 的文本层（搜索 / 选字）与漫画翻译的气泡识别都跑在本机 ONNX 推理上，但要先导入模型（full 包自带，lite 包自行导入）；不做任何在线 OCR / 云识别。
 - **不做在线书城、账号体系、社交**。书籍与数据以本地为准；唯一的联网例外是用户显式配置的 AI 服务与 WebDAV 备份（见「数据与隐私」）。
 - **仿真翻页是可选的第四种方式**（覆盖 / 仿真 / 无动画 / 滚动），默认仍是覆盖。旧的圆柱/铰链 3D 模型已删除（提交 `9a0c0ad`），现用 2.5D 折痕反射，见设计说明书附录 v2.4。
 - **未上架任何应用商店**，仅通过 GitHub Releases 分发。
@@ -218,6 +201,7 @@ com.llzx373.foldreader
 | --- | --- |
 | [docs/需求与设计说明书.md](docs/需求与设计说明书.md) | 完整的产品定位、折叠形态分析、交互与排版设计、技术架构 |
 | [docs/AI功能需求与实施.md](docs/AI功能需求与实施.md) | AI 功能规划：网络策略、技术底座、功能优化 / 翻译 / OCR 三条功能线 |
+| [docs/构建与打包.md](docs/构建与打包.md) | 从源码构建：环境、flavor、命令、签名与版本号 |
 | [docs/发布流程.md](docs/发布流程.md) | 签名密钥生成、GitHub Secrets 配置、打 tag 发布 |
 | [docs/images/README.md](docs/images/README.md) | README 截图采集清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
@@ -239,6 +223,8 @@ com.llzx373.foldreader
 | AndroidX（Activity / Lifecycle / Navigation / DataStore / Window / Adaptive） | Apache License 2.0 |
 | Room 持久化库 | Apache License 2.0 |
 | kotlinx-coroutines | Apache License 2.0 |
+| ONNX Runtime（onnxruntime-mobile） | MIT License |
+| OCR / 气泡检测模型（PaddleOCR PP-OCRv4、RT-DETR-v2） | Apache License 2.0 |
 | [OpenCC](https://github.com/BYVoid/OpenCC) 繁简转换字表（`assets/ts_map.txt`） | Apache License 2.0 |
 | Apache Commons Compress | Apache License 2.0 |
 | XZ for Java | Public Domain |

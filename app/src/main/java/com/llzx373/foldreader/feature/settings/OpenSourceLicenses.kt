@@ -16,6 +16,8 @@ internal val openSourceLicenses: List<Pair<String, String>> = listOf(
     "Apache Commons Compress（zip / tar / 7z 容器）" to "Apache License 2.0",
     "XZ for Java（7z 的 LZMA 解码）" to "Public Domain",
     "junrar（RAR 容器读取）" to "UnRAR License",
+    "ONNX Runtime（onnxruntime-mobile，OCR 本地推理）" to "MIT License",
+    "OCR / 气泡检测模型（PaddleOCR PP-OCRv4、RT-DETR-v2）" to "Apache License 2.0",
     "PDFBox-Android（PDF 元数据与文本）" to "Apache License 2.0",
     "androidx.pdf（PDF 渲染与沙箱文档服务）" to "Apache License 2.0",
 )
