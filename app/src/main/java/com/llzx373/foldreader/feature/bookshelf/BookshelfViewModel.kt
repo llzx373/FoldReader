@@ -122,6 +122,11 @@ class BookshelfViewModel(
         .map { it.bookshelfGridView }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    /** 书架网格每行本数：0 = 自动（按窗口宽度自适应），2~5 = 固定列数。 */
+    val gridColumns: StateFlow<Int> = settingsRepository.preferences
+        .map { it.bookshelfGridColumns }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     val groups: StateFlow<List<String>> = bookshelfRepository.observeGroupNames()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

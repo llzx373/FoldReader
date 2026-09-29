@@ -139,6 +139,8 @@ class SettingsViewModel(
     fun updateShowTime(enabled: Boolean) = launch { settingsRepository.setShowTime(enabled) }
     fun updateBookshelfGridView(gridView: Boolean) =
         launch { settingsRepository.setBookshelfGridView(gridView) }
+    fun updateBookshelfGridColumns(columns: Int) =
+        launch { settingsRepository.setBookshelfGridColumns(columns) }
     fun updateComicDirection(direction: ComicDirection) = launch {
         settingsRepository.setComicDirection(direction)
         bookPrefsRepository.applyGlobalComicDirection(direction)

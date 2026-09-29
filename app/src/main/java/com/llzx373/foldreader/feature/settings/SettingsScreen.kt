@@ -712,6 +712,20 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 },
             )
             SwitchSetting("书架网格视图", prefs.bookshelfGridView, viewModel::updateBookshelfGridView)
+            if (prefs.bookshelfGridView) {
+                SegmentedSetting(
+                    label = "书架每行本数",
+                    options = listOf("自动", "2", "3", "4", "5"),
+                    selectedIndex = if (prefs.bookshelfGridColumns in 2..5) {
+                        prefs.bookshelfGridColumns - 1
+                    } else {
+                        0
+                    },
+                    onSelect = { index ->
+                        viewModel.updateBookshelfGridColumns(if (index == 0) 0 else index + 1)
+                    },
+                )
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             ReadingStatsSection(stats = readingStats)

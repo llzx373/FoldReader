@@ -666,6 +666,8 @@ class BackupCodecTest {
             update { copy(panelScreenOff = enabled) }
         override suspend fun setBookshelfGridView(gridView: Boolean) =
             update { copy(bookshelfGridView = gridView) }
+        override suspend fun setBookshelfGridColumns(columns: Int) =
+            update { copy(bookshelfGridColumns = if (columns <= 0) 0 else columns.coerceIn(2, 5)) }
         override suspend fun setBookshelfSort(sort: com.llzx373.foldreader.core.data.settings.BookshelfSort) =
             update { copy(bookshelfSort = sort) }
         override suspend fun setCustomChapterRules(rules: List<String>) =

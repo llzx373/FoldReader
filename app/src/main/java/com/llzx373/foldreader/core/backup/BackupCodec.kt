@@ -431,6 +431,7 @@ class BackupCodec(
         .put("autoPageSpeedPx", p.autoPageSpeedPx.toDouble())
         .put("panelScreenOff", p.panelScreenOff)
         .put("bookshelfGridView", p.bookshelfGridView)
+        .put("bookshelfGridColumns", p.bookshelfGridColumns)
         .put("customChapterRules", JSONArray().apply { p.customChapterRules.forEach { put(it) } })
         .put("adCleanRules", JSONArray().apply { p.adCleanRules.forEach { put(it) } })
         .put("cleanLevel", p.cleanLevel.name)
@@ -559,6 +560,9 @@ class BackupCodec(
         }
         if (json.has("bookshelfGridView")) {
             settingsRepository.setBookshelfGridView(json.optBoolean("bookshelfGridView"))
+        }
+        if (json.has("bookshelfGridColumns")) {
+            settingsRepository.setBookshelfGridColumns(json.optInt("bookshelfGridColumns"))
         }
         if (json.has("customChapterRules")) {
             settingsRepository.setCustomChapterRules(json.stringList("customChapterRules"))

@@ -62,6 +62,7 @@ class SettingsRepositoryImpl(
         val AUTO_PAGE_SPEED_PX = floatPreferencesKey("auto_page_speed_px")
         val PANEL_SCREEN_OFF = booleanPreferencesKey("panel_screen_off")
         val BOOKSHELF_GRID_VIEW = booleanPreferencesKey("bookshelf_grid_view")
+        val BOOKSHELF_GRID_COLUMNS = intPreferencesKey("bookshelf_grid_columns")
         val BOOKSHELF_SORT = stringPreferencesKey("bookshelf_sort")
         val CUSTOM_CHAPTER_RULES = stringPreferencesKey("custom_chapter_rules")
         val AD_CLEAN_RULES = stringPreferencesKey("ad_clean_rules")
@@ -142,6 +143,8 @@ class SettingsRepositoryImpl(
                 autoPageSpeedPx = prefs[Keys.AUTO_PAGE_SPEED_PX] ?: defaults.autoPageSpeedPx,
                 panelScreenOff = prefs[Keys.PANEL_SCREEN_OFF] ?: defaults.panelScreenOff,
                 bookshelfGridView = prefs[Keys.BOOKSHELF_GRID_VIEW] ?: defaults.bookshelfGridView,
+                bookshelfGridColumns = prefs[Keys.BOOKSHELF_GRID_COLUMNS]
+                    ?: defaults.bookshelfGridColumns,
                 bookshelfSort = enumOrDefault(prefs[Keys.BOOKSHELF_SORT], defaults.bookshelfSort),
                 customChapterRules = decodeCustomChapterRules(prefs[Keys.CUSTOM_CHAPTER_RULES]),
                 adCleanRules = decodeRuleList(prefs[Keys.AD_CLEAN_RULES]),
@@ -341,6 +344,12 @@ class SettingsRepositoryImpl(
 
     override suspend fun setBookshelfGridView(gridView: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.BOOKSHELF_GRID_VIEW] = gridView }
+    }
+
+    override suspend fun setBookshelfGridColumns(columns: Int) {
+        context.readingPreferencesStore.edit {
+            it[Keys.BOOKSHELF_GRID_COLUMNS] = if (columns <= 0) 0 else columns.coerceIn(2, 5)
+        }
     }
 
     override suspend fun setBookshelfSort(sort: BookshelfSort) {

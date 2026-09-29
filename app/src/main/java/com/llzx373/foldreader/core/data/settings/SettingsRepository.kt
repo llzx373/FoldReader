@@ -44,6 +44,8 @@ interface SettingsRepository {
     suspend fun setAutoPageSpeedPx(pxPerSecond: Float)
     suspend fun setPanelScreenOff(enabled: Boolean)
     suspend fun setBookshelfGridView(gridView: Boolean)
+    /** 书架网格每行本数：0 = 自动，2~5 = 固定列数。 */
+    suspend fun setBookshelfGridColumns(columns: Int)
     suspend fun setBookshelfSort(sort: BookshelfSort)
     suspend fun setCustomChapterRules(rules: List<String>)
     suspend fun setAdCleanRules(rules: List<String>)

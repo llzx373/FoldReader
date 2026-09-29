@@ -98,6 +98,11 @@ data class ReadingPreferences(
     val autoIndentEnabled: Boolean = true,
     val normalizeWhitespaceEnabled: Boolean = false,
     val bookshelfGridView: Boolean = true,
+    /**
+     * 书架网格每行本数：0 = 自动（按窗口宽度自适应），2~5 = 固定列数。
+     * 自动档的最小列宽由 `BookshelfScreen` 按宽度类别给（COMPACT/MEDIUM/EXPANDED）。
+     */
+    val bookshelfGridColumns: Int = 0,
     val bookshelfSort: BookshelfSort = BookshelfSort.IMPORT_TIME,
     val customChapterRules: List<String> = emptyList(),
     val adCleanRules: List<String> = emptyList(),

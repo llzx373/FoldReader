@@ -103,6 +103,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookEntity
@@ -111,6 +114,7 @@ import com.llzx373.foldreader.core.data.db.BookSource
 import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.needsContentPreparation
 import com.llzx373.foldreader.core.data.settings.BookshelfSort
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.debug.ReturnTrace
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.core.foldable.WidthCategory
@@ -143,6 +147,7 @@ fun BookshelfScreen(
     val books by viewModel.books.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val gridView by viewModel.gridView.collectAsState()
+    val gridColumns by viewModel.gridColumns.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val importState by viewModel.importState.collectAsState()
@@ -254,11 +259,18 @@ fun BookshelfScreen(
         )
     }
 
+    // 与 FoldReaderApp 的切回书架同理：只在界面可见（STARTED）时消费待导入 URI。
+    // 后台到达的 intent 先留在 StateFlow 里，回到前台重放出来再弹窗；若在后台就消费，
+    // 对话框排在不可见界面上，用户看到的就是「下次打开 App 才弹导入框」。
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
-        app.container.pendingImportUris.collect { incoming ->
-            if (incoming.isEmpty()) return@collect
-            app.container.pendingImportUris.value = emptyList()
-            importQueue.addAll(incoming)
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            app.container.pendingImportUris.collect { incoming ->
+                if (incoming.isEmpty()) return@collect
+                DiagnosticLog.line("open-with: 书架消费 ${incoming.size} 个待导入 URI")
+                app.container.pendingImportUris.value = emptyList()
+                importQueue.addAll(incoming)
+            }
         }
     }
 
@@ -525,6 +537,7 @@ fun BookshelfScreen(
                                             books = displayBooks,
                                             selectedIds = selectedIds,
                                             selectionMode = selectionMode,
+                                            columns = gridColumns,
                                             minColumnWidth = when (foldableUiState.widthCategory) {
                                                 WidthCategory.COMPACT -> 160.dp
                                                 WidthCategory.MEDIUM -> 140.dp
@@ -1270,6 +1283,7 @@ private fun BookGrid(
     books: List<BookWithProgress>,
     selectedIds: Set<Long>,
     selectionMode: Boolean,
+    columns: Int,
     minColumnWidth: Dp,
     onOpenBook: (bookId: Long, title: String) -> Unit,
     onToggleSelection: (Long) -> Unit,
@@ -1277,7 +1291,7 @@ private fun BookGrid(
     animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = minColumnWidth),
+        columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minColumnWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
