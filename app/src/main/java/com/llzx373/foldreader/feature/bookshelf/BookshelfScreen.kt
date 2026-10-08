@@ -207,6 +207,11 @@ fun BookshelfScreen(
     // M34 隐私锁：默认滤掉已隐藏的书，溢出菜单验证身份后才放行
     val showHidden by viewModel.showHidden.collectAsState()
     val appLockEnabled by viewModel.appLockEnabled.collectAsState()
+    // M34 书架全文搜索（索引开关开着才露出「全文」档）
+    val searchIndexEnabled by viewModel.searchIndexEnabled.collectAsState()
+    val fullTextResults by viewModel.fullTextResults.collectAsState()
+    val fullTextSearching by viewModel.fullTextSearching.collectAsState()
+    var searchFullTextMode by rememberSaveable { mutableStateOf(false) }
     val selectionMode = selectedIds.isNotEmpty()
     // 系列总览同样遵守隐藏口径：未验证身份时隐藏的书不进系列列表
     val visibleSeriesCatalog = remember(seriesCatalog, showHidden) {
@@ -429,8 +434,13 @@ fun BookshelfScreen(
                     title = {
                         OutlinedTextField(
                             value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("搜索书名 / 作者") },
+                            onValueChange = {
+                                searchQuery = it
+                                if (searchFullTextMode) viewModel.searchFullText(it)
+                            },
+                            placeholder = {
+                                Text(if (searchFullTextMode) "搜索正文（全文）" else "搜索书名 / 作者")
+                            },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -439,6 +449,8 @@ fun BookshelfScreen(
                         IconButton(onClick = {
                             searchActive = false
                             searchQuery = ""
+                            searchFullTextMode = false
+                            viewModel.clearFullTextResults()
                         }) {
                             Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
                         }
@@ -626,7 +638,41 @@ fun BookshelfScreen(
                                 onSeriesClick = { showSeriesDialog = true },
                             )
                         }
+                        // M34：全文搜索档位（索引开关开着才露出）；切档时按当前查询立即重搜
+                        if (searchActive && searchIndexEnabled) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            ) {
+                                FilterChip(
+                                    selected = !searchFullTextMode,
+                                    onClick = {
+                                        searchFullTextMode = false
+                                        viewModel.clearFullTextResults()
+                                    },
+                                    label = { Text("书名/作者") },
+                                )
+                                FilterChip(
+                                    selected = searchFullTextMode,
+                                    onClick = {
+                                        searchFullTextMode = true
+                                        viewModel.searchFullText(searchQuery)
+                                    },
+                                    label = { Text("全文") },
+                                )
+                            }
+                        }
                         when {
+                            // M34 全文模式：结果按书分组（命中数 + 上下文预览），完全顶替网格
+                            searchActive && searchFullTextMode -> FullTextSearchResults(
+                                searching = fullTextSearching,
+                                results = fullTextResults,
+                                query = searchQuery,
+                                onOpenHit = { bookId, offset, title ->
+                                    onOpenBookAt(bookId, offset, title)
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
                             displayBooks.isEmpty() && searchQuery.isNotBlank() -> Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -1642,4 +1688,105 @@ private fun bookshelfSortLabel(sort: BookshelfSort): String = when (sort) {
     BookshelfSort.IMPORT_TIME -> "按导入时间"
     BookshelfSort.TITLE -> "按书名"
     BookshelfSort.PROGRESS -> "按阅读进度"
+}
+
+
+/**
+ * M34 书架全文搜索结果：按书分组（命中数降序），每书最多 3 条上下文预览，
+ * 命中词在摘要里加粗；点书或点摘要都直跳阅读页对应偏移。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun FullTextSearchResults(
+    searching: Boolean,
+    results: List<com.llzx373.foldreader.core.search.ShelfSearchResult>?,
+    query: String,
+    onOpenHit: (bookId: Long, offset: Long, title: String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        query.isBlank() -> Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "输入关键词，搜索已索引书籍的正文",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        results == null && searching -> Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            LoadingIndicator()
+        }
+        results.isNullOrEmpty() -> Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (searching) "搜索中…" else "正文里没有命中「${query.trim()}」",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        else -> LazyColumn(
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(results, key = { it.bookId }) { result ->
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "${result.title} · ${result.totalHits} 处命中",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                result.previews.firstOrNull()
+                                    ?.let { onOpenHit(result.bookId, it.offset, result.title) }
+                            }
+                            .padding(vertical = 4.dp),
+                    )
+                    result.previews.forEach { hit ->
+                        Text(
+                            text = hitContextPreview(hit),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenHit(result.bookId, hit.offset, result.title) }
+                                .padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 命中上下文预览：命中词在摘要中加粗（[SearchHit] 已带摘要内命中区间）。 */
+@Composable
+private fun hitContextPreview(hit: com.llzx373.foldreader.core.format.SearchHit): androidx.compose.ui.text.AnnotatedString {
+    val color = MaterialTheme.colorScheme.primary
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append("…")
+        append(hit.context)
+        append("…")
+        // +1：开头的省略号占了一位
+        val start = hit.matchStartInContext + 1
+        val end = (start + hit.matchLength).coerceAtMost(length)
+        if (start < end) {
+            addStyle(
+                androidx.compose.ui.text.SpanStyle(
+                    color = color,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                ),
+                start,
+                end,
+            )
+        }
+    }
 }

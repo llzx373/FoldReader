@@ -198,6 +198,12 @@ data class ReadingPreferences(
      * 只锁冷启动，退后台不重复锁。隐藏书籍的「显示」入口也走同一验证。
      */
     val appLockEnabled: Boolean = false,
+    /**
+     * M34：书架全文搜索索引开关。开启后后台为可解析文本的书（TXT/Markdown 原文件、
+     * 有清洗/压平副本的格式）建纯文本副本索引（filesDir/search_index/），
+     * 书架搜索栏多出「全文」模式；关闭即清空索引目录。
+     */
+    val bookshelfSearchIndexEnabled: Boolean = false,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

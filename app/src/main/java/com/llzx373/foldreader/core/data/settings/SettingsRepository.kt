@@ -111,4 +111,6 @@ interface SettingsRepository {
     suspend fun setDailyReadingGoalMinutes(minutes: Int)
     /** M34：隐私锁（应用锁）开关。 */
     suspend fun setAppLockEnabled(enabled: Boolean)
+    /** M34：书架全文搜索索引开关；关闭时索引目录由容器侧清空。 */
+    suspend fun setBookshelfSearchIndexEnabled(enabled: Boolean)
 }

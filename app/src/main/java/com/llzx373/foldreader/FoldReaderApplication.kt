@@ -43,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -79,6 +80,9 @@ class AppContainer(context: Context) {
     val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
     /** 页边界缓存目录（改版式会生成多份文件，删书时按 bookId 清理）。 */
     val pageBoundsDir = File(context.filesDir, "page_bounds")
+    /** M34 书架全文搜索的文本副本索引目录（`<bookId>.<sig>.txt`）。 */
+    val bookshelfSearchIndex =
+        com.llzx373.foldreader.core.search.BookshelfSearchIndex(File(context.filesDir, "search_index"))
     /**
      * 源文件副本目录（`<原文内容哈希>.<ext>`）。
      *
@@ -1164,6 +1168,70 @@ class AppContainer(context: Context) {
             runCatching { autoBackupRunner.runIfDue() }
         }
         startWidgetSync()
+        startSearchIndexSync()
+    }
+
+    /**
+     * M34 书架全文搜索的后台索引：开关开着才跑——为缺索引/签名过期的书建文本副本
+     * （TXT/Markdown 原文件按编码解码；清洗副本/压平产物直接读，即阅读器读的同一份），
+     * 清掉孤儿文件（书删了或变得不可索引）。开关关掉即清空索引目录。
+     * 书架签名（id + 内容哈希 + 副本路径）变化触发重同步，导入/重洗/删书都被覆盖。
+     */
+    private fun startSearchIndexSync() {
+        maintenanceScope.launch {
+            kotlinx.coroutines.flow.combine(
+                settingsRepository.preferences.map { it.bookshelfSearchIndexEnabled },
+                bookshelfRepository.observeBookshelf()
+                    .map { books -> books.map { Triple(it.id, it.contentHash, it.cleanedFilePath) } },
+            ) { enabled, sig -> enabled to sig }
+                .distinctUntilChanged()
+                .collectLatest { (enabled, _) ->
+                    runCatching {
+                        if (enabled) syncBookshelfSearchIndex() else bookshelfSearchIndex.clear()
+                    }
+                }
+        }
+    }
+
+    /** M34：设置页「清除索引」按钮入口（后台线程清空；索引会随后台同步按需重建）。 */
+    fun clearSearchIndex() {
+        maintenanceScope.launch { bookshelfSearchIndex.clear() }
+    }
+
+    /** 索引一次全量同步；失败的书跳过（下次触发再试），不中断整轮。 */
+    suspend fun syncBookshelfSearchIndex() = withContext(Dispatchers.IO) {
+        val books = bookshelfRepository.observeBookshelf().first()
+        val wanted = HashSet<String>()
+        for (book in books) {
+            val fileName = bookshelfSearchIndex.signatureOf(book) ?: continue
+            wanted += fileName
+            if (bookshelfSearchIndex.currentFile(book.id)?.name == fileName) continue
+            val text = runCatching { readIndexText(book) }.getOrNull() ?: continue
+            bookshelfSearchIndex.write(book.id, fileName, text)
+        }
+        // 孤儿清理：文件不在「应有」名单里就删（书删了/重洗换签名/格式变得不可索引）
+        val indexDir = File(appContext.filesDir, "search_index")
+        indexDir.listFiles()
+            ?.filter { it.name !in wanted }
+            ?.forEach { it.delete() }
+        Unit
+    }
+
+    private fun readIndexText(book: com.llzx373.foldreader.core.data.db.BookEntity): String? {
+        val max = com.llzx373.foldreader.core.search.BookshelfSearchIndex.MAX_SOURCE_BYTES
+        val cleaned = book.cleanedFilePath
+        if (cleaned != null) {
+            val file = File(cleaned)
+            if (!file.isFile || file.length() > max) return null
+            return file.readText()
+        }
+        if (book.format != BookFormat.TXT && book.format != BookFormat.MARKDOWN) return null
+        val channel = UriChannels.open(appContext, Uri.parse(book.fileUri))
+        channel.use {
+            if (it.size() > max) return null
+            val bytes = java.nio.channels.Channels.newInputStream(it).readBytes()
+            return com.llzx373.foldreader.core.search.decodeIndexText(bytes, book.encoding)
+        }
     }
 
     /**

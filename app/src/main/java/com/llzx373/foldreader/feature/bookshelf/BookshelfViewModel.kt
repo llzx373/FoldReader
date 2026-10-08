@@ -104,6 +104,8 @@ class BookshelfViewModel(
     private val cleanProfileFactory: CleanProfileFactory,
     /** 重建目录（作废索引 → 重扫 → 落库），实现挂在容器上，与 M15 AI 章节规则共用。 */
     private val rebuildBookChapters: suspend (Long) -> Unit,
+    /** M34 书架全文搜索的文本副本索引（开关关着时不会被用到）。 */
+    private val searchIndex: com.llzx373.foldreader.core.search.BookshelfSearchIndex,
 ) : ViewModel() {
     val books: StateFlow<List<BookWithProgress>> = combine(
         bookshelfRepository.observeBookshelfWithProgress(),
@@ -142,6 +144,58 @@ class BookshelfViewModel(
     val appLockEnabled: StateFlow<Boolean> = settingsRepository.preferences
         .map { it.appLockEnabled }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** M34：书架全文搜索索引开关（开着时搜索栏多出「全文」模式）。 */
+    val searchIndexEnabled: StateFlow<Boolean> = settingsRepository.preferences
+        .map { it.bookshelfSearchIndexEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** M34 全文搜索：当前结果（按命中数降序）；null = 未在搜。 */
+    private val _fullTextResults =
+        MutableStateFlow<List<com.llzx373.foldreader.core.search.ShelfSearchResult>?>(null)
+    val fullTextResults: StateFlow<List<com.llzx373.foldreader.core.search.ShelfSearchResult>?> =
+        _fullTextResults.asStateFlow()
+
+    private val _fullTextSearching = MutableStateFlow(false)
+    val fullTextSearching: StateFlow<Boolean> = _fullTextSearching.asStateFlow()
+
+    private var fullTextJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 全文搜索（仅索引开关开着时有意义；搜索范围与书架可见口径一致——隐藏书不搜，
+     * 除非当前已「显示隐藏的书籍」）。空查询清空结果；新书query取消上一次在跑的。
+     */
+    fun searchFullText(query: String) {
+        fullTextJob?.cancel()
+        if (query.isBlank()) {
+            _fullTextResults.value = null
+            _fullTextSearching.value = false
+            return
+        }
+        fullTextJob = viewModelScope.launch {
+            _fullTextSearching.value = true
+            // 输入连发去抖：等手停下来再扫
+            kotlinx.coroutines.delay(300)
+            val books = books.value
+                .filter { showHidden.value || !it.book.hidden }
+                .map { it.book }
+            val results = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.llzx373.foldreader.core.search.searchShelfIndex(
+                        searchIndex, books, query,
+                    )
+                }.getOrDefault(emptyList())
+            }
+            _fullTextResults.value = results
+            _fullTextSearching.value = false
+        }
+    }
+
+    fun clearFullTextResults() {
+        fullTextJob?.cancel()
+        _fullTextResults.value = null
+        _fullTextSearching.value = false
+    }
 
     /** M34：批量隐藏/取消隐藏。 */
     fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
@@ -695,6 +749,7 @@ class BookshelfViewModel(
                     reclean = container.recleanBookUseCase,
                     cleanProfileFactory = container.cleanProfileFactory,
                     rebuildBookChapters = container::rebuildBookChapters,
+                    searchIndex = container.bookshelfSearchIndex,
                 )
             }
         }

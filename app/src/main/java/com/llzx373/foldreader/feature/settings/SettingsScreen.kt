@@ -37,6 +37,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -798,6 +799,40 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     },
                     onSelect = { index ->
                         viewModel.updateBookshelfGridColumns(if (index == 0) 0 else index + 1)
+                    },
+                )
+            }
+            // M34：书架全文搜索（可选开关；关掉即清空索引目录，由容器侧同步负责）
+            SwitchSetting(
+                "书架全文搜索（为正文建索引）",
+                prefs.bookshelfSearchIndexEnabled,
+                viewModel::updateBookshelfSearchIndexEnabled,
+            )
+            if (prefs.bookshelfSearchIndexEnabled) {
+                // 索引占用现算（遍历目录求和，量小）；「清除索引」后重新量一遍
+                var searchIndexBytes by remember { mutableStateOf<Long?>(null) }
+                LaunchedEffect(searchIndexBytes == null) {
+                    if (searchIndexBytes == null) {
+                        searchIndexBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            app.container.bookshelfSearchIndex.totalBytes()
+                        }
+                    }
+                }
+                ListItem(
+                    headlineContent = { Text("搜索索引") },
+                    supportingContent = {
+                        Text(
+                            searchIndexBytes?.let { "已占用 ${it / 1024} KB（TXT/Markdown 与已解析格式参与索引）" }
+                                ?: "统计中…",
+                        )
+                    },
+                    trailingContent = {
+                        TextButton(onClick = {
+                            app.container.clearSearchIndex()
+                            searchIndexBytes = null
+                        }) {
+                            Text("清除索引")
+                        }
                     },
                 )
             }

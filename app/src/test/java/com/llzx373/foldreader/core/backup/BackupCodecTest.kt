@@ -1090,6 +1090,7 @@ class BackupCodecTest {
 
         override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
         override suspend fun setAppLockEnabled(enabled: Boolean) = Unit
+        override suspend fun setBookshelfSearchIndexEnabled(enabled: Boolean) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) =
             update { copy(autoBackupLastRunAt = timestamp) }
 

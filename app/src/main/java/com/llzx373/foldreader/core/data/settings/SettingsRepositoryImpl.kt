@@ -105,6 +105,7 @@ class SettingsRepositoryImpl(
         val AUTO_BACKUP_LAST_RUN_AT = longPreferencesKey("auto_backup_last_run_at")
         val DAILY_READING_GOAL_MINUTES = intPreferencesKey("daily_reading_goal_minutes")
         val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
+        val BOOKSHELF_SEARCH_INDEX_ENABLED = booleanPreferencesKey("bookshelf_search_index_enabled")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -218,6 +219,8 @@ class SettingsRepositoryImpl(
                 dailyReadingGoalMinutes = prefs[Keys.DAILY_READING_GOAL_MINUTES]
                     ?: defaults.dailyReadingGoalMinutes,
                 appLockEnabled = prefs[Keys.APP_LOCK_ENABLED] ?: defaults.appLockEnabled,
+                bookshelfSearchIndexEnabled = prefs[Keys.BOOKSHELF_SEARCH_INDEX_ENABLED]
+                    ?: defaults.bookshelfSearchIndexEnabled,
             )
         }
 
@@ -588,5 +591,9 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAppLockEnabled(enabled: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.APP_LOCK_ENABLED] = enabled }
+    }
+
+    override suspend fun setBookshelfSearchIndexEnabled(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.BOOKSHELF_SEARCH_INDEX_ENABLED] = enabled }
     }
 }
