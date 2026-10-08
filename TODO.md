@@ -40,14 +40,23 @@
 
 ---
 
-## M26 TTS 增强（P0，README 自列扩展点）
+## M26 TTS 增强（P0，README 自列扩展点）✅ 已完成（2026-10-08）
 
 **验收标准**：睡眠定时到点自动停止（含「本章读完」档）；语速 / 音调调节即时生效；外文书可按书切换 TTS 语言，语种数据缺失有降级提示。
 
-- [ ] 睡眠定时：15/30/45/60 分钟 + 「本章读完」；通知栏显示剩余时间；到时停队列并退出前台服务
-- [ ] 语速 / 音调：设置页全局默认值 + 朗读中面板临时调整（当次生效）
-- [ ] 按书 TTS 语言：书籍详情可选（跟随全书翻译目标语言联动）；设备缺对应 TTS 数据时复用现有降级提示口径
-- [ ] 译文朗读：译本已有完整 content.txt + .toc，用译本自身偏移坐标系独立走 TTS 链路（M19 禁用仅因锚点是原文坐标系）
+- [x] 睡眠定时：15/30/45/60 分钟 + 「本章读完」；通知栏显示剩余时间；到时停队列并退出前台服务
+- [x] 语速 / 音调：设置页全局默认值 + 朗读中面板临时调整（当次生效）
+- [x] 按书 TTS 语言：书籍详情可选（跟随全书翻译目标语言联动）；设备缺对应 TTS 数据时复用现有降级提示口径
+- [x] 译文朗读：译本已有完整 content.txt + .toc，用译本自身偏移坐标系独立走 TTS 链路（M19 禁用仅因锚点是原文坐标系）
+
+验收记录（2026-10-08）：
+
+- 睡眠定时：`core/tts/TtsSleepTimer`（纯 JVM 状态机：档位、deadline、剩余分钟向上取整、文案）；`ReaderTtsController` 分钟档 Handler 到点精确停 + 30s tick 兜底刷新文案，「读完本章」与自然播完同口径（speakFromHere/speakChapter 范围本就截到章末）；通知 contentText 追加「定时：…」（`NotificationSig` 替代 Triple）。
+- 语速/音调：`core/tts/TtsSpeech`（纯 JVM，0.5~2.0、clamp、NaN 回落默认）；全局默认存 DataStore（设置页「听书朗读」区滑杆），朗读中菜单滑杆只调当次值、不写回设置；speak() 每次从全局偏好重取。备份导出/导入同步两字段（BACKUP_VERSION 不升，导入容错）。
+- 按书语言：`core/tts/TtsLanguage`（纯 JVM：简/繁/英/日 + `resolveTtsLanguage` 优先级——按书显式 > 译文视角跟随译本语言 > 默认简体中文）；存 `book_prefs` 新可空列 `ttsLang`（DB v7→v8，`MIGRATION_7_8`，老行落 NULL）——项目惯例是「随书独立演化的项进 BookPrefsEntity」，比 DataStore 散存 map 更一致，且随备份走。入口在书籍详情（非漫画）「朗读语言」行。语言检查从引擎 init 移到 `startQueueFrom`：缺语音数据按语言动态报「当前设备没有「X」的语音数据」，不再永久锁死引擎。
+- 译文朗读：阅读器菜单 TTS 组不再对译文视角隐藏（speakRange 的 content/chapters 本就是当前坐标系，天然兼容）；`switchToOriginal` 补对称的停 TTS（坐标系不可互带）。
+- 测试：`testLiteDebugUnitTest` 全绿（新增 13 用例：TtsSleepTimerTest 5 + TtsSpeechTest 3 + TtsLanguageTest 5，另 DatabaseMigrationTest 补 v7→v8）。
+- 真机待验：睡眠定时到点停与通知剩余时间刷新；各语言语音数据缺失提示（尤其英/日）；朗读中语速/音调滑杆即时生效；译文朗读的翻页联动与切回原/译时的停止行为。
 
 ---
 
