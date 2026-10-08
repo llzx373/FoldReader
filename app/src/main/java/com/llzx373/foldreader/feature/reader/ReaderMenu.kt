@@ -518,68 +518,67 @@ fun ReaderMenuPanel(
                 clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
                 clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
             }
-            if (!viewModeTranslated) {
-                ButtonGroup(
-                    overflowIndicator = {},
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (ttsPlaying) {
-                        clickableItem(
-                            onClick = onToggleSpeakPause,
-                            label = if (ttsPaused) "继续朗读" else "暂停朗读",
-                            weight = 1f)
-                        clickableItem(
-                            onClick = onSleepTimer,
-                            label = "定时：${ttsSleepText ?: "关"}",
-                            weight = 1f)
-                        clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
-                    } else {
-                        clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
-                        clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
-                    }
-                }
-                // 朗读中的语速/音调：当次临时调整，不写回全局设置
+            // M26：TTS 在译文视角同样可用（译本坐标系天然兼容，语言跟随译本）
+            ButtonGroup(
+                overflowIndicator = {},
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 if (ttsPlaying) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("语速", style = MaterialTheme.typography.labelMedium)
-                        Slider(
-                            value = ttsRateDraft ?: ttsSpeechRate,
-                            onValueChange = { ttsRateDraft = it },
-                            onValueChangeFinished = {
-                                ttsRateDraft?.let(onTtsSpeechRate)
-                                ttsRateDraft = null
-                            },
-                            valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
-                            steps = 14,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 8.dp),
-                        )
-                        Text(
-                            text = TtsSpeech.formatRate(ttsRateDraft ?: ttsSpeechRate),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("音调", style = MaterialTheme.typography.labelMedium)
-                        Slider(
-                            value = ttsPitchDraft ?: ttsPitch,
-                            onValueChange = { ttsPitchDraft = it },
-                            onValueChangeFinished = {
-                                ttsPitchDraft?.let(onTtsPitch)
-                                ttsPitchDraft = null
-                            },
-                            valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
-                            steps = 14,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 8.dp),
-                        )
-                        Text(
-                            text = TtsSpeech.formatPitch(ttsPitchDraft ?: ttsPitch),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
+                    clickableItem(
+                        onClick = onToggleSpeakPause,
+                        label = if (ttsPaused) "继续朗读" else "暂停朗读",
+                        weight = 1f)
+                    clickableItem(
+                        onClick = onSleepTimer,
+                        label = "定时：${ttsSleepText ?: "关"}",
+                        weight = 1f)
+                    clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
+                } else {
+                    clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
+                    clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+                }
+            }
+            // 朗读中的语速/音调：当次临时调整，不写回全局设置
+            if (ttsPlaying) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("语速", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = ttsRateDraft ?: ttsSpeechRate,
+                        onValueChange = { ttsRateDraft = it },
+                        onValueChangeFinished = {
+                            ttsRateDraft?.let(onTtsSpeechRate)
+                            ttsRateDraft = null
+                        },
+                        valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
+                        steps = 14,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = TtsSpeech.formatRate(ttsRateDraft ?: ttsSpeechRate),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("音调", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = ttsPitchDraft ?: ttsPitch,
+                        onValueChange = { ttsPitchDraft = it },
+                        onValueChangeFinished = {
+                            ttsPitchDraft?.let(onTtsPitch)
+                            ttsPitchDraft = null
+                        },
+                        valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
+                        steps = 14,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                    )
+                    Text(
+                        text = TtsSpeech.formatPitch(ttsPitchDraft ?: ttsPitch),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
             if (translateAvailable) {

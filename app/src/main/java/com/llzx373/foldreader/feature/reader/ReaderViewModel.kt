@@ -740,7 +740,7 @@ class ReaderViewModel(
                 val source = content ?: return@launch
                 val (unitIndex, fraction) = locateUnit(units, anchorOffset.value) ?: (0 to 0f)
                 val targetAnchor = offsetInTranslated(translatedChapters, unitIndex, fraction)
-                // 朗读锚点在原坐标系：切模式前停掉（译文模式 TTS 禁用）
+                // 朗读锚点在原坐标系：坐标系切换前停掉（原/译偏移不可互带，M26 起译文侧可重新起读）
                 if (ttsState.value.bookId == bookId && ttsState.value.playing) ttsController.stop()
                 originalContent = source
                 originalChapters = chapterList()
@@ -778,6 +778,8 @@ class ReaderViewModel(
                 val (unitIndex, fraction) =
                     locateTranslatedUnit(chapterList(), anchorOffset.value) ?: (0 to 0f)
                 val targetAnchor = offsetInOriginal(_translationUnits.value, unitIndex, fraction)
+                // 朗读锚点在译文坐标系：坐标系切换前停掉（译/原偏移不可互带，与 switchToTranslated 对称）
+                if (ttsState.value.bookId == bookId && ttsState.value.playing) ttsController.stop()
                 restoreOriginalContent()
                 anchorOffset.value = targetAnchor.coerceIn(0L, original.charCount)
                 contentRevision.update { it + 1 }
