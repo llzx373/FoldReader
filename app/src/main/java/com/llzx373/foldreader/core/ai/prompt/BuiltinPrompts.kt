@@ -21,6 +21,7 @@ object BuiltinPrompts {
     val chapterSummary = BuiltinPrompt("章节摘要", ChapterSummaryPrompt.SYSTEM_PROMPT)
     val bookOutline = BuiltinPrompt("全书大纲", BookOutlinePrompt.SYSTEM_PROMPT)
     val bookQa = BuiltinPrompt("问书", BookQaPrompt.SYSTEM_PROMPT)
+    val proofread = BuiltinPrompt("AI 校对", ProofreadPrompt.SYSTEM_PROMPT)
 
     val all: List<BuiltinPrompt> =
         listOf(
@@ -36,5 +37,6 @@ object BuiltinPrompts {
             chapterSummary,
             bookOutline,
             bookQa,
+            proofread,
         )
 }
