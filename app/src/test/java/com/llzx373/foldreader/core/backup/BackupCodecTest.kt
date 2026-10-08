@@ -751,6 +751,15 @@ class BackupCodecTest {
         override suspend fun setOcrRecLang(modelId: String) =
             update { copy(ocrRecLang = modelId) }
 
+        override suspend fun setWebDavBaseUrl(baseUrl: String) =
+            update { copy(webdavBaseUrl = baseUrl) }
+
+        override suspend fun setWebDavUsername(username: String) =
+            update { copy(webdavUsername = username) }
+
+        override suspend fun setWebDavConfirmed(confirmed: Boolean) =
+            update { copy(webdavConfirmed = confirmed) }
+
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()
         }

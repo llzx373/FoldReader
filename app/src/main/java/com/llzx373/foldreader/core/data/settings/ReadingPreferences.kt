@@ -163,6 +163,12 @@ data class ReadingPreferences(
      * 空串 = 自动（优先中文模型——中日英混排覆盖最好——未导入则取第一个已导入的）。
      */
     val ocrRecLang: String = "",
+    /** 以下为 WebDAV 备份（M25）；密码不走这里，由 WebDavCredentialStore 加密托管。 */
+    /** WebDAV 备份目录的完整地址；空串 = 未配置（未配置时零网络请求）。 */
+    val webdavBaseUrl: String = "",
+    val webdavUsername: String = "",
+    /** M25：WebDAV 首次连接的一次性明示确认；确认后不再弹。 */
+    val webdavConfirmed: Boolean = false,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

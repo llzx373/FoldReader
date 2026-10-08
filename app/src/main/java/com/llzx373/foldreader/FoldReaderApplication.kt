@@ -140,20 +140,23 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     /** AI API key 加密存储（AndroidKeyStore AES/GCM）；明文不出存储边界。 */
     val credentialStore = com.llzx373.foldreader.core.ai.android.CredentialStore(appContext)
+    /** WebDAV 密码加密存储（M25，口径同 AI key：AndroidKeyStore AES/GCM，不进备份与日志）。 */
+    val webDavCredentialStore =
+        com.llzx373.foldreader.core.backup.webdav.android.WebDavCredentialStore(appContext)
     /** AI 出站内容台账：设置页「外发历史」展示的记录来源。 */
     val aiContentGate = com.llzx373.foldreader.core.ai.gate.AiContentGate(
         File(appContext.filesDir, "ai_outbound_history.json"),
     )
-    // v2.6 约束：未配置 API key 时不创建任何网络组件。
-    // client 惰性单例、进程内共享；Provider 廉价，每次按当前配置新建。
+    // v2.6 约束：未配置任何网络功能（AI / WebDAV）时不创建任何网络组件。
+    // client 惰性单例、进程内共享（M25 WebDAV 复用同一栈）；Provider 廉价，每次按当前配置新建。
     @Volatile
-    private var aiHttpClient: okhttp3.OkHttpClient? = null
+    private var sharedHttpClient: okhttp3.OkHttpClient? = null
 
-    private fun sharedAiHttpClient(): okhttp3.OkHttpClient =
-        aiHttpClient ?: synchronized(this) {
-            aiHttpClient ?: com.llzx373.foldreader.core.ai.AiProviderFactory
+    private fun sharedOkHttpClient(): okhttp3.OkHttpClient =
+        sharedHttpClient ?: synchronized(this) {
+            sharedHttpClient ?: com.llzx373.foldreader.core.ai.AiProviderFactory
                 .defaultClient(timeoutSeconds = 60)
-                .also { aiHttpClient = it }
+                .also { sharedHttpClient = it }
         }
 
     /**
@@ -199,7 +202,34 @@ class AppContainer(context: Context) {
                 baseUrl = prefs.aiBaseUrl,
                 apiKey = key,
             ),
-            sharedAiHttpClient(),
+            sharedOkHttpClient(),
+        )
+    }
+
+    /**
+     * WebDAV 功能可用性判据（M25）：已配地址 + 账号 + 已存密码。
+     * 只读配置与凭据，不触碰网络组件（OkHttpClient 仍只在真正传输时创建）。
+     */
+    suspend fun webDavConfigured(): Boolean {
+        val prefs = settingsRepository.preferences.first()
+        return prefs.webdavBaseUrl.isNotBlank() && prefs.webdavUsername.isNotBlank() &&
+            webDavCredentialStore.readPassword() != null
+    }
+
+    /**
+     * 按当前配置装配 WebDAV 客户端（M25）；未配置时返回 null，
+     * 且整个调用链不触碰网络组件（与 aiProvider 同一口径，client 与 AI 共享同一惰性单例）。
+     */
+    suspend fun webDavClient(): com.llzx373.foldreader.core.backup.webdav.WebDavClient? {
+        val prefs = settingsRepository.preferences.first()
+        if (prefs.webdavBaseUrl.isBlank() || prefs.webdavUsername.isBlank()) return null
+        val password = webDavCredentialStore.readPassword() ?: return null
+        return com.llzx373.foldreader.core.backup.webdav.WebDavClient(
+            baseUrl = prefs.webdavBaseUrl,
+            username = prefs.webdavUsername,
+            password = password,
+            client = sharedOkHttpClient(),
+            xmlParserFactory = { android.util.Xml.newPullParser() },
         )
     }
     /**
@@ -655,6 +685,14 @@ class AppContainer(context: Context) {
         bookPrefsDao = database.bookPrefsDao(),
         readingSessionDao = database.readingSessionDao(),
         glossaryTermDao = database.glossaryTermDao(),
+    )
+    /** WebDAV 备份编排（M25）：编解码复用 backupManager，传输记账进外发历史台账。 */
+    val webDavBackupManager = com.llzx373.foldreader.core.backup.webdav.WebDavBackupManager(
+        exportJsonText = backupManager::exportJsonText,
+        importJsonText = backupManager::importFromText,
+        preview = { text -> com.llzx373.foldreader.core.backup.BackupManager.preview(text) },
+        clientFor = { webDavClient() },
+        gate = aiContentGate,
     )
     /** 漫画容器读取（zip 随机访问 / tar·7z·rar 解压缓存 / SAF 目录）。 */
     val comicArchiveFactory = com.llzx373.foldreader.core.comic.ComicArchiveFactory(

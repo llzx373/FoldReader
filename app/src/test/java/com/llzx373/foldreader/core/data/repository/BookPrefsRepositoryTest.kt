@@ -340,5 +340,8 @@ class BookPrefsRepositoryTest {
         override suspend fun setTranslationViewHintShown(shown: Boolean) = Unit
         override suspend fun setAiPricePerMillion(price: Double) = Unit
         override suspend fun setOcrRecLang(modelId: String) = Unit
+        override suspend fun setWebDavBaseUrl(baseUrl: String) = Unit
+        override suspend fun setWebDavUsername(username: String) = Unit
+        override suspend fun setWebDavConfirmed(confirmed: Boolean) = Unit
     }
 }

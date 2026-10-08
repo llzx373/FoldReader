@@ -41,6 +41,23 @@ class BackupManager(
         val restoredGlossary: Int = 0,
     )
 
+    /** 恢复前预览（M25）：只解析元信息不落库；非备份文件/版本不认时抛异常。 */
+    data class BackupPreview(
+        val version: Int,
+        val bookCount: Int,
+        val exportedAt: Long,
+    )
+
+    /** 导出为 JSON 文本：WebDAV 上传与本地自动备份共用，与 [exportTo] 同一编解码路径。 */
+    suspend fun exportJsonText(): String = withContext(Dispatchers.IO) {
+        codec.exportJson().toString()
+    }
+
+    /** 从 JSON 文本导入：WebDAV 下载恢复走这里，与 [importFrom] 同一编解码路径。 */
+    suspend fun importFromText(text: String): ImportResult = withContext(Dispatchers.IO) {
+        codec.importJson(text)
+    }
+
     suspend fun exportTo(uri: Uri) = withContext(Dispatchers.IO) {
         val root = codec.exportJson()
         val stream = context.contentResolver.openOutputStream(uri)
@@ -63,5 +80,17 @@ class BackupManager(
          * 导入侧对老版本仍然兼容——新字段缺失即按 null / 默认值处理。
          */
         const val BACKUP_VERSION = 7
+
+        /** 解析备份元信息供恢复前预览（M25）；不碰数据库，纯函数可测。 */
+        fun preview(text: String): BackupPreview {
+            val root = org.json.JSONObject(text)
+            val version = root.optInt("version", 0)
+            require(version >= 1) { "备份版本不支持" }
+            return BackupPreview(
+                version = version,
+                bookCount = root.optJSONArray("books")?.length() ?: 0,
+                exportedAt = root.optLong("exportedAt"),
+            )
+        }
     }
 }

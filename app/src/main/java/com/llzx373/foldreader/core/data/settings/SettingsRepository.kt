@@ -86,4 +86,9 @@ interface SettingsRepository {
     suspend fun setAiPricePerMillion(price: Double)
     /** M21：OCR 识别语言（rec 模型 id；空串 = 自动）。 */
     suspend fun setOcrRecLang(modelId: String)
+    /** M25：WebDAV 备份目录完整地址；密码由 WebDavCredentialStore 托管。 */
+    suspend fun setWebDavBaseUrl(baseUrl: String)
+    suspend fun setWebDavUsername(username: String)
+    /** M25：WebDAV 首次连接的一次性明示确认（幂等）。 */
+    suspend fun setWebDavConfirmed(confirmed: Boolean)
 }

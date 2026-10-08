@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 class SettingsViewModel(
@@ -46,6 +47,11 @@ class SettingsViewModel(
     private val credentialStore: CredentialStore,
     private val aiContentGate: AiContentGate,
     private val aiProvider: suspend () -> AiProvider?,
+    /** M25：WebDAV 密码的加密存储与客户端装配（未配置时 provider 返回 null、零网络组件）。 */
+    private val webDavCredentialStore: com.llzx373.foldreader.core.backup.webdav.android.WebDavCredentialStore,
+    private val webDavClientProvider: suspend () -> com.llzx373.foldreader.core.backup.webdav.WebDavClient?,
+    /** M25：上传/列表/下载恢复编排（无状态，装配单例）。 */
+    private val webDavBackupManager: com.llzx373.foldreader.core.backup.webdav.WebDavBackupManager,
     /** M21：OCR/气泡模型管理（导入/校验/删除/就绪状态）。 */
     private val modelManager: com.llzx373.foldreader.core.ai.android.ModelManager,
     /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
@@ -267,6 +273,136 @@ class SettingsViewModel(
     /** 出站历史直接读台账（最新在前由界面负责反转）。 */
     fun outboundHistory(): List<AiContentGate.OutboundRecord> = aiContentGate.history()
 
+    // ---- WebDAV 备份（M25）----
+
+    fun updateWebDavBaseUrl(baseUrl: String) = launch { settingsRepository.setWebDavBaseUrl(baseUrl) }
+    fun updateWebDavUsername(username: String) = launch { settingsRepository.setWebDavUsername(username) }
+
+    /** 首次连接的一次性明示确认落账（幂等）。 */
+    fun confirmWebDav() = launch { settingsRepository.setWebDavConfirmed(true) }
+
+    private val _webDavPasswordConfigured = MutableStateFlow(webDavCredentialStore.readPassword() != null)
+    val webDavPasswordConfigured: StateFlow<Boolean> = _webDavPasswordConfigured.asStateFlow()
+
+    /** 密码只交给 WebDavCredentialStore，不落任何状态与日志。 */
+    fun saveWebDavPassword(password: String) {
+        webDavCredentialStore.savePassword(password)
+        _webDavPasswordConfigured.value = true
+    }
+
+    fun clearWebDavPassword() {
+        webDavCredentialStore.clear()
+        _webDavPasswordConfigured.value = false
+    }
+
+    /** WebDAV 测试连接的状态；密码永远不进入这里（也不进日志）。 */
+    sealed interface WebDavTestState {
+        data object Running : WebDavTestState
+        data class Success(val createdDirectory: Boolean) : WebDavTestState
+        data class Failure(val message: String) : WebDavTestState
+    }
+
+    private val _webDavTestState = MutableStateFlow<WebDavTestState?>(null)
+    val webDavTestState: StateFlow<WebDavTestState?> = _webDavTestState.asStateFlow()
+
+    fun testWebDavConnection() {
+        launch {
+            _webDavTestState.value = WebDavTestState.Running
+            val client = webDavClientProvider()
+            if (client == null) {
+                _webDavTestState.value = WebDavTestState.Failure("请完成服务器地址、账号与密码配置")
+                return@launch
+            }
+            try {
+                val result = withContext(kotlinx.coroutines.Dispatchers.IO) { client.testConnection() }
+                _webDavTestState.value = WebDavTestState.Success(result.createdDirectory)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: com.llzx373.foldreader.core.backup.webdav.WebDavException) {
+                _webDavTestState.value = WebDavTestState.Failure(e.message ?: "连接失败")
+            } catch (e: Exception) {
+                _webDavTestState.value = WebDavTestState.Failure("网络不可达或响应异常")
+            }
+        }
+    }
+
+    /** 远端备份列表状态；null = 尚未加载。 */
+    sealed interface WebDavListState {
+        data object Loading : WebDavListState
+        data class Ready(val entries: List<com.llzx373.foldreader.core.backup.webdav.WebDavEntry>) :
+            WebDavListState
+        data class Failed(val message: String) : WebDavListState
+    }
+
+    private val _webDavBackups = MutableStateFlow<WebDavListState?>(null)
+    val webDavBackups: StateFlow<WebDavListState?> = _webDavBackups.asStateFlow()
+
+    /** 上传中标记（界面据此禁用重复点击）。 */
+    private val _webDavUploading = MutableStateFlow(false)
+    val webDavUploading: StateFlow<Boolean> = _webDavUploading.asStateFlow()
+
+    fun uploadBackupToWebDav(onResult: (String?, String?) -> Unit) {
+        launch {
+            _webDavUploading.value = true
+            try {
+                val name = webDavBackupManager.upload()
+                onResult(name, null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(null, e.message ?: "上传失败")
+            } finally {
+                _webDavUploading.value = false
+            }
+        }
+    }
+
+    fun refreshWebDavBackups() {
+        launch {
+            _webDavBackups.value = WebDavListState.Loading
+            _webDavBackups.value = try {
+                WebDavListState.Ready(webDavBackupManager.listBackups())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                WebDavListState.Failed(e.message ?: "列表加载失败")
+            }
+        }
+    }
+
+    /** 恢复前预览：下载并解析元信息，成功后回调（预览 + 待确认恢复的原文）。 */
+    fun previewWebDavBackup(
+        name: String,
+        onResult: (BackupManager.BackupPreview?, String?, String?) -> Unit,
+    ) {
+        launch {
+            try {
+                val (preview, text) = webDavBackupManager.downloadForPreview(name)
+                onResult(preview, text, null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(null, null, e.message ?: "下载失败")
+            }
+        }
+    }
+
+    /** 确认恢复：走与本地导入相同的链路（contentHash 对齐既有书）。 */
+    fun restoreWebDavBackup(
+        backupText: String,
+        onResult: (BackupManager.ImportResult?, String?) -> Unit,
+    ) {
+        launch {
+            try {
+                onResult(webDavBackupManager.restore(backupText), null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(null, e.message ?: "恢复失败")
+            }
+        }
+    }
+
     fun importFont(uri: Uri, displayName: String?, onResult: (Boolean) -> Unit) {
         launch {
             val key = fontManager.import(uri, displayName)
@@ -350,6 +486,9 @@ class SettingsViewModel(
                     credentialStore = container.credentialStore,
                     aiContentGate = container.aiContentGate,
                     aiProvider = container::aiProvider,
+                    webDavCredentialStore = container.webDavCredentialStore,
+                    webDavClientProvider = container::webDavClient,
+                    webDavBackupManager = container.webDavBackupManager,
                     modelManager = container.modelManager,
                     clearAiDataAction = container::clearAiData,
                 )
