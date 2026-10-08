@@ -95,6 +95,9 @@ class AppContainer(context: Context) {
     /** 漫画翻译产物目录（M22）：`<bookId>/<page>.ocr.json`（气泡缓存）+ `<page>.<lang>.json`（译文）。 */
     val comicTranslateDir = File(context.filesDir, "comic_translate")
     val comicTranslationStore = com.llzx373.foldreader.core.translate.ComicTranslationStore(comicTranslateDir)
+    /** 词典目录（M28）：每部词典一个子目录（ifo + idx + dict 三件套，.dict.dz 导入时解压）。 */
+    val dictsDir = File(context.filesDir, "dicts").apply { mkdirs() }
+    val dictionaryStore = com.llzx373.foldreader.core.dict.DictionaryStore(dictsDir)
     /**
      * ONNX 会话层（M21）。对象本身很轻（会话全部惰性：模型未导入不创建 OrtEnvironment），
      * 但进程级共享一把锁，必须与阅读器同生命周期，所以挂容器单例。
@@ -495,6 +498,14 @@ class AppContainer(context: Context) {
     val fileBrowserRootsStore = FileBrowserRootsStore(context)
     /** SAF 目录访问（文件浏览器 / 目录批量导入 / 漫画目录容器共用）。 */
     val safTree = com.llzx373.foldreader.core.format.saf.SafTree(appContext)
+    /** 词典导入（M28）：SAF 目录 → 同名三件套 → filesDir/dicts/。 */
+    val dictionaryImporter = com.llzx373.foldreader.core.dict.android.DictionaryImporter(
+        appContext, safTree, dictionaryStore,
+    )
+    /** 查词服务（M28）：进程级单例（索引常驻内存），本地优先；AI 回落判据注入。 */
+    val dictionaryLookupService = com.llzx373.foldreader.core.dict.DictionaryLookupService(
+        dictsDir, aiAvailable = { aiConfigured() },
+    )
     val bookPrefsRepository = BookPrefsRepository(
         bookPrefsDao = database.bookPrefsDao(),
         settingsRepository = settingsRepository,

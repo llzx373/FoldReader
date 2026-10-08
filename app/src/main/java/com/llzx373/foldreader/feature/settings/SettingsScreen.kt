@@ -102,6 +102,8 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showAiHistoryDialog by remember { mutableStateOf(false) }
     var showBuiltinPromptsDialog by remember { mutableStateOf(false) }
     var showGlossaryDialog by remember { mutableStateOf(false) }
+    var showDictionaryDialog by remember { mutableStateOf(false) }
+    val dictionaries by viewModel.dictionaries.collectAsState()
     var showAiClearKeyConfirm by remember { mutableStateOf(false) }
     var showAiClearDataConfirm by remember { mutableStateOf(false) }
     var showModelManagerDialog by remember { mutableStateOf(false) }
@@ -702,6 +704,23 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("词典（离线查词）")
+            ListItem(
+                headlineContent = { Text("词典管理") },
+                supportingContent = {
+                    Text(
+                        if (dictionaries.isEmpty()) {
+                            "导入 StarDict 词典后，阅读器长按选中可查词（离线优先，未命中可回落 AI 解释）"
+                        } else {
+                            "已导入 ${dictionaries.size} 部：" +
+                                dictionaries.joinToString("、") { it.bookName }
+                        },
+                    )
+                },
+                modifier = Modifier.clickable { showDictionaryDialog = true },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("OCR 模型（离线识别）")
             ListItem(
                 headlineContent = { Text("模型管理") },
@@ -1093,6 +1112,12 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     }
     if (showGlossaryDialog) {
         GlossaryDialog(onDismiss = { showGlossaryDialog = false })
+    }
+    if (showDictionaryDialog) {
+        DictionaryDialog(
+            viewModel = viewModel,
+            onDismiss = { showDictionaryDialog = false },
+        )
     }
     if (showModelManagerDialog) {
         ModelManagerDialog(

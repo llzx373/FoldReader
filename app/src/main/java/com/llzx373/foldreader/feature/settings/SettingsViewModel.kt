@@ -56,6 +56,10 @@ class SettingsViewModel(
     private val autoBackupRunner: com.llzx373.foldreader.core.backup.AutoBackupRunner,
     /** M21：OCR/气泡模型管理（导入/校验/删除/就绪状态）。 */
     private val modelManager: com.llzx373.foldreader.core.ai.android.ModelManager,
+    /** M28：词典管理（导入/删除）与查词缓存失效。 */
+    private val dictionaryStore: com.llzx373.foldreader.core.dict.DictionaryStore,
+    private val importDictionariesAction: (Uri) -> com.llzx373.foldreader.core.dict.android.DictionaryImporter.Summary,
+    private val invalidateDictionariesAction: () -> Unit,
     /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
     private val clearAiDataAction: suspend () -> Unit = {},
 ) : ViewModel() {
@@ -77,6 +81,7 @@ class SettingsViewModel(
 
     init {
         refreshReadingStats()
+        refreshDictionaries()
     }
 
     fun refreshReadingStats() = launch {
@@ -491,6 +496,57 @@ class SettingsViewModel(
 
     fun updateOcrRecLang(modelId: String) = launch { settingsRepository.setOcrRecLang(modelId) }
 
+    // ---- 词典管理（M28）----
+
+    private val _dictionaries = MutableStateFlow<List<com.llzx373.foldreader.core.dict.DictInfo>>(emptyList())
+    val dictionaries: StateFlow<List<com.llzx373.foldreader.core.dict.DictInfo>> =
+        _dictionaries.asStateFlow()
+
+    private val _dictionariesLoaded = MutableStateFlow(false)
+    val dictionariesLoaded: StateFlow<Boolean> = _dictionariesLoaded.asStateFlow()
+
+    private fun refreshDictionaries() = launch {
+        _dictionaries.value = withContext(kotlinx.coroutines.Dispatchers.IO) { dictionaryStore.list() }
+        _dictionariesLoaded.value = true
+    }
+
+    /** 导入词典目录（SAF 树）：逐词干导入，汇总成功/失败；查词缓存随之失效。 */
+    fun importDictionaries(treeUri: Uri, onResult: (String) -> Unit) {
+        launch {
+            val message = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val summary = importDictionariesAction(treeUri)
+                    invalidateDictionariesAction()
+                    buildString {
+                        if (summary.imported.isNotEmpty()) {
+                            append("已导入 ${summary.imported.size} 部词典（")
+                            append(summary.imported.joinToString("、") { it.bookName })
+                            append("）")
+                        }
+                        summary.failures.forEach { (stem, reason) ->
+                            if (isNotEmpty()) append("\n")
+                            append("$stem：$reason")
+                        }
+                    }
+                } catch (e: com.llzx373.foldreader.core.dict.DictionaryStore.ImportException) {
+                    e.message ?: "导入失败"
+                } catch (e: Exception) {
+                    "导入失败：${e.message ?: "文件读取异常"}"
+                }
+            }
+            refreshDictionaries()
+            onResult(message)
+        }
+    }
+
+    fun deleteDictionary(id: String) {
+        launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) { dictionaryStore.delete(id) }
+            invalidateDictionariesAction()
+            refreshDictionaries()
+        }
+    }
+
     fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
         launch {
             val error = runCatching { backupManager.exportTo(uri) }.exceptionOrNull()?.message
@@ -525,6 +581,9 @@ class SettingsViewModel(
                     webDavBackupManager = container.webDavBackupManager,
                     autoBackupRunner = container.autoBackupRunner,
                     modelManager = container.modelManager,
+                    dictionaryStore = container.dictionaryStore,
+                    importDictionariesAction = container.dictionaryImporter::importFromTree,
+                    invalidateDictionariesAction = container.dictionaryLookupService::invalidate,
                     clearAiDataAction = container::clearAiData,
                 )
             }
