@@ -157,6 +157,70 @@ class FormatDetectorTest {
     }
 
     @Test
+    fun `HTML 按 doctype 与 html 根标签判定（大小写不敏感）`() {
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect(null, null, "<!DOCTYPE html><html><body>x</body></html>".toByteArray()),
+        )
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, null, "<!doctype html>".toByteArray()))
+        // HTML4 的 PUBLIC 写法也被前缀覆盖
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect(
+                null,
+                null,
+                "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"x\">".toByteArray(),
+            ),
+        )
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect(null, null, "<html lang=\"zh\"><head></head></html>".toByteArray()),
+        )
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, null, "<HTML>".toByteArray()))
+    }
+
+    @Test
+    fun `HTML 判定容忍前导空白 BOM 与 XML 声明`() {
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, null, "  \n<!DOCTYPE html>".toByteArray()))
+        val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, null, bom + "<html>".toByteArray()))
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect(
+                null,
+                null,
+                "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\">".toByteArray(),
+            ),
+        )
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect(null, null, "<!-- comment -->\n<html>".toByteArray()),
+        )
+    }
+
+    @Test
+    fun `html htm 扩展名与 HTML MIME 判定`() {
+        assertEquals(BookFormat.HTML, FormatDetector.detect("page.html", null, ByteArray(0)))
+        assertEquals(BookFormat.HTML, FormatDetector.detect("page.HTM", null, ByteArray(0)))
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, "text/html", ByteArray(0)))
+        assertEquals(BookFormat.HTML, FormatDetector.detect(null, "application/xhtml+xml", ByteArray(0)))
+    }
+
+    @Test
+    fun `HTML 判定不误伤 FB2 与普通 XML`() {
+        // FB2 判定在 HTML 之前，根标签 FictionBook 先命中
+        val fb2 = "<FictionBook xmlns=\"http://www.gribuser.ru/xml/fictionbook/2.0\">".toByteArray()
+        assertEquals(BookFormat.FB2, FormatDetector.detect(null, null, fb2))
+        // 非 html 的 DOCTYPE 与普通 XML 根标签不认作 HTML（识别不出返回 null，上层按 TXT）
+        assertNull(
+            FormatDetector.detect("x", null, "<?xml version=\"1.0\"?><rss version=\"2.0\">".toByteArray()),
+        )
+        assertNull(FormatDetector.detect("x", null, "<!DOCTYPE svg><svg/>".toByteArray()))
+        // zip 不认作 HTML
+        assertFalse(FormatDetector.isHtml(zipHead("word/document.xml", ByteArray(0))))
+    }
+
+    @Test
     fun `FB2 裸 XML 根标签判定（含 BOM 前导空白 注释）`() {
         val xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FictionBook xmlns=\"http://www.gribuser.ru/xml/fictionbook/2.0\">"
         assertEquals(BookFormat.FB2, FormatDetector.detect(null, null, xml.toByteArray()))
@@ -168,7 +232,12 @@ class FormatDetectorTest {
         assertEquals(BookFormat.FB2, FormatDetector.detect("x", null, withComment))
 
         // 根标签不是 FictionBook 的普通 XML 不误判
-        assertNull(FormatDetector.detect("x", null, "<?xml version=\"1.0\"?><html>".toByteArray()))
+        assertNull(FormatDetector.detect("x", null, "<?xml version=\"1.0\"?><htmlx>".toByteArray()))
+        // 但 <html> 根标签现在由 HTML 格式接管（xhtml 判定）
+        assertEquals(
+            BookFormat.HTML,
+            FormatDetector.detect("x", null, "<?xml version=\"1.0\"?><html>".toByteArray()),
+        )
     }
 
     @Test

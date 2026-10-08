@@ -29,6 +29,7 @@ import com.llzx373.foldreader.core.format.clean.TsCharMap
 import com.llzx373.foldreader.core.format.docx.DocxBookParser
 import com.llzx373.foldreader.core.format.epub.EpubBookParser
 import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
+import com.llzx373.foldreader.core.format.html.HtmlBookParser
 import com.llzx373.foldreader.core.format.txt.TxtBookParser
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
@@ -595,6 +596,15 @@ class AppContainer(context: Context) {
         bookIdResolver = bookIdForUri,
         onChaptersIndexed = onChaptersIndexed,
     )
+    /** HTML 只读支持：编码探测 + jsoup 消毒后复用同一条压平管线。 */
+    val htmlBookParser = HtmlBookParser(
+        convertedDir = convertedDir,
+        openFlattenedContent = openFlattenedContent,
+        openChannel = { uri -> UriChannels.open(context, uri) },
+        displayNameOf = { uri -> UriChannels.displayName(context, uri) },
+        bookIdResolver = bookIdForUri,
+        onChaptersIndexed = onChaptersIndexed,
+    )
     /**
      * 文本型 PDF 的「当电子书读」入口：抽正文压平后进 TXT 管线。
      * 扫描件不会产出压平产物，所以这个解析器对扫描件是"存在但用不上"。
@@ -614,6 +624,7 @@ class AppContainer(context: Context) {
             BookFormat.EPUB to epubBookParser,
             BookFormat.FB2 to fb2BookParser,
             BookFormat.DOCX to docxBookParser,
+            BookFormat.HTML to htmlBookParser,
             // PDF 只在文本模式下走这里（扫描件没有压平产物，会走页式阅读器）
             BookFormat.PDF to pdfBookParser,
         ),
@@ -910,6 +921,7 @@ class AppContainer(context: Context) {
             BookFormat.EPUB to epubBookParser,
             BookFormat.FB2 to fb2BookParser,
             BookFormat.DOCX to docxBookParser,
+            BookFormat.HTML to htmlBookParser,
         ),
         coversDir = coversDir,
         enqueuePrewarm = bookPrewarmQueue::enqueue,

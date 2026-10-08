@@ -11,10 +11,12 @@ import com.llzx373.foldreader.core.format.CoverImage
 import com.llzx373.foldreader.core.format.FlattenContent
 import com.llzx373.foldreader.core.format.FlattenedBook
 import com.llzx373.foldreader.core.format.TextSpan
-import com.llzx373.foldreader.core.format.TextSpanType
 import com.llzx373.foldreader.core.format.epub.FlattenSink
 import com.llzx373.foldreader.core.format.epub.HtmlTextFlattener
 import com.llzx373.foldreader.core.format.epub.sniffImageExtension
+import com.llzx373.foldreader.core.format.html.HtmlSanitizer
+import com.llzx373.foldreader.core.format.html.buildHeadingChapters
+import com.llzx373.foldreader.core.format.html.resolveHtmlLinkSpans
 import com.llzx373.foldreader.core.format.newPullParser
 import java.io.File
 import java.nio.channels.SeekableByteChannel
@@ -28,11 +30,11 @@ import org.zwobble.mammoth.images.ImageConverter
 
 /**
  * DOCX 解析器：复用 EPUB 的压平管线——首开时先做 [DocxSecurity] 安全校验，
- * 再经 mammoth 转 HTML、[DocxSanitizer] 消毒（顺带注入标题锚点），
+ * 再经 mammoth 转 HTML、[HtmlSanitizer] 消毒（顺带注入标题锚点），
  * 最后由 [HtmlTextFlattener] 压平为 `convertedDir/<contentHash>.txt` + sidecar，
  * 之后由 [openFlattenedContent]（TXT 管线）提供内容与偏移索引。
  *
- * 目录 = 消毒时收集的 h1-h6（[DocxSanitizer.Heading]），边界 = 标题锚点在压平流中的偏移，
+ * 目录 = 消毒时收集的 h1-h6（[HtmlSanitizer.Heading]），边界 = 标题锚点在压平流中的偏移，
  * depth = 标题级别 - 1。无标题的书退化为单个「正文」章。
  *
  * 图片：mammoth 的 [ImageConverter.ImgElement] 把图片字节收集为 `word/media/image-N.<ext>`
@@ -237,7 +239,7 @@ class DocxBookParser(
     private fun flattenTo(docx: File, out: File, imagesDir: File): FlattenContent {
         docx.inputStream().use { DocxSecurity.validate(it) }
         val (html, images) = convertToHtml(docx)
-        val sanitized = DocxSanitizer.sanitize(html)
+        val sanitized = HtmlSanitizer.sanitize(html, isFragment = true, imagePathPrefix = IMAGE_PATH_PREFIX)
 
         val flattener = HtmlTextFlattener(newParser)
         val anchors = LinkedHashMap<String, Long>()
@@ -262,9 +264,9 @@ class DocxBookParser(
             totalChars = sink.charCount
         }
         return FlattenContent(
-            chapters = buildChapters(sanitized.headings, anchors, totalChars),
+            chapters = buildHeadingChapters(sanitized.headings, anchors, DOCUMENT_FILE, totalChars),
             anchors = anchors,
-            spans = resolveLinkSpans(sink.recordedSpans(), anchors),
+            spans = resolveHtmlLinkSpans(sink.recordedSpans(), anchors),
         )
     }
 
@@ -297,50 +299,6 @@ class DocxBookParser(
         File(imagesDir, store.imageFileName(zipPath)).writeBytes(bytes)
         return size
     }
-
-    /**
-     * 目录 = h1-h6 锚点偏移（消毒时收集，已按文档序）；同偏移去重保留先出现标题。
-     * 无标题时退化为单个「正文」章（与无 TOC 的兜底一致，depth=0）。
-     */
-    private fun buildChapters(
-        headings: List<DocxSanitizer.Heading>,
-        anchors: Map<String, Long>,
-        totalChars: Long,
-    ): List<Chapter> {
-        val points = LinkedHashMap<Long, Pair<String, Int>>()
-        for (heading in headings) {
-            val start = anchors["$DOCUMENT_FILE#${heading.id}"] ?: continue
-            if (start < 0L || start >= totalChars) continue
-            points.putIfAbsent(start, heading.text to (heading.level - 1).coerceAtLeast(0))
-        }
-        val starts = points.keys.sorted()
-        val chapters = starts.mapIndexed { index, start ->
-            val (title, depth) = points.getValue(start)
-            Chapter(
-                title = title,
-                charStart = start,
-                charEnd = if (index + 1 < starts.size) starts[index + 1] else totalChars,
-                depth = depth,
-            )
-        }.filter { it.charEnd > it.charStart }
-        if (chapters.isNotEmpty()) return chapters
-        return listOf(Chapter("正文", 0L, totalChars))
-    }
-
-    /**
-     * 链接 span 后处理：内部目标经锚点表解析为 `#目标charOffset`（fragment 未命中回退
-     * 文件级锚点，两者皆无则丢弃该 span）；外部 http(s) URL 原样保留。与 EPUB 同规则。
-     */
-    private fun resolveLinkSpans(spans: List<TextSpan>, anchors: Map<String, Long>): List<TextSpan> =
-        spans.mapNotNull { span ->
-            if (span.type != TextSpanType.LINK && span.type != TextSpanType.NOTEREF) return@mapNotNull span
-            val payload = span.payload ?: return@mapNotNull null
-            if (payload.startsWith("http://") || payload.startsWith("https://")) return@mapNotNull span
-            val file = payload.substringBefore('#')
-            val fragment = payload.substringAfter('#', "").takeIf { it.isNotEmpty() }
-            val target = fragment?.let { anchors["$file#$it"] ?: anchors[file] } ?: anchors[file]
-            target?.let { span.copy(payload = "#$it") }
-        }
 
     /**
      * 图片文件在压平期就已抽取到 `converted/<hash>.images/`，这里只需算出 contentHash 定位它。

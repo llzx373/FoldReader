@@ -5,7 +5,7 @@ import com.llzx373.foldreader.core.data.db.BookFormat
 
 /**
  * 电子书格式识别：magic bytes 优先，扩展名/MIME 兜底。
- * 支持 TXT / EPUB / FB2（裸 XML 与 .fb2.zip）/ DOCX / PDF / 漫画容器；
+ * 支持 TXT / EPUB / FB2（裸 XML 与 .fb2.zip）/ HTML / DOCX / PDF / 漫画容器；
  * 识别不出返回 null（上层按 TXT 处理，保持既有行为）。
  */
 object FormatDetector {
@@ -13,6 +13,9 @@ object FormatDetector {
     const val EPUB_MIME_TYPE = "application/epub+zip"
     const val PDF_MIME_TYPE = "application/pdf"
     const val DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    /** HTML 的两种常见 MIME（xhtml+xml 走同一条 HTML 管线）。 */
+    val HTML_MIME_TYPES = setOf("text/html", "application/xhtml+xml")
 
     /**
      * FB2 没有注册的正式 MIME，两种写法都遇到过。
@@ -26,6 +29,8 @@ object FormatDetector {
         if (isEpub(head)) return BookFormat.EPUB
         if (isFb2Zip(head)) return BookFormat.FB2
         if (isFb2(head)) return BookFormat.FB2
+        // HTML 判定放在 FB2 之后（FB2 根标签 FictionBook 会先命中，不误伤）、漫画之前
+        if (isHtml(head)) return BookFormat.HTML
         // DOCX 判定放在 EPUB/FB2 之后（它们也是 zip）、漫画之前
         // （把 docx 当漫画解只会报「压缩包内没有可显示的图片」）
         if (isDocx(head, displayName, mimeType)) return BookFormat.DOCX
@@ -37,6 +42,7 @@ object FormatDetector {
             ext == "epub" || mimeType == EPUB_MIME_TYPE -> BookFormat.EPUB
             ext == "fb2" || name?.endsWith(".fb2.zip") == true || mimeType in FB2_MIME_TYPES ->
                 BookFormat.FB2
+            ext == "html" || ext == "htm" || mimeType in HTML_MIME_TYPES -> BookFormat.HTML
             ext == "docx" || mimeType == DOCX_MIME_TYPE -> BookFormat.DOCX
             ext == "pdf" || mimeType == PDF_MIME_TYPE -> BookFormat.PDF
             // 漫画判定放在 EPUB/FB2 之后（它们也是 zip）、TXT 之前
@@ -112,6 +118,48 @@ object FormatDetector {
         if (firstEntry != "[Content_Types].xml") return false
         val ext = displayName?.lowercase()?.substringAfterLast('.', "")
         return ext == "docx" || mimeType == DOCX_MIME_TYPE
+    }
+
+    /**
+     * 裸 HTML：BOM/空白/XML 声明/注释之后为 `<!doctype html`（大小写不敏感，HTML4 的
+     * `<!DOCTYPE html PUBLIC …>` 也被这个前缀覆盖）或根标签 `<html`。
+     * 遇到非 html 的 DOCTYPE 直接否决（那是别的 XML 方言）；UTF-16 源与 FB2 一样靠扩展名兜底。
+     * 前缀命中后要求下一个字符不是标签名延续（空白/`>`/`/`/结尾），否则 `<htmlx>` 之类会被误收。
+     */
+    fun isHtml(head: ByteArray): Boolean {
+        if (isZip(head)) return false
+        // Latin-1 视图下探标签 ASCII 骨架（同 isFb2 的跳过逻辑）
+        val s = String(head, Charsets.ISO_8859_1)
+        val limit = minOf(s.length, 4096)
+        var i = 0
+        while (i < limit) {
+            when {
+                s[i].isWhitespace() -> i++
+                // UTF-8 BOM 的 Latin-1 视图
+                s.startsWith("ï»¿", i) -> i += 3
+                s.startsWith("<?xml", i) -> {
+                    val end = s.indexOf("?>", i + 5)
+                    if (end < 0) return false
+                    i = end + 2
+                }
+                s.startsWith("<!--", i) -> {
+                    val end = s.indexOf("-->", i + 4)
+                    if (end < 0) return false
+                    i = end + 3
+                }
+                s.startsWith("<!DOCTYPE", i, ignoreCase = true) ->
+                    return s.matchesTagPrefix(i, "<!DOCTYPE html")
+                else -> return s.matchesTagPrefix(i, "<html")
+            }
+        }
+        return false
+    }
+
+    /** 大小写不敏感的前缀匹配，且前缀之后的字符须为标签名终止符（空白/`>`/`/`/字符串结尾）。 */
+    private fun String.matchesTagPrefix(index: Int, prefix: String): Boolean {
+        if (!startsWith(prefix, index, ignoreCase = true)) return false
+        val next = getOrNull(index + prefix.length) ?: return true
+        return next.isWhitespace() || next == '>' || next == '/'
     }
 
     fun isPdf(head: ByteArray): Boolean {
