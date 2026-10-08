@@ -2,7 +2,9 @@ package com.llzx373.foldreader.feature.bookshelf
 
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.data.db.BookWithProgress
 import com.llzx373.foldreader.core.data.db.needsContentPreparation
+import com.llzx373.foldreader.core.data.settings.BookshelfSort
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -68,6 +70,49 @@ class ReadingProgressFormatTest {
         // 避免受运行环境默认 Locale 影响。
         val text = formatLastRead(1_700_000_000_000L, Locale.US)
         assertTrue("实际输出：$text", text!!.matches(Regex("\\d{2}-\\d{2} \\d{2}:\\d{2}")))
+    }
+}
+
+/** 书架排序：RECENT_READ 按 lastReadAt 降序，未读过的书沉底并按导入时间兜底。 */
+class BookshelfSortTest {
+
+    private fun book(id: Long, importedAt: Long, lastReadAt: Long?) = BookWithProgress(
+        BookEntity(
+            id = id,
+            title = "书$id",
+            author = null,
+            fileUri = "content://book/$id",
+            contentHash = "hash$id",
+            format = BookFormat.TXT,
+            totalChars = 0,
+            encoding = "UTF-8",
+            importedAt = importedAt,
+            lastReadAt = lastReadAt,
+            contentPreparedAt = null,
+        ),
+        charOffset = null,
+        comicPage = null,
+    )
+
+    @Test
+    fun `最近读过的排最前`() {
+        val books = listOf(
+            book(id = 1, importedAt = 100, lastReadAt = 500),
+            book(id = 2, importedAt = 200, lastReadAt = 900),
+        )
+        val sorted = sortBookshelf(books, BookshelfSort.RECENT_READ)
+        assertEquals(listOf(2L, 1L), sorted.map { it.book.id })
+    }
+
+    @Test
+    fun `从未读过的书沉底且按导入时间兜底`() {
+        val books = listOf(
+            book(id = 1, importedAt = 100, lastReadAt = null),
+            book(id = 2, importedAt = 200, lastReadAt = 500),
+            book(id = 3, importedAt = 300, lastReadAt = null),
+        )
+        val sorted = sortBookshelf(books, BookshelfSort.RECENT_READ)
+        assertEquals(listOf(2L, 3L, 1L), sorted.map { it.book.id })
     }
 }
 

@@ -32,8 +32,13 @@ enum class AutoPageMode { INTERVAL, SCROLL }
  */
 enum class PdfReadingMode { PAGED, TEXT }
 
-/** 书架排序方式：均为稳定排序，阅读行为本身不会改变列表顺序。 */
-enum class BookshelfSort { IMPORT_TIME, TITLE, PROGRESS }
+/**
+ * 书架排序方式。
+ *
+ * [RECENT_READ] 由阅读行为驱动：读完一本书返回书架时它会浮到最前，从未打开过的书沉底
+ * （按导入时间兜底）；其余三档均为稳定排序，阅读行为本身不会改变列表顺序。
+ */
+enum class BookshelfSort { RECENT_READ, IMPORT_TIME, TITLE, PROGRESS }
 
 /**
  * 中间点击区可分配的动作。

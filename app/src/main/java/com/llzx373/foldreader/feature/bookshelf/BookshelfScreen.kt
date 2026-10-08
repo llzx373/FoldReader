@@ -1424,6 +1424,7 @@ private fun bookSubtitle(item: BookWithProgress, locale: Locale): String {
 }
 
 private fun bookshelfSortLabel(sort: BookshelfSort): String = when (sort) {
+    BookshelfSort.RECENT_READ -> "按最近阅读"
     BookshelfSort.IMPORT_TIME -> "按导入时间"
     BookshelfSort.TITLE -> "按书名"
     BookshelfSort.PROGRESS -> "按阅读进度"

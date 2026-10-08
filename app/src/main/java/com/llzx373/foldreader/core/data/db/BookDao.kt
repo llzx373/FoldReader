@@ -18,8 +18,8 @@ data class BookWithProgress(
 @Dao
 interface BookDao {
 
-    // 书架排序改由 ViewModel 按用户选择客户端排序，DAO 只保证稳定顺序（id），
-    // 避免 lastReadAt 更新导致从阅读页返回时列表重排。
+    // 书架排序改由 ViewModel 按用户选择客户端排序，DAO 只保证稳定顺序（id）。
+    // lastReadAt 更新触发重排只在用户选了「按最近阅读」时发生——那正是该排序的语义。
     @Query("SELECT * FROM books ORDER BY id")
     fun observeBookshelf(): Flow<List<BookEntity>>
 

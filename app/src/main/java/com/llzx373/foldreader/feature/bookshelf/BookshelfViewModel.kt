@@ -40,9 +40,17 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 书架客户端排序：均为稳定键，阅读行为不会改变列表顺序（进度排序仅在进度百分比变化跨越他书时移动）。 */
-private fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): List<BookWithProgress> =
+/**
+ * 书架客户端排序。除 RECENT_READ 外均为稳定键，阅读行为不会改变列表顺序
+ * （进度排序仅在进度百分比变化跨越他书时移动）；RECENT_READ 是用户显式选择的
+ * 「最近读的浮到最前」，从未读过的书（lastReadAt 为 null）沉底、按导入时间兜底。
+ */
+internal fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): List<BookWithProgress> =
     when (sort) {
+        BookshelfSort.RECENT_READ -> books.sortedWith(
+            compareByDescending<BookWithProgress> { it.book.lastReadAt ?: Long.MIN_VALUE }
+                .thenByDescending { it.book.importedAt },
+        )
         BookshelfSort.IMPORT_TIME -> books.sortedByDescending { it.book.importedAt }
         BookshelfSort.TITLE -> books.sortedBy { it.book.title }
         BookshelfSort.PROGRESS -> books.sortedByDescending { item ->
