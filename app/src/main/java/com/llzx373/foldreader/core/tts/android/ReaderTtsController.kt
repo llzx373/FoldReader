@@ -6,12 +6,12 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.llzx373.foldreader.core.tts.TtsLanguage
 import com.llzx373.foldreader.core.tts.TtsSegment
 import com.llzx373.foldreader.core.tts.TtsSleepOption
 import com.llzx373.foldreader.core.tts.TtsSleepTimer
 import com.llzx373.foldreader.core.tts.TtsSpeech
 import com.llzx373.foldreader.core.tts.TtsState
-import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,7 +36,7 @@ class ReaderTtsController(context: Context) {
     // 以下字段全部只在主线程读写
     private var engine: TextToSpeech? = null
     private var engineReady = false
-    /** 初始化/语种检查一旦失败不再重试，直接走错误文案（避免每次点朗读都重建引擎）。 */
+    /** 引擎初始化一旦失败不再重试，直接走错误文案（避免每次点朗读都重建引擎）。 */
     private var engineFailed = false
     /** 播放代次：stop/重新 speak 都会 +1，迟到回调凭 utteranceId 里的代次丢弃。 */
     private var generation = 0
@@ -56,6 +56,8 @@ class ReaderTtsController(context: Context) {
     /** 当前会话生效的语速 / 音调（M26）：speak 时取全局默认，setSpeechRate/setPitch 当次临时改。 */
     private var currentRate = TtsSpeech.DEFAULT_RATE
     private var currentPitch = TtsSpeech.DEFAULT_PITCH
+    /** 当前会话的朗读语言（M26）：speak 时按「按书设置 > 译文跟随 > 默认」解析好传入。 */
+    private var currentLanguage = TtsLanguage.DEFAULT
 
     /**
      * 语速 / 音调的当次临时调整（朗读中面板）：立即作用于引擎（Android TTS 在
@@ -163,6 +165,7 @@ class ReaderTtsController(context: Context) {
         chapterTitle: String = "",
         speechRate: Float = TtsSpeech.DEFAULT_RATE,
         pitch: Float = TtsSpeech.DEFAULT_PITCH,
+        language: TtsLanguage = TtsLanguage.DEFAULT,
     ) {
         main.post {
             if (segments.isEmpty()) return@post
@@ -171,6 +174,7 @@ class ReaderTtsController(context: Context) {
             generation++
             currentRate = TtsSpeech.clampRate(speechRate)
             currentPitch = TtsSpeech.clampPitch(pitch)
+            currentLanguage = language
             _state.value = TtsState(
                 bookId = bookId,
                 charOffset = segments.first().charOffset,
@@ -253,15 +257,6 @@ class ReaderTtsController(context: Context) {
                     return@TextToSpeech
                 }
                 val tts = engine ?: return@TextToSpeech
-                // 语种检查：优先中文（按书语言选择是未来扩展点）；缺数据/不支持 → 降级报错
-                val lang = tts.setLanguage(Locale.CHINESE)
-                if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    engineFailed = true
-                    tts.shutdown()
-                    engine = null
-                    failNow("当前设备不支持中文 TTS")
-                    return@TextToSpeech
-                }
                 tts.setOnUtteranceProgressListener(utteranceListener)
                 engineReady = true
                 pendingLaunch?.invoke()
@@ -279,6 +274,13 @@ class ReaderTtsController(context: Context) {
     private fun startQueueFrom(index: Int) {
         val tts = engine ?: return
         tts.stop()
+        // 语种检查按会话语言逐次进行（M26 按书/译文跟随）：缺数据/不支持 → 降级报错，
+        // 不置 engineFailed（换个语言还能读），引擎与状态保持可重试
+        val lang = tts.setLanguage(currentLanguage.toLocale())
+        if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
+            failNow("当前设备没有「${currentLanguage.displayName}」的语音数据，可在系统设置中下载")
+            return
+        }
         tts.setSpeechRate(currentRate)
         tts.setPitch(currentPitch)
         currentIndex = index

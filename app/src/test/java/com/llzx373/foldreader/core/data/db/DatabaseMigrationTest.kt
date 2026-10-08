@@ -476,4 +476,61 @@ class DatabaseMigrationTest {
             assertEquals(2, c.getInt(0))
         }
     }
+
+    /** 建一个 v7 形态的库（`book_prefs` 含一行老数据），之后手动跑 v7→v8 迁移。 */
+    private fun openV7(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(7) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+                db.execSQL(bookPrefsV1)
+                db.execSQL(insertV1)
+                MIGRATION_1_2.migrate(db)
+                MIGRATION_2_3.migrate(db)
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v7 升到 v8 book_prefs 加按书 TTS 语言列且老行落 NULL`() {
+        val v7 = openV7()
+        val migrated = openV7()
+
+        MIGRATION_7_8.migrate(migrated)
+
+        // 老行原样还在，新列默认 NULL（= 跟随默认）
+        migrated.query(
+            "SELECT `fontSizeSp`, `chapterRules`, `ttsLang` FROM `book_prefs` WHERE `bookId` = 7",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals(21.5f, c.getFloat(0), 0.001f)
+            assertEquals("", c.getString(1))
+            assertTrue("ttsLang 应默认 NULL", c.isNull(2))
+        }
+        // 列结构 = v7 的全部列 + 新列（可空、无默认值，与 Room 期望逐项一致）
+        assertEquals(
+            columns(v7, "book_prefs") + Column("ttsLang", "TEXT", false, null),
+            columns(migrated, "book_prefs"),
+        )
+        // 新列可写、可清回 NULL
+        migrated.execSQL("UPDATE `book_prefs` SET `ttsLang` = 'JA' WHERE `bookId` = 7")
+        migrated.query("SELECT `ttsLang` FROM `book_prefs` WHERE `bookId` = 7").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("JA", c.getString(0))
+        }
+        migrated.execSQL("UPDATE `book_prefs` SET `ttsLang` = NULL WHERE `bookId` = 7")
+        migrated.query("SELECT `ttsLang` FROM `book_prefs` WHERE `bookId` = 7").use { c ->
+            assertTrue(c.moveToFirst())
+            assertTrue(c.isNull(0))
+        }
+    }
 }

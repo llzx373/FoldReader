@@ -18,6 +18,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,6 +49,7 @@ import com.llzx373.foldreader.core.format.clean.CleanProfile
 import com.llzx373.foldreader.core.metadata.BookMetaSources
 import com.llzx373.foldreader.core.reader.averageCharsPerMinute
 import com.llzx373.foldreader.core.reader.formatDurationZh
+import com.llzx373.foldreader.core.tts.TtsLanguage
 import com.llzx373.foldreader.ui.EncodingPickerDialog
 import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
@@ -185,6 +189,8 @@ fun BookDetailDialog(
                                 null
                             },
                         )
+                        // M26：按书 TTS 朗读语言（null = 跟随默认/译文跟随）
+                        TtsLanguageRow(bookId)
                     }
                     // M17：手动改正元数据（改动字段打 user 标，AI 不再改写）
                     Spacer(modifier = Modifier.height(8.dp))
@@ -536,8 +542,65 @@ private fun DetailRow(
     }
 }
 
-/** 「AI 生成」徽标：M17 起，metaSource 标记为 AI 填入的元数据字段旁展示。 */
+/** M26：按书 TTS 朗读语言行（book_prefs.ttfLang，null = 跟随默认），点击弹选项。 */
 @Composable
+private fun TtsLanguageRow(bookId: Long) {
+    val context = LocalContext.current
+    val container = remember(context) {
+        (context.applicationContext as? FoldReaderApplication)?.container
+    } ?: return
+    val scope = rememberCoroutineScope()
+    val ttsLang by remember(container, bookId) {
+        container.bookPrefsRepository.observeTtsLang(bookId)
+    }.collectAsState(initial = null)
+    var showPicker by remember { mutableStateOf(false) }
+    DetailRow(
+        label = "朗读语言",
+        value = ttsLang?.let(TtsLanguage::fromNameOrNull)?.displayName ?: "跟随默认",
+        onClick = { showPicker = true },
+    )
+    if (showPicker) {
+        val options = listOf<Pair<TtsLanguage?, String>>(null to "跟随默认") +
+            TtsLanguage.entries.map { it to it.displayName }
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) { Text("关闭") }
+            },
+            title = { Text("朗读语言") },
+            text = {
+                Column {
+                    options.forEach { (lang, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        container.bookPrefsRepository.setTtsLang(bookId, lang?.name)
+                                    }
+                                    showPicker = false
+                                }
+                                .padding(vertical = 10.dp),
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (lang?.name == ttsLang) {
+                                Icon(Icons.Filled.Check, contentDescription = null)
+                            }
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** 「AI 生成」徽标：M17 起，metaSource 标记为 AI 填入的元数据字段旁展示。 */@Composable
 private fun AiSourceBadge(text: String) {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,

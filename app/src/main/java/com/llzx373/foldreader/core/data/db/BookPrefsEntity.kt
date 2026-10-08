@@ -61,6 +61,8 @@ data class BookPrefsEntity(
     val pdfReadingMode: String? = null,
     /** 按书自定义章节正则，\u001F 分隔编码（与全局规则同编码）；空串 = 未自定义。 */
     @ColumnInfo(defaultValue = "") val chapterRules: String = "",
+    /** 按书 TTS 朗读语言（TtsLanguage 枚举名，M26）；null = 跟随默认（译文视角跟随译本语言）。 */
+    val ttsLang: String? = null,
 )
 
 @Dao

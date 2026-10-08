@@ -56,6 +56,16 @@ class BookPrefsRepository(
         update(bookId) { it.copy(chapterRules = encodeCustomChapterRules(rules)) }
     }
 
+    /** 按书 TTS 朗读语言（TtsLanguage 枚举名）；null = 跟随默认。 */
+    fun observeTtsLang(bookId: Long): Flow<String?> =
+        bookPrefsDao.observe(bookId).map { it?.ttsLang }
+
+    suspend fun ttsLang(bookId: Long): String? = bookPrefsDao.get(bookId)?.ttsLang
+
+    suspend fun setTtsLang(bookId: Long, lang: String?) {
+        update(bookId) { it.copy(ttsLang = lang) }
+    }
+
     /** 全局翻页模式变更同步到所有已落库的书：覆盖每书模式。 */
     suspend fun applyGlobalPageTurnMode(mode: PageTurnMode) {
         bookPrefsDao.applyGlobalPageTurnMode(mode.name)

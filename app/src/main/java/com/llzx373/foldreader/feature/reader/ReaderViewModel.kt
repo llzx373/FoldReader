@@ -57,6 +57,7 @@ import com.llzx373.foldreader.core.reader.collectScrollPages
 import com.llzx373.foldreader.core.reader.decodeSampledImage
 import com.llzx373.foldreader.core.reader.sessionFlushDelta
 import com.llzx373.foldreader.core.reader.sliceSpansForLine
+import com.llzx373.foldreader.core.tts.TtsLanguage
 import com.llzx373.foldreader.core.tts.TtsSentenceSplitter
 import com.llzx373.foldreader.core.tts.TtsState
 import com.llzx373.foldreader.core.tts.android.ReaderTtsController
@@ -1413,6 +1414,12 @@ class ReaderViewModel(
         val text = runCatching { source.read(start until end) }.getOrNull() ?: return
         val segments = TtsSentenceSplitter.split(text, start)
         val prefs = settingsRepository.preferences.first()
+        // 语言优先级（M26）：按书显式设置 > 译文视角跟随译本语言 > 默认中文
+        val language = TtsLanguage.resolveTtsLanguage(
+            explicit = bookPrefsRepository.ttsLang(bookId)?.let { TtsLanguage.fromNameOrNull(it) },
+            inTranslatedView = _viewMode.value == ReaderViewMode.TRANSLATED,
+            translationTarget = prefs.aiTargetLang,
+        )
         ttsController.speak(
             bookId = bookId,
             segments = segments,
@@ -1420,6 +1427,7 @@ class ReaderViewModel(
             chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, start))?.title.orEmpty(),
             speechRate = prefs.ttsSpeechRate,
             pitch = prefs.ttsPitch,
+            language = language,
         )
     }
 

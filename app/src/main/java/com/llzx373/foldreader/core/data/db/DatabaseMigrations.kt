@@ -101,6 +101,15 @@ internal val MIGRATION_6_7 = object : Migration(6, 7) {
 }
 
 /**
+ * v8：`book_prefs` 加按书 TTS 朗读语言列 `ttsLang`（M26，可空，老行落 NULL = 跟随默认）。
+ */
+internal val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `book_prefs` ADD COLUMN `ttsLang` TEXT")
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -110,4 +119,4 @@ internal val MIGRATION_6_7 = object : Migration(6, 7) {
  * 迁移只做结构变更；要动数据另起一条 Migration，并在上面补注释说明。
  */
 val DATABASE_MIGRATIONS: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
