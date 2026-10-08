@@ -116,6 +116,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.settings.AutoPageMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
@@ -233,6 +234,8 @@ fun ReaderScreen(
     // 长按选择：分页模式支持拖边跨页；滚动模式在 ScrollContent 内按项实现
     var selection by remember { mutableStateOf<SelectionUi?>(null) }
     var noteDraft by remember { mutableStateOf<SelectionUi?>(null) }
+    // 「选中行生成章节规则」：非 null 时对话框以此字符偏移吸附原始行并合成候选
+    var chapterRuleAnchor by remember { mutableStateOf<Long?>(null) }
     var editingAnnotation by remember {
         mutableStateOf<com.llzx373.foldreader.core.data.db.AnnotationEntity?>(null)
     }
@@ -693,6 +696,12 @@ fun ReaderScreen(
     // M18 选中即译：AI 服务已配置才在选区操作条给「翻译」入口（未配置时界面零变化）
     var aiConfigured by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { aiConfigured = app.container.aiConfigured() }
+
+    // 「选中行生成章节规则」入口判据：仅 TXT（规则只在 TXT 解析管线生效）。
+    // 一次性检查，不在重组路径上反复做 suspend 判据
+    val chapterRuleEligible by produceState(initialValue = false, bookId) {
+        value = app.container.bookshelfRepository.getBook(bookId)?.format == BookFormat.TXT
+    }
 
     // M19 视角 1：原文 / 译文。译文模式下标注写入、选字翻译、TTS 全部禁用
     // （标注/书签锚点是原文坐标系，写进去必错位）。
@@ -1616,6 +1625,15 @@ fun ReaderScreen(
                 } else {
                     null
                 },
+                // 译文坐标系不是原文行坐标，规则切分只对 TXT 原文有意义
+                onMakeChapterRule = if (chapterRuleEligible && !viewModeTranslated) {
+                    {
+                        chapterRuleAnchor = activeSelection.start
+                        clearSelection()
+                    }
+                } else {
+                    null
+                },
                 onCancel = { clearSelection() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1964,6 +1982,15 @@ fun ReaderScreen(
                 onRename = viewModel::renameBookmark,
                 onDelete = { viewModel.deleteBookmark(it.id) },
                 onDismiss = { bookmarksVisible = false },
+            )
+        }
+
+        // 「选中行生成章节规则」对话框（选区操作条入口）
+        chapterRuleAnchor?.let { anchor ->
+            ChapterRuleFromSelectionDialog(
+                bookId = bookId,
+                anchorOffset = anchor,
+                onDismiss = { chapterRuleAnchor = null },
             )
         }
 

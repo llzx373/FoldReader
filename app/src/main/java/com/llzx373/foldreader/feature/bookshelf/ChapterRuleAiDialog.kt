@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.format.ChapterRulePreview
 
 /**
  * 「AI 识别章节」入口按钮（M15）：仅当书籍为 TXT 且 AI 服务已配置时渲染，
@@ -135,7 +136,9 @@ fun ChapterRuleAiDialog(bookId: Long, onDismiss: () -> Unit) {
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                             }
                             CandidateBlock(
-                                candidate = candidate,
+                                regex = candidate.regex,
+                                explanation = candidate.explanation,
+                                preview = candidate.preview,
                                 onSelect = { viewModel.select(candidate) },
                             )
                         }
@@ -180,21 +183,26 @@ fun ChapterRuleAiDialog(bookId: Long, onDismiss: () -> Unit) {
     )
 }
 
+/**
+ * 候选规则块：正则 + 说明 + 试切报告 + 「采用此规则」。
+ * M15「AI 识别章节」与「选中行生成章节规则」共用（后者在 feature/reader 侧）。
+ */
 @Composable
-private fun CandidateBlock(
-    candidate: ChapterRuleAiViewModel.CandidateUi,
+internal fun CandidateBlock(
+    regex: String,
+    explanation: String,
+    preview: ChapterRulePreview.RulePreview,
     onSelect: () -> Unit,
 ) {
-    val preview = candidate.preview
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Text(
-            text = candidate.regex,
+            text = regex,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
         )
-        if (candidate.explanation.isNotBlank()) {
+        if (explanation.isNotBlank()) {
             Text(
-                text = candidate.explanation,
+                text = explanation,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -232,7 +240,7 @@ private fun CandidateBlock(
 }
 
 @Composable
-private fun ProgressLine(label: String) {
+internal fun ProgressLine(label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
         Spacer(modifier = Modifier.width(8.dp))
