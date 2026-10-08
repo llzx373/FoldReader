@@ -40,6 +40,14 @@ fun ComicScrollContent(
     translationTypeface: android.graphics.Typeface? = null,
     /** 竖排默认（M31）：日漫 RTL 传 true，覆盖层译文默认竖排。 */
     rtl: Boolean = false,
+    /**
+     * 气泡微调模式（M31 条漫专项）：开 = 各条目页内可拖动气泡框。
+     * 条目的归一化坐标本来就相对自己的页图片，与翻页布局同一套换算；
+     * 未命中气泡的拖动不消费事件，列表照常竖向滚动。
+     */
+    adjustMode: Boolean = false,
+    onBubbleAdjust: (pageIndex: Int, bubbleIndex: Int, rect: com.llzx373.foldreader.core.ocr.OcrRect) -> Unit =
+        { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -70,6 +78,9 @@ fun ComicScrollContent(
                     // 条漫里页是竖向连成一条的，「页内」坐标与屏幕坐标不是一套换算，暂不接受锚点手势；
                     // 但已有书签与高亮照常显示（它们用的是页内归一化坐标）
                     anchorsEnabled = false,
+                    // 微调（M31）：未命中气泡的拖动不消费事件，列表照常滚动
+                    adjustMode = adjustMode,
+                    onBubbleAdjust = onBubbleAdjust,
                     host = host,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -78,6 +89,10 @@ fun ComicScrollContent(
                 viewModel.ensurePage(index)
                 // 有覆盖层的条目顺带补抹除位图（无模型/无译文时内部直接返回）
                 viewModel.ensureInpainted(index)
+            }
+            // 微调模式：条目进入视口时备底图（无译文页也要出轮廓才能拖框）
+            if (adjustMode) {
+                LaunchedEffect(index) { viewModel.ensureAdjustBaseFor(index) }
             }
         }
     }

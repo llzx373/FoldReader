@@ -1192,6 +1192,8 @@ fun ComicReaderScreen(
                         translationFor = translationFor,
                         translationTypeface = translationTypeface,
                         rtl = rtl,
+                        adjustMode = bubbleAdjustMode,
+                        onBubbleAdjust = viewModel::saveBubbleAdjustment,
                         modifier = Modifier.fillMaxSize(),
                     )
                     return@Box
@@ -1549,8 +1551,8 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
-                    // 微调手势只在翻页布局（ComicSpread）里接了；滚动模式是另一套坐标，不给入口
-                    onAdjustBubbles = if (translationAvailable && !scrollMode) {
+                    // 微调手势翻页布局（ComicSpread）与滚动模式（条目页内坐标，M31 起）都接了
+                    onAdjustBubbles = if (translationAvailable) {
                         {
                             menuVisible = false
                             viewModel.setBubbleAdjustMode(true)
@@ -2017,7 +2019,7 @@ private fun BoxScope.ComicSpread(
     translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation? = { null },
     translationTypeface: android.graphics.Typeface? = null,
     highlightBubble: Int = -1,
-    /** 气泡微调模式（M23）：开 = 页内可拖动气泡框；滚动模式不支持（那边是另一套坐标）。 */
+    /** 气泡微调模式（M23；M31 起滚动模式也支持）：开 = 页内可拖动气泡框。 */
     adjustMode: Boolean = false,
     onBubbleAdjust: (pageIndex: Int, bubbleIndex: Int, rect: com.llzx373.foldreader.core.ocr.OcrRect) -> Unit =
         { _, _, _ -> },

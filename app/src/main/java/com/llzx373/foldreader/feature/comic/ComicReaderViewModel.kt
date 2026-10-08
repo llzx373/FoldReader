@@ -625,9 +625,20 @@ class ComicReaderViewModel(
 
     /** 微调底图：当前页还没有覆盖层数据时，用（套过微调的）气泡建一张无译文覆盖层。 */
     private suspend fun ensureAdjustBase() {
+        ensureAdjustBaseFor(currentPages().firstOrNull() ?: return)
+    }
+
+    /**
+     * 指定页的微调底图（M31 条漫专项：滚动模式由进入视口的条目逐页调用）：
+     * 该页还没有覆盖层数据时，用（套过微调的）气泡建一张无译文覆盖层。
+     * 只有当前锚点页会同步 [hasPageAdjustments]（「恢复自动位置」按钮的显隐判据）。
+     */
+    suspend fun ensureAdjustBaseFor(page: Int) {
         val controller = comicTranslation ?: return
-        val page = currentPages().firstOrNull() ?: return
-        _hasPageAdjustments.value = controller.hasAdjustments(page)
+        if (page !in 0 until _uiState.value.pageCount) return
+        if (page == currentPages().firstOrNull()) {
+            _hasPageAdjustments.value = controller.hasAdjustments(page)
+        }
         if (translationOverlays.containsKey(page)) return
         val bubbles = controller.adjustedBubblesFor(page) ?: return
         Snapshot.withMutableSnapshot {

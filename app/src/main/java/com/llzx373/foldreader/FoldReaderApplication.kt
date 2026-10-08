@@ -455,7 +455,15 @@ class AppContainer(context: Context) {
             val image = source.loadPage(pageIndex, COMIC_OCR_TARGET_PX, COMIC_OCR_TARGET_PX)
             val bitmap = (image as? com.llzx373.foldreader.core.paged.PagedPageImage.Still)?.bitmap
                 ?: return@withContext emptyList()
-            val bubbles = ocrEngine.detectBubbles(bitmap, recSpec, rtl)
+            // 原生超长图（未预切的长条漫，M31）：整页压进 RT-DETR 的 640 方形输入会纵向
+            // 压扁几十倍必漏检——竖向分片（约 2:1、片间重叠）分别检测，坐标换算回整页后
+            // 按气泡中心归属去重合并；重解失败退回压扁整页（检出率差但不出错）
+            val bubbles = if (com.llzx373.foldreader.core.ocr.TallPageTiles.isTall(bitmap.width, bitmap.height)) {
+                detectTallPageBubbles(source, pageIndex, recSpec, rtl)
+                    ?: ocrEngine.detectBubbles(bitmap, recSpec, rtl)
+            } else {
+                ocrEngine.detectBubbles(bitmap, recSpec, rtl)
+            }
             if (bubbles.isNotEmpty()) {
                 runCatching { comicTranslationStore.saveOcr(bookId, pageIndex, bubbles) }
             }
@@ -463,6 +471,41 @@ class AppContainer(context: Context) {
         } finally {
             runCatching { source.close() }
         }
+    }
+
+    /**
+     * 超长页的分片气泡检测（M31）：按片高上限放宽重解页位图（宽仍按 [COMIC_OCR_TARGET_PX]），
+     * 逐片跑「RT-DETR + 页级 OCR + 行归并」，片内坐标换算回整页归一化坐标后合并、
+     * 整页重排阅读序与编号。任一步失败返回 null，调用方退回压扁整页检测。
+     */
+    private suspend fun detectTallPageBubbles(
+        source: com.llzx373.foldreader.core.paged.PagedImageSource,
+        pageIndex: Int,
+        recSpec: com.llzx373.foldreader.core.ocr.OcrModelSpec,
+        rtl: Boolean,
+    ): List<com.llzx373.foldreader.core.ocr.OcrBubble>? {
+        val tiles = com.llzx373.foldreader.core.ocr.TallPageTiles
+        val tall = runCatching {
+            val image = source.loadPage(pageIndex, COMIC_OCR_TARGET_PX, TALL_OCR_MAX_HEIGHT_PX)
+            (image as? com.llzx373.foldreader.core.paged.PagedPageImage.Still)?.bitmap
+        }.getOrNull() ?: return null
+        val w = tall.width
+        val h = tall.height
+        val tileH = (w * tiles.TILE_ASPECT).toInt()
+        val ranges = tiles.tileRanges(h, tileH, tileH / tiles.OVERLAP_DIVISOR)
+        val detected = ArrayList<Pair<IntRange, List<com.llzx373.foldreader.core.ocr.OcrBubble>>>(ranges.size)
+        for (range in ranges) {
+            val tile = runCatching {
+                android.graphics.Bitmap.createBitmap(tall, 0, range.first, w, range.last - range.first)
+            }.getOrNull() ?: continue
+            val bubbles = ocrEngine.detectBubbles(tile, recSpec, rtl)
+                .map { tiles.toPageBubble(it, range.first, range.last - range.first, h) }
+            detected += range to bubbles
+        }
+        if (detected.isEmpty()) return null
+        val merged = tiles.merge(detected, h)
+        return com.llzx373.foldreader.core.ocr.BubbleGrouping.sortBubbles(merged, rtl)
+            .mapIndexed { index, bubble -> bubble.copy(index = index) }
     }
 
     /**
@@ -1120,6 +1163,10 @@ class AppContainer(context: Context) {
 
         /** M22 漫画气泡识别的页位图目标边长（px）：OCR 降采样上限。 */
         private const val COMIC_OCR_TARGET_PX = 1600
+
+        /** 超长页分片检测（M31）的重解高度上限：宽 1600 × 片高 2× 宽 × 片数封顶。 */
+        private const val TALL_OCR_MAX_HEIGHT_PX =
+            COMIC_OCR_TARGET_PX * 2 * com.llzx373.foldreader.core.ocr.TallPageTiles.MAX_TILES
 
         /** 视觉翻译的页图像边长上限：再大只是白白烧 token，视觉模型输入本身也会缩放。 */
         private const val COMIC_VISION_TARGET_PX = 1024
