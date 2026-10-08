@@ -35,6 +35,10 @@ object SelectionTranslatePrompt {
         AiTargetLang.ZH_HANT -> "繁體中文"
         AiTargetLang.EN -> "English"
         AiTargetLang.JA -> "日本語"
+        AiTargetLang.KO -> "한국어"
+        AiTargetLang.FR -> "Français"
+        AiTargetLang.DE -> "Deutsch"
+        AiTargetLang.ES -> "Español"
     }
 
     /** SYSTEM 给任务与目标语言，USER 原样附上选中原文。 */

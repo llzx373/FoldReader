@@ -37,6 +37,10 @@ class ComicTranslatePromptTest {
             AiTargetLang.ZH_HANT to "繁體中文",
             AiTargetLang.EN to "English",
             AiTargetLang.JA to "日本語",
+            AiTargetLang.KO to "한국어",
+            AiTargetLang.FR to "Français",
+            AiTargetLang.DE to "Deutsch",
+            AiTargetLang.ES to "Español",
         )) {
             val messages = ComicTranslatePrompt.buildMessages(listOf("a"), lang)
             val system = (messages[0].content[0] as com.llzx373.foldreader.core.ai.AiContent.Text).text

@@ -187,6 +187,10 @@ private val LANG_OPTIONS = listOf(
     AiTargetLang.ZH_HANT to "繁中",
     AiTargetLang.EN to "EN",
     AiTargetLang.JA to "日",
+    AiTargetLang.KO to "韩",
+    AiTargetLang.FR to "法",
+    AiTargetLang.DE to "德",
+    AiTargetLang.ES to "西",
 )
 
 /** 台账 feature 名（确认页整书记一次；引擎仍按单位记「章节翻译」）。 */

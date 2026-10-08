@@ -3,8 +3,8 @@ package com.llzx373.foldreader.core.ai
 /** AI 服务商协议族。 */
 enum class AiProtocol { OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC }
 
-/** 翻译/输出目标语言。 */
-enum class AiTargetLang { ZH_HANS, ZH_HANT, EN, JA }
+/** 翻译/输出目标语言。M30 起扩为 8 种（首版简中/繁中/英/日，+韩/法/德/西）。 */
+enum class AiTargetLang { ZH_HANS, ZH_HANT, EN, JA, KO, FR, DE, ES }
 
 /**
  * AI 服务连接配置。

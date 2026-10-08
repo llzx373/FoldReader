@@ -26,6 +26,10 @@ class SelectionTranslatePromptTest {
             AiTargetLang.ZH_HANT to "繁體中文",
             AiTargetLang.EN to "English",
             AiTargetLang.JA to "日本語",
+            AiTargetLang.KO to "한국어",
+            AiTargetLang.FR to "Français",
+            AiTargetLang.DE to "Deutsch",
+            AiTargetLang.ES to "Español",
         )
         cases.forEach { (lang, name) ->
             val messages = SelectionTranslatePrompt.buildMessages("text", lang)

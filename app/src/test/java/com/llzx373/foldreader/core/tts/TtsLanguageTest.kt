@@ -70,7 +70,8 @@ class TtsLanguageTest {
     @Test
     fun `fromNameOrNull - 合法枚举名还原，非法与 null 归 null`() {
         assertEquals(TtsLanguage.ZH_CN, TtsLanguage.fromNameOrNull("ZH_CN"))
-        assertNull(TtsLanguage.fromNameOrNull("FR"))
+        assertEquals(TtsLanguage.KO, TtsLanguage.fromNameOrNull("KO"))
+        assertNull(TtsLanguage.fromNameOrNull("XX"))
         assertNull(TtsLanguage.fromNameOrNull(null))
     }
 
@@ -80,6 +81,20 @@ class TtsLanguageTest {
         assertEquals("zh-TW", TtsLanguage.ZH_TW.languageTag)
         assertEquals("en", TtsLanguage.EN.languageTag)
         assertEquals("ja", TtsLanguage.JA.languageTag)
+        assertEquals("ko", TtsLanguage.KO.languageTag)
+        assertEquals("fr", TtsLanguage.FR.languageTag)
+        assertEquals("de", TtsLanguage.DE.languageTag)
+        assertEquals("es", TtsLanguage.ES.languageTag)
         assertEquals("简体中文", TtsLanguage.ZH_CN.displayName)
+        assertEquals("韩语", TtsLanguage.KO.displayName)
+    }
+
+    @Test
+    fun `fromAiTarget - 新增目标语言映射到对应朗读语言`() {
+        assertEquals(TtsLanguage.KO, TtsLanguage.fromAiTarget(AiTargetLang.KO))
+        assertEquals(TtsLanguage.FR, TtsLanguage.fromAiTarget(AiTargetLang.FR))
+        assertEquals(TtsLanguage.DE, TtsLanguage.fromAiTarget(AiTargetLang.DE))
+        assertEquals(TtsLanguage.ES, TtsLanguage.fromAiTarget(AiTargetLang.ES))
+        assertNull(TtsLanguage.fromAiTarget(null))
     }
 }

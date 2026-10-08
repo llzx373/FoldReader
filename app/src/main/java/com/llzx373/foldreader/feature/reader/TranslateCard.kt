@@ -204,4 +204,8 @@ internal fun translateLangLabel(lang: AiTargetLang): String = when (lang) {
     AiTargetLang.ZH_HANT -> "繁中"
     AiTargetLang.EN -> "EN"
     AiTargetLang.JA -> "日"
+    AiTargetLang.KO -> "韩"
+    AiTargetLang.FR -> "法"
+    AiTargetLang.DE -> "德"
+    AiTargetLang.ES -> "西"
 }

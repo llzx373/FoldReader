@@ -58,6 +58,7 @@ import com.llzx373.foldreader.core.ai.AiProtocol
 import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.ai.gate.AiContentGate
 import com.llzx373.foldreader.core.ai.prompt.BuiltinPrompts
+import com.llzx373.foldreader.core.ai.prompt.SelectionTranslatePrompt
 import com.llzx373.foldreader.core.backup.BackupManager
 import com.llzx373.foldreader.core.data.settings.ComicDirection
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
@@ -102,6 +103,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showAiHistoryDialog by remember { mutableStateOf(false) }
     var showBuiltinPromptsDialog by remember { mutableStateOf(false) }
     var showGlossaryDialog by remember { mutableStateOf(false) }
+    var showTargetLangDialog by remember { mutableStateOf(false) }
     var showDictionaryDialog by remember { mutableStateOf(false) }
     var showVocabularyDialog by remember { mutableStateOf(false) }
     val dictionaries by viewModel.dictionaries.collectAsState()
@@ -647,25 +649,13 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     supportingContent = { Text(aiTestSummary(aiTestState)) },
                     modifier = Modifier.clickable { viewModel.testConnection() },
                 )
-                SegmentedSetting(
-                    label = "默认目标语言",
-                    options = listOf("简体中文", "繁体中文", "English", "日本語"),
-                    selectedIndex = when (prefs.aiTargetLang) {
-                        AiTargetLang.ZH_HANS -> 0
-                        AiTargetLang.ZH_HANT -> 1
-                        AiTargetLang.EN -> 2
-                        AiTargetLang.JA -> 3
+                // M30：目标语言扩到 8 种，分段按钮放不下，改为弹窗单选
+                ListItem(
+                    headlineContent = { Text("默认目标语言") },
+                    supportingContent = {
+                        Text(SelectionTranslatePrompt.displayName(prefs.aiTargetLang))
                     },
-                    onSelect = { index ->
-                        viewModel.updateAiTargetLang(
-                            when (index) {
-                                1 -> AiTargetLang.ZH_HANT
-                                2 -> AiTargetLang.EN
-                                3 -> AiTargetLang.JA
-                                else -> AiTargetLang.ZH_HANS
-                            },
-                        )
-                    },
+                    modifier = Modifier.clickable { showTargetLangDialog = true },
                 )
                 ListItem(
                     headlineContent = { Text("外发历史") },
@@ -1118,6 +1108,41 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     }
     if (showGlossaryDialog) {
         GlossaryDialog(onDismiss = { showGlossaryDialog = false })
+    }
+    if (showTargetLangDialog) {
+        AlertDialog(
+            onDismissRequest = { showTargetLangDialog = false },
+            title = { Text("默认目标语言") },
+            text = {
+                Column {
+                    AiTargetLang.entries.forEach { option ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.updateAiTargetLang(option)
+                                    showTargetLangDialog = false
+                                }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            RadioButton(
+                                selected = prefs.aiTargetLang == option,
+                                onClick = null,
+                            )
+                            Text(
+                                text = SelectionTranslatePrompt.displayName(option),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showTargetLangDialog = false }) { Text("关闭") }
+            },
+        )
     }
     if (showDictionaryDialog) {
         DictionaryDialog(

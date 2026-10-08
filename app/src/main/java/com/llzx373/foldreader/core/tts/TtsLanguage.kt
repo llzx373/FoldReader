@@ -14,6 +14,10 @@ enum class TtsLanguage(val displayName: String, val languageTag: String) {
     ZH_TW("繁体中文", "zh-TW"),
     EN("英语", "en"),
     JA("日语", "ja"),
+    KO("韩语", "ko"),
+    FR("法语", "fr"),
+    DE("德语", "de"),
+    ES("西班牙语", "es"),
     ;
 
     fun toLocale(): Locale = Locale.forLanguageTag(languageTag)
@@ -31,6 +35,10 @@ enum class TtsLanguage(val displayName: String, val languageTag: String) {
                 AiTargetLang.ZH_HANT -> ZH_TW
                 AiTargetLang.EN -> EN
                 AiTargetLang.JA -> JA
+                AiTargetLang.KO -> KO
+                AiTargetLang.FR -> FR
+                AiTargetLang.DE -> DE
+                AiTargetLang.ES -> ES
                 null -> null
             }
 
