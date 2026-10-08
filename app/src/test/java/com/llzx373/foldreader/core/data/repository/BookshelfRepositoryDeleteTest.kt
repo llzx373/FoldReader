@@ -368,6 +368,8 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun upsert(session: ReadingSessionEntity) = Unit
         override suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> = emptyList()
         override suspend fun getAll(): List<ReadingSessionEntity> = emptyList()
+
+        override suspend fun dayStartsWithReading(): List<Long> = emptyList()
         override suspend fun countReadingDays(bookId: Long): Int = 0
     }
 }

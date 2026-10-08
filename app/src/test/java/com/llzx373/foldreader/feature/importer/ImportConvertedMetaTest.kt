@@ -115,6 +115,7 @@ class ImportConvertedMetaTest {
         override suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long) =
             throw UnsupportedOperationException()
         override suspend fun getReadingDayCount(bookId: Long) = throw UnsupportedOperationException()
+        override suspend fun getReadingDayStarts(): List<Long> = throw UnsupportedOperationException()
     }
 
     private val fullMeta = BookMeta(

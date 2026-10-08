@@ -320,5 +320,6 @@ class ImportBookCleanTest {
         override suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =
             emptyList()
         override suspend fun getReadingDayCount(bookId: Long): Int = 0
+        override suspend fun getReadingDayStarts(): List<Long> = emptyList()
     }
 }

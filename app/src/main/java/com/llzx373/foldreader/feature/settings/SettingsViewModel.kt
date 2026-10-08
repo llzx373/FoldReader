@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +78,11 @@ class SettingsViewModel(
         val weekMillis: Long = 0,
         val monthMillis: Long = 0,
         val last7Days: List<Pair<Long, Long>> = emptyList(),
+        /** M34：今日已读时长（毫秒）与每日目标（分钟，0 = 未设目标）。 */
+        val todayMillis: Long = 0,
+        val goalMinutes: Int = 0,
+        /** M34：连续打卡天数（有阅读记录的日期从今天/昨天往回逐日连续计数）。 */
+        val streakDays: Int = 0,
     )
 
     private val _readingStats = MutableStateFlow(ReadingStatsUi())
@@ -84,6 +91,13 @@ class SettingsViewModel(
     init {
         refreshReadingStats()
         refreshDictionaries()
+        // 目标分钟数是偏好：改了立刻重算展示（日桶本身由阅读器落库，进设置页时 refresh）
+        launch {
+            settingsRepository.preferences
+                .map { it.dailyReadingGoalMinutes }
+                .distinctUntilChanged()
+                .collect { refreshReadingStats() }
+        }
     }
 
     fun refreshReadingStats() = launch {
@@ -92,6 +106,8 @@ class SettingsViewModel(
         val monthStart = com.llzx373.foldreader.core.reader.monthStartMs(now, zone)
         val sessions = bookshelfRepository.getReadingSessionsBetween(monthStart, now)
             .map { it.dayStartMs to it.durationMs }
+        // 连续打卡要跨月回溯，本月的区间查询覆盖不了月初断点，另取全量日桶起点
+        val dayStarts = bookshelfRepository.getReadingDayStarts()
         _readingStats.value = ReadingStatsUi(
             weekMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
                 sessions, com.llzx373.foldreader.core.reader.weekStartMs(now, zone), now,
@@ -100,8 +116,15 @@ class SettingsViewModel(
                 sessions, monthStart, now,
             ),
             last7Days = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 7, zone),
+            todayMillis = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 1, zone)
+                .firstOrNull()?.second ?: 0L,
+            goalMinutes = preferences.value.dailyReadingGoalMinutes,
+            streakDays = com.llzx373.foldreader.core.reader.readingStreakDays(dayStarts, now, zone),
         )
     }
+
+    fun updateDailyReadingGoalMinutes(minutes: Int) =
+        launch { settingsRepository.setDailyReadingGoalMinutes(minutes) }
 
     fun updateFontSize(sizeSp: Float) = launch { settingsRepository.setFontSize(sizeSp) }
     fun updateLineSpacing(multiplier: Float) = launch { settingsRepository.setLineSpacing(multiplier) }

@@ -802,6 +802,29 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             ReadingStatsSection(stats = readingStats)
+            // M34：每日阅读目标（分钟）；打卡数据复用阅读统计日桶，零新采集
+            SegmentedSetting(
+                label = "每日阅读目标",
+                options = listOf("关闭", "10 分钟", "20 分钟", "30 分钟", "60 分钟"),
+                selectedIndex = when (prefs.dailyReadingGoalMinutes) {
+                    10 -> 1
+                    20 -> 2
+                    30 -> 3
+                    60 -> 4
+                    else -> 0
+                },
+                onSelect = { index ->
+                    viewModel.updateDailyReadingGoalMinutes(
+                        when (index) {
+                            1 -> 10
+                            2 -> 20
+                            3 -> 30
+                            4 -> 60
+                            else -> 0
+                        },
+                    )
+                },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("备份与恢复")

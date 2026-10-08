@@ -1033,6 +1033,7 @@ class BackupCodecTest {
         override suspend fun setAutoBackupKeepCount(keep: Int) =
             update { copy(autoBackupKeepCount = keep) }
 
+        override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) =
             update { copy(autoBackupLastRunAt = timestamp) }
 
@@ -1148,6 +1149,8 @@ class BackupCodecTest {
             endMs: Long,
         ): List<ReadingSessionEntity> = emptyList()
         override suspend fun getReadingDayCount(bookId: Long): Int = 0
+
+        override suspend fun getReadingDayStarts(): List<Long> = emptyList()
     }
 
     private class FakeBookPrefsDao : BookPrefsDao {
@@ -1191,6 +1194,9 @@ class BackupCodecTest {
         override suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =
             rows.filter { it.dayStartMs in startMs..endMs }
         override suspend fun getAll(): List<ReadingSessionEntity> = rows.toList()
+
+        override suspend fun dayStartsWithReading(): List<Long> =
+            rows.filter { it.durationMs > 0 }.map { it.dayStartMs }.distinct()
         override suspend fun countReadingDays(bookId: Long): Int =
             rows.filter { it.bookId == bookId }.size
     }

@@ -233,6 +233,8 @@ class FakeBookshelfRepository : BookshelfRepository {
 
     override suspend fun getReadingDayCount(bookId: Long): Int = unsupported()
 
+    override suspend fun getReadingDayStarts(): List<Long> = unsupported()
+
     private fun unsupported(): Nothing =
         error("FakeBookshelfRepository 未实现该接口（本测试用不到）")
 }

@@ -102,6 +102,7 @@ class AutoBackupRunnerTest {
             update { copy(autoBackupDirUri = treeUri) }
         override suspend fun setAutoBackupKeepCount(keep: Int) =
             update { copy(autoBackupKeepCount = keep) }
+        override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) =
             update { copy(autoBackupLastRunAt = timestamp) }
 

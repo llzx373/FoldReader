@@ -114,4 +114,52 @@ class ReadingStatsTest {
         assertEquals("3 小时 25 分", formatDurationZh((3 * 60 + 25) * 60_000L))
         assertEquals("2 小时", formatDurationZh(120 * 60_000L))
     }
+
+    // ---- M34：连续打卡与每日目标 ----
+
+    @Test
+    fun `streak counts consecutive days ending today`() {
+        val today = 10 * dayMs
+        // 今天 + 前三天连续 → 4
+        assertEquals(
+            4,
+            readingStreakDays(listOf(today, today - dayMs, today - 2 * dayMs, today - 3 * dayMs), today + 1000L, utc),
+        )
+        // 前天断档 → 只算今天 + 昨天 = 2
+        assertEquals(2, readingStreakDays(listOf(today, today - dayMs, today - 3 * dayMs), today + 1000L, utc))
+    }
+
+    @Test
+    fun `streak survives today not yet read`() {
+        val today = 10 * dayMs
+        // 今天还没读：从昨天往回数，连续 3 天
+        assertEquals(
+            3,
+            readingStreakDays(listOf(today - dayMs, today - 2 * dayMs, today - 3 * dayMs), today + 1000L, utc),
+        )
+        // 昨天也没读 = 连续已断
+        assertEquals(0, readingStreakDays(listOf(today - 2 * dayMs), today + 1000L, utc))
+        assertEquals(0, readingStreakDays(emptyList(), today + 1000L, utc))
+    }
+
+    @Test
+    fun `streak respects timezone day boundaries`() {
+        // 上海时区的本地 0 点桶：dayStartMs 仍是等距步进，跨月不影响
+        val t = 10 * dayMs + 12 * 3_600_000L
+        val todayCst = dayStartMs(t, cst)
+        assertEquals(
+            2,
+            readingStreakDays(listOf(todayCst, todayCst - dayMs), t, cst),
+        )
+        // UTC 口径下同一时刻属于不同本地日：UTC 今天无记录、昨天有 → 1
+        val todayUtc = dayStartMs(t, utc)
+        assertEquals(1, readingStreakDays(listOf(todayUtc - dayMs), t, utc))
+    }
+
+    @Test
+    fun `daily goal progress clamps and zero goal disables`() {
+        assertEquals(0f, dailyGoalProgress(5 * 60_000L, 0), 0.001f)
+        assertEquals(0.5f, dailyGoalProgress(10 * 60_000L, 20), 0.001f)
+        assertEquals(1f, dailyGoalProgress(30 * 60_000L, 20), 0.001f)
+    }
 }

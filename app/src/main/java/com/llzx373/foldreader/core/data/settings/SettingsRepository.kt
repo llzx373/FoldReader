@@ -107,4 +107,6 @@ interface SettingsRepository {
     suspend fun setAutoBackupDirUri(treeUri: String)
     suspend fun setAutoBackupKeepCount(keep: Int)
     suspend fun setAutoBackupLastRunAt(timestamp: Long)
+    /** M34：每日阅读目标（分钟）；0 = 未设目标。 */
+    suspend fun setDailyReadingGoalMinutes(minutes: Int)
 }

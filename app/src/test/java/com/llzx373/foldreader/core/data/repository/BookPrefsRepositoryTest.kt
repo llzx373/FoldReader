@@ -353,5 +353,6 @@ class BookPrefsRepositoryTest {
         override suspend fun setAutoBackupDirUri(treeUri: String) = Unit
         override suspend fun setAutoBackupKeepCount(keep: Int) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) = Unit
+        override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
     }
 }

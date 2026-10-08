@@ -122,4 +122,7 @@ interface BookshelfRepository {
 
     /** 实际阅读天数：该书有阅读记录的日期去重计数。 */
     suspend fun getReadingDayCount(bookId: Long): Int
+
+    /** M34：有阅读记录的全部日桶起点（跨全部书籍），供连续打卡计算。 */
+    suspend fun getReadingDayStarts(): List<Long>
 }

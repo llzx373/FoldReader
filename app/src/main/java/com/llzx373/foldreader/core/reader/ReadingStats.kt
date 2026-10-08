@@ -98,3 +98,33 @@ fun dayOfMonthOf(dayStartMs: Long, zone: ZoneId): Int =
 
 fun monthOf(dayStartMs: Long, zone: ZoneId): Int =
     Instant.ofEpochMilli(dayStartMs).atZone(zone).monthValue
+
+/**
+ * M34 连续打卡天数：有阅读记录（时长 > 0 的日桶）的日期从今天往回逐日连续计数。
+ *
+ * 今天还没读不打断连续——从昨天起算（今天读完任何一段就续上）；昨天也没读才是真的断了，
+ * 返回 0。跨月/跨年由 dayStartMs 的等距步进（86400_000L）天然覆盖（各桶本来就是本地 0 点）。
+ */
+fun readingStreakDays(dayStartMsList: List<Long>, todayMs: Long, zone: ZoneId): Int {
+    val days = dayStartMsList.toSet()
+    if (days.isEmpty()) return 0
+    val today = dayStartMs(todayMs, zone)
+    // 起点：今天有记录从今天算，否则从昨天算；昨天也没有 = 连续已断
+    var cursor = when {
+        days.contains(today) -> today
+        days.contains(today - DAY_MS) -> today - DAY_MS
+        else -> return 0
+    }
+    var streak = 0
+    while (days.contains(cursor)) {
+        streak++
+        cursor -= DAY_MS
+    }
+    return streak
+}
+
+private const val DAY_MS = 86_400_000L
+
+/** M34 今日目标进度：目标分钟数 ≤ 0 表示未设目标（界面只展示今日时长，不画进度条）。 */
+fun dailyGoalProgress(todayMillis: Long, goalMinutes: Int): Float =
+    if (goalMinutes <= 0) 0f else (todayMillis / (goalMinutes * 60_000f)).coerceIn(0f, 1f)

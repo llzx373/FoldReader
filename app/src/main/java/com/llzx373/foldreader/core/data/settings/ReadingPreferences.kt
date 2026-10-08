@@ -188,6 +188,11 @@ data class ReadingPreferences(
     val autoBackupKeepCount: Int = 5,
     /** 上次成功自动备份时间；0 = 从未成功。 */
     val autoBackupLastRunAt: Long = 0,
+    /**
+     * M34：每日阅读目标（分钟）；0 = 未设目标（设置页统计区只展示今日时长，不画目标进度）。
+     * 打卡数据零新采集：今日时长与连续天数全部复用 reading_sessions 日桶。
+     */
+    val dailyReadingGoalMinutes: Int = 0,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

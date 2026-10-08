@@ -272,6 +272,8 @@ class BookshelfRepositoryImpl(
         sessionDao.getBetween(startMs, endMs)
 
     override suspend fun getReadingDayCount(bookId: Long): Int = sessionDao.countReadingDays(bookId)
+
+    override suspend fun getReadingDayStarts(): List<Long> = sessionDao.dayStartsWithReading()
 }
 
 /**

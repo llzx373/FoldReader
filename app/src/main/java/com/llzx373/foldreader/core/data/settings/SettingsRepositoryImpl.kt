@@ -103,6 +103,7 @@ class SettingsRepositoryImpl(
         val AUTO_BACKUP_DIR_URI = stringPreferencesKey("auto_backup_dir_uri")
         val AUTO_BACKUP_KEEP_COUNT = intPreferencesKey("auto_backup_keep_count")
         val AUTO_BACKUP_LAST_RUN_AT = longPreferencesKey("auto_backup_last_run_at")
+        val DAILY_READING_GOAL_MINUTES = intPreferencesKey("daily_reading_goal_minutes")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -213,6 +214,8 @@ class SettingsRepositoryImpl(
                 autoBackupDirUri = prefs[Keys.AUTO_BACKUP_DIR_URI] ?: defaults.autoBackupDirUri,
                 autoBackupKeepCount = prefs[Keys.AUTO_BACKUP_KEEP_COUNT] ?: defaults.autoBackupKeepCount,
                 autoBackupLastRunAt = prefs[Keys.AUTO_BACKUP_LAST_RUN_AT] ?: defaults.autoBackupLastRunAt,
+                dailyReadingGoalMinutes = prefs[Keys.DAILY_READING_GOAL_MINUTES]
+                    ?: defaults.dailyReadingGoalMinutes,
             )
         }
 
@@ -573,5 +576,11 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAutoBackupLastRunAt(timestamp: Long) {
         context.readingPreferencesStore.edit { it[Keys.AUTO_BACKUP_LAST_RUN_AT] = timestamp }
+    }
+
+    override suspend fun setDailyReadingGoalMinutes(minutes: Int) {
+        context.readingPreferencesStore.edit {
+            it[Keys.DAILY_READING_GOAL_MINUTES] = minutes.coerceIn(0, 24 * 60)
+        }
     }
 }

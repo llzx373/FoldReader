@@ -20,7 +20,7 @@ import com.llzx373.foldreader.core.reader.dayOfMonthOf
 import com.llzx373.foldreader.core.reader.formatDurationZh
 import com.llzx373.foldreader.core.reader.monthOf
 
-/** 设置页「阅读统计」区：本周/本月时长 + 近 7 天圆角柱状图。 */
+/** 设置页「阅读统计」区：今日目标进度 + 连续打卡 + 本周/本月时长 + 近 7 天圆角柱状图。 */
 @Composable
 fun ReadingStatsSection(stats: SettingsViewModel.ReadingStatsUi) {
     val zone = java.time.ZoneId.systemDefault()
@@ -30,6 +30,47 @@ fun ReadingStatsSection(stats: SettingsViewModel.ReadingStatsUi) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
     )
+    // M34：今日目标进度 + 连续打卡（数据全部复用 reading_sessions 日桶，零新采集）
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Row {
+            Text(
+                text = if (stats.goalMinutes > 0) {
+                    "今日 ${formatDurationZh(stats.todayMillis)} / 目标 ${stats.goalMinutes} 分钟"
+                } else {
+                    "今日 ${formatDurationZh(stats.todayMillis)}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (stats.streakDays > 0) {
+                Text(
+                    text = "连续 ${stats.streakDays} 天",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        if (stats.goalMinutes > 0) {
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = {
+                    com.llzx373.foldreader.core.reader.dailyGoalProgress(
+                        stats.todayMillis, stats.goalMinutes,
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+            )
+            if (stats.todayMillis >= stats.goalMinutes * 60_000L) {
+                Text(
+                    text = "今日目标已达成 ✓",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
     Row(modifier = Modifier.padding(horizontal = 16.dp)) {
         Text(
             text = "本周 ${formatDurationZh(stats.weekMillis)}",
