@@ -29,10 +29,12 @@ class ComicTranslationQueue(
     /** 书名与页数（进度展示 / 页数上限）；null = 书不存在。 */
     private val bookFor: suspend (bookId: Long) -> Pair<String, Int>?,
     private val pageDao: ComicPageTranslationDao,
-    /** 单页翻译调用（生产 = ComicTranslateEngine.translatePage；测试 = fake）。 */
+    /** 单页翻译调用（生产 = ComicTranslateEngine.translatePage/translatePageVision；测试 = fake）。 */
     private val translatePageCall:
-        suspend (bookId: Long, bookTitle: String, pageIndex: Int, lang: AiTargetLang) -> Result<Int>,
+        suspend (bookId: Long, bookTitle: String, pageIndex: Int, lang: AiTargetLang, vision: Boolean) -> Result<Int>,
     private val betweenPagesDelayMs: Long = BETWEEN_PAGES_DELAY_MS,
+    /** 视觉模式（M30）的页间隔限速：整页图像外发，成本与速率都远高于文本模式。 */
+    private val visionBetweenPagesDelayMs: Long = VISION_BETWEEN_PAGES_DELAY_MS,
     private val maxPageRetries: Int = MAX_PAGE_RETRIES,
     private val retryBaseDelayMs: Long = RETRY_BASE_DELAY_MS,
     private val pausePollMs: Long = PAUSE_POLL_MS,
@@ -48,9 +50,11 @@ class ComicTranslationQueue(
         val done: Int,
         val failedPages: Int = 0,
         val status: Status,
+        /** 视觉模式（M30）：整页图像外发，通知里标注区分。 */
+        val vision: Boolean = false,
     )
 
-    private data class Job(val bookId: Long, val lang: AiTargetLang)
+    private data class Job(val bookId: Long, val lang: AiTargetLang, val vision: Boolean)
 
     private val pending = Channel<Job>(Channel.UNLIMITED)
     /** 在渠道里排队 / 正在处理的书（重入队判据）；process 取出即移除。 */
@@ -88,15 +92,16 @@ class ComicTranslationQueue(
     /**
      * 入队（幂等）：已在队列直接忽略；再次入队 = 断点续译（done 页跳过）。
      * 入队前先把该书过期的 CANCELLED/FAILED 终态清掉。
+     * [vision] = true 走视觉模式（M30）：整页图像外发，页间隔限速 [VISION_BETWEEN_PAGES_DELAY_MS]。
      */
-    fun enqueueBook(bookId: Long, lang: AiTargetLang) {
+    fun enqueueBook(bookId: Long, lang: AiTargetLang, vision: Boolean = false) {
         if (isActive(bookId)) return
         cancelled.remove(bookId)
         updateProgress(bookId) {
-            BookProgress(bookId, lang, total = 0, done = 0, status = Status.QUEUED)
+            BookProgress(bookId, lang, total = 0, done = 0, status = Status.QUEUED, vision = vision)
         }
         inQueue += bookId
-        pending.trySend(Job(bookId, lang))
+        pending.trySend(Job(bookId, lang, vision))
     }
 
     /** 整队暂停 / 恢复（页粒度生效：当前页翻完才停）。 */
@@ -140,6 +145,8 @@ class ComicTranslationQueue(
             val doneSet = pageDao.getForBook(job.bookId, job.lang.name)
                 .filter { it.status == ComicPageTranslationEntity.STATUS_DONE }
                 .mapTo(HashSet()) { it.pageIndex }
+            // 视觉模式页间隔限速（整页图像外发，成本与速率远高于文本模式）
+            val pageDelay = if (job.vision) visionBetweenPagesDelayMs else betweenPagesDelayMs
             var failedPages = 0
             var cursor = 0
             updateProgress(job.bookId) {
@@ -147,6 +154,7 @@ class ComicTranslationQueue(
                     job.bookId, job.lang,
                     total = pageCount, done = doneSet.size,
                     status = Status.RUNNING,
+                    vision = job.vision,
                 )
             }
             while (true) {
@@ -179,7 +187,7 @@ class ComicTranslationQueue(
                     failedPages++
                     updateProgress(job.bookId) { it?.copy(failedPages = failedPages) }
                 }
-                if (betweenPagesDelayMs > 0) delay(betweenPagesDelayMs)
+                if (pageDelay > 0) delay(pageDelay)
             }
             updateProgress(job.bookId) {
                 it?.copy(status = Status.DONE, failedPages = failedPages)
@@ -200,7 +208,7 @@ class ComicTranslationQueue(
         kotlinx.coroutines.coroutineScope {
             val pageJob = launch {
                 while (true) {
-                    result = translatePageCall(job.bookId, bookTitle, pageIndex, job.lang)
+                    result = translatePageCall(job.bookId, bookTitle, pageIndex, job.lang, job.vision)
                     if (result?.isSuccess == true) break
                     attempt++
                     if (attempt > maxPageRetries) break
@@ -222,6 +230,9 @@ class ComicTranslationQueue(
     private companion object {
         /** 页间让出：串行翻译不占满，阅读/翻页保持流畅。 */
         const val BETWEEN_PAGES_DELAY_MS = 200L
+
+        /** 视觉模式（M30）页间隔限速：整页图像外发，给服务商与账单都留喘息。 */
+        const val VISION_BETWEEN_PAGES_DELAY_MS = 1_500L
 
         /** 单页失败后的队列级重试次数（引擎内部另有一次整体重试）。 */
         const val MAX_PAGE_RETRIES = 2

@@ -57,6 +57,7 @@ class ComicTranslationQueueTest {
     /** 记录调用顺序、可按页编排成败、可用门闩卡住某次调用的假翻译调用。 */
     private class FakeTranslate {
         val calls = mutableListOf<Pair<Long, Int>>() // bookId to pageIndex
+        val visionCalls = mutableListOf<Pair<Long, Int>>() // 视觉模式的调用
         val failures = mutableSetOf<Pair<Long, Int>>() // 恒败页
         var gate: CompletableDeferred<Unit>? = null // 非空时每次调用前等待放行
 
@@ -65,9 +66,11 @@ class ComicTranslationQueueTest {
             bookTitle: String,
             pageIndex: Int,
             lang: AiTargetLang,
+            vision: Boolean,
         ): Result<Int> {
             gate?.await()
             calls += bookId to pageIndex
+            if (vision) visionCalls += bookId to pageIndex
             val key = bookId to pageIndex
             return if (key in failures) {
                 Result.failure(IllegalStateException("恒败"))
@@ -103,6 +106,7 @@ class ComicTranslationQueueTest {
             pageDao = dao,
             translatePageCall = translate::translate,
             betweenPagesDelayMs = 1L,
+            visionBetweenPagesDelayMs = 1L,
             maxPageRetries = 2,
             retryBaseDelayMs = 5L,
             pausePollMs = 5L,
@@ -213,5 +217,17 @@ class ComicTranslationQueueTest {
 
         assertTrue(pausedCalls <= 1)
         assertEquals(2, translate.calls.size)
+    }
+
+    @Test
+    fun `视觉模式整卷入队走视觉调用且进度带标记`() = runBlocking {
+        val translate = FakeTranslate()
+        val queue = newQueue(this, FakePageDao(), mapOf(7L to ("漫画" to 2)), translate)
+
+        queue.enqueueBook(7L, AiTargetLang.ZH_HANS, vision = true)
+        val done = awaitProgress(queue, 7L) { it?.status == ComicTranslationQueue.Status.DONE }
+
+        assertEquals(listOf(7L to 0, 7L to 1), translate.visionCalls)
+        assertEquals(true, done?.vision)
     }
 }

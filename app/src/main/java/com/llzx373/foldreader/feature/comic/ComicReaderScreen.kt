@@ -237,6 +237,8 @@ fun ComicReaderScreen(
     // 视觉翻译（M23）：页图像外发的逐书确认 + 进度对话框
     var visionTranslateVisible by remember { mutableStateOf(false) }
     var visionTranslateStarted by remember { mutableStateOf(false) }
+    // 视觉整卷（M30）：整页图像逐页外发的确认页（页数/成本/限速 + 逐书首次确认）
+    var volumeVisionTranslateVisible by remember { mutableStateOf(false) }
     var pendingTranslateAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // 同系列的前后卷：直接从状态列表推，避免在组合期调用 ViewModel 函数（那样系列载入后不会重组）
@@ -1562,6 +1564,17 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
+                    // 视觉整卷（M30）：同一配置闸门；确认页明示整页图片外发 × N 页、成本估算与限速
+                    onTranslateVolumeVision = if (translationAvailable &&
+                        prefs.aiModelVision.ifBlank { prefs.aiModelGeneral }.isNotBlank()
+                    ) {
+                        {
+                            menuVisible = false
+                            withTranslateConfirm { volumeVisionTranslateVisible = true }
+                        }
+                    } else {
+                        null
+                    },
                     onSelectPageTurnMode = viewModel::setPageTurnMode,
                     onSelectDirection = viewModel::setComicDirection,
                     onSelectFitMode = viewModel::setComicFitMode,
@@ -1702,6 +1715,27 @@ fun ComicReaderScreen(
                     viewModel.translateVolume()
                 },
                 onDismiss = { volumeTranslateVisible = false },
+            )
+        }
+
+        // 视觉整卷（M30）：整页图像逐页外发；逐书首次确认复用 aiComicVisionConfirmedBooks
+        if (volumeVisionTranslateVisible) {
+            ComicVisionVolumeTranslateConfirmDialog(
+                totalPages = uiState.pageCount,
+                donePages = translationPageStatus.count {
+                    it.value == com.llzx373.foldreader.core.data.db.ComicPageTranslationEntity.STATUS_DONE
+                },
+                lang = translationLang,
+                model = prefs.aiModelVision.ifBlank { prefs.aiModelGeneral },
+                pricePerMillion = prefs.aiPricePerMillion,
+                firstConfirm = !prefs.aiComicVisionConfirmedFor(bookId),
+                colors = colors,
+                onStart = {
+                    volumeVisionTranslateVisible = false
+                    scope.launch { app.container.settingsRepository.confirmAiComicVisionForBook(bookId) }
+                    viewModel.translateVolume(vision = true)
+                },
+                onDismiss = { volumeVisionTranslateVisible = false },
             )
         }
 

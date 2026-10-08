@@ -94,7 +94,8 @@ class ComicTranslationService : Service() {
                 ComicTranslationQueue.Status.PAUSED -> "已暂停"
                 else -> "翻译中"
             }
-            "$title：${p.done}/${p.total}（$state）"
+            // 视觉模式（M30）标注出来：整页图像外发，成本口径与文本模式不同
+            "$title：${p.done}/${p.total}（$state${if (p.vision) " · 视觉" else ""}）"
         }
         // 异步补书名（首次出现的书先显示占位，下次限频窗口自然带上真名）
         scope.launch(Dispatchers.IO) {

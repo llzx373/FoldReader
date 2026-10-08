@@ -286,6 +286,87 @@ fun ComicVisionTranslateDialog(
 }
 
 /**
+ * M30「视觉翻译整卷」确认页：整页图像逐页外发 × N 页，明示页数、token/成本估算与限速。
+ *
+ * 与文本整卷（[ComicVolumeTranslateConfirmDialog]）的关键区别：这里每页都把整页图片
+ * （不只是文字）发给视觉模型，所以必须明示「外发的是图片 × 页数」并给出成本估算。
+ * [firstConfirm] = 该书首次使用视觉外发（复用 aiComicVisionConfirmedBooks 逐书确认），
+ * 确认按钮文案变为「同意外发并开始」，确认动作由调用方落账。
+ */
+@Composable
+fun ComicVisionVolumeTranslateConfirmDialog(
+    totalPages: Int,
+    donePages: Int,
+    lang: AiTargetLang,
+    model: String,
+    pricePerMillion: Double,
+    firstConfirm: Boolean,
+    colors: ReaderColors,
+    onStart: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val pendingPages = (totalPages - donePages).coerceAtLeast(0)
+    val estimatedTokens = pendingPages.toLong() * VISION_EST_TOKENS_PER_PAGE
+    val estimatedCost = estimatedTokens / 1_000_000.0 * pricePerMillion
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.background,
+        title = { Text("视觉翻译整卷") },
+        text = {
+            Column {
+                Text(
+                    text = buildString {
+                        append("范围：全书 $totalPages 页")
+                        if (donePages > 0) append("（已译 $donePages 页将自动跳过，断点续译）")
+                        append("，目标语言：${translateLangLabel(lang)}")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "与「翻译整卷」不同：视觉模式会把每页的整页图片（不只是文字）" +
+                        "逐页发送给视觉模型 $model，共外发整页图片 × $pendingPages 页。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "估算：约 ${estimatedTokens / 1000}K token，费用约 ¥%.2f".format(estimatedCost) +
+                        "（按每页图像 ≈${VISION_EST_TOKENS_PER_PAGE / 1000}K token 粗估，实际以服务商账单为准）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.text.copy(alpha = 0.6f),
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    // 间隔秒数与 ComicTranslationQueue.VISION_BETWEEN_PAGES_DELAY_MS（1500ms）保持一致
+                    text = "限速：每页间隔约 1.5 秒；" +
+                        "翻译在后台队列逐页进行，可随时在通知里暂停，失败的页会记为失败可续译。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.text.copy(alpha = 0.6f),
+                )
+                if (firstConfirm) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "首次使用：点击「同意外发并开始」即表示你了解整页图片将外发至所配置的服务商；" +
+                            "此确认对本书只出现一次。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.text.copy(alpha = 0.6f),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onStart, enabled = pendingPages > 0) {
+                Text(if (firstConfirm) "同意外发并开始" else "开始翻译")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 视觉模式单页 token 粗估：长边 1024px JPEG q85 ≈ 150KB → base64 ≈ 200K 字符 → /16 ≈ 12.5K，取整 10K。 */
+private const val VISION_EST_TOKENS_PER_PAGE = 10_000
+
+/**
  * M22 气泡对照面板（视角③）：当前页气泡的原文/译文逐条对照；
  * 点一条高亮页面上对应的气泡（覆盖层画边框），关闭时清除高亮。
  * [pairs] null = 加载中；空列表 = 该页无气泡。

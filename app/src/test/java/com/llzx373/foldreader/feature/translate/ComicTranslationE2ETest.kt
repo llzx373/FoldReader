@@ -313,7 +313,7 @@ class ComicTranslationE2ETest {
             scope = scope,
             bookFor = { id -> if (id == 1L) "测试漫画" to 3 else null },
             pageDao = db.comicPageTranslationDao(),
-            translatePageCall = { bookId, title, page, lang ->
+            translatePageCall = { bookId, title, page, lang, _ ->
                 engine.translatePage(bookId, title, page, lang)
             },
             betweenPagesDelayMs = 5,

@@ -522,17 +522,26 @@ class AppContainer(context: Context) {
                 ?.let { it.title to (it.comicPageCount ?: 0) }
         },
         pageDao = database.comicPageTranslationDao(),
-        translatePageCall = { bookId, title, pageIndex, lang ->
-            comicTranslateEngine().translatePage(bookId, title, pageIndex, lang)
+        translatePageCall = { bookId, title, pageIndex, lang, vision ->
+            if (vision) {
+                comicTranslateEngine().translatePageVision(bookId, title, pageIndex, lang)
+            } else {
+                comicTranslateEngine().translatePage(bookId, title, pageIndex, lang)
+            }
         },
     )
 
     /**
      * 漫画整卷入队（阅读器菜单入口）：断点续译由队列负责；前台服务托住进程。
      * AI 配置判定在界面层（入口不可见时本不该被调到，队列本身幂等兜底）。
+     * [vision] = 视觉模式（M30）：整页图像逐页外发，确认页的页数与成本明示在界面层完成。
      */
-    fun enqueueComicVolumeTranslation(bookId: Long, lang: com.llzx373.foldreader.core.ai.AiTargetLang) {
-        comicTranslationQueue.enqueueBook(bookId, lang)
+    fun enqueueComicVolumeTranslation(
+        bookId: Long,
+        lang: com.llzx373.foldreader.core.ai.AiTargetLang,
+        vision: Boolean = false,
+    ) {
+        comicTranslationQueue.enqueueBook(bookId, lang, vision)
         ContextCompat.startForegroundService(
             appContext,
             Intent(appContext, com.llzx373.foldreader.feature.translate.ComicTranslationService::class.java),

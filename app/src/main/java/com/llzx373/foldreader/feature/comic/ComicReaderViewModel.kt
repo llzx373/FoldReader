@@ -143,8 +143,8 @@ class ComicReaderViewModel(
      * （菜单整片隐藏）。首次外发确认与 AI 配置判定由界面层先行处理。
      */
     val comicTranslation: ComicTranslationController? = null,
-    /** 整卷批量入队（生产 = ComicTranslationQueue.enqueueBook + 前台服务拉起）。 */
-    private val enqueueVolumeTranslation: ((AiTargetLang) -> Unit)? = null,
+    /** 整卷批量入队（生产 = ComicTranslationQueue.enqueueBook + 前台服务拉起）；vision = 视觉模式（M30）。 */
+    private val enqueueVolumeTranslation: ((AiTargetLang, Boolean) -> Unit)? = null,
     private val initialPage: Int = -1,
 ) : ViewModel() {
 
@@ -513,8 +513,8 @@ class ComicReaderViewModel(
     }
 
     /** 整卷批量：入队（断点续译由队列负责），前台服务由 AppContainer 一侧拉起。 */
-    fun translateVolume() {
-        enqueueVolumeTranslation?.invoke(_translationLang.value)
+    fun translateVolume(vision: Boolean = false) {
+        enqueueVolumeTranslation?.invoke(_translationLang.value, vision)
     }
 
     // ---- 气泡位置手动微调（M23）----
@@ -1435,8 +1435,8 @@ class ComicReaderViewModel(
                     fileSizeMb = container::fileSizeMb,
                     ocrTextLayerReady = { container.modelManager.ocrReady() },
                     comicTranslation = container.comicTranslationController(bookId),
-                    enqueueVolumeTranslation = { lang ->
-                        container.enqueueComicVolumeTranslation(bookId, lang)
+                    enqueueVolumeTranslation = { lang, vision ->
+                        container.enqueueComicVolumeTranslation(bookId, lang, vision)
                     },
                     initialPage = initialPage,
                 )

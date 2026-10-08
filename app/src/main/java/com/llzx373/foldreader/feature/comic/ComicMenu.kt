@@ -214,6 +214,8 @@ fun ComicMenuPanel(
     onAdjustBubbles: (() -> Unit)? = null,
     /** 视觉翻译本页（M23）：页图像外发给视觉模型。null = 未配置视觉模型。 */
     onTranslatePageVision: (() -> Unit)? = null,
+    /** 视觉翻译整卷（M30）：整页图像逐页外发，确认页明示页数/成本/限速。null = 未配置视觉模型。 */
+    onTranslateVolumeVision: (() -> Unit)? = null,
     onSelectPageTurnMode: (PageTurnMode) -> Unit,
     onSelectDirection: (ComicDirection) -> Unit,
     onSelectFitMode: (ComicFitMode) -> Unit,
@@ -436,6 +438,12 @@ fun ComicMenuPanel(
                     }
                     if (onTranslatePageVision != null) {
                         TextButton(onClick = { onTranslatePageVision.invoke() }) { Text("视觉翻译") }
+                    }
+                    if (onTranslateVolumeVision != null) {
+                        TextButton(
+                            onClick = { onTranslateVolumeVision.invoke() },
+                            enabled = !volumeActive,
+                        ) { Text("视觉整卷") }
                     }
                     if (translatedText != null) {
                         Spacer(modifier = Modifier.weight(1f))
