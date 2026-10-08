@@ -105,6 +105,11 @@ fun ComicPageView(
     host: PageAnchorHost = PageAnchorHost(),
     /** 翻译覆盖层（视角①）：null = 不画。动图页不画覆盖层（无静态位图可取底色）。 */
     translation: ComicPageTranslation? = null,
+    /**
+     * 抹除后的整页位图（M31 inpaint）：非空时代替原图绘制（同尺寸同坐标系），
+     * 覆盖层气泡不再铺采样底色、译文直接落在干净页面上（文字带描边保持可读）。
+     */
+    inpainted: ImageBitmap? = null,
     /** 覆盖层译文字体（设置页正文字体）；null = 系统默认。 */
     translationTypeface: Typeface? = null,
     /** 对照面板点中的气泡序号（画高亮边框）；-1 = 无。 */
@@ -394,6 +399,7 @@ fun ComicPageView(
                 selection = effectiveSelection,
                 selectionCommitted = localSelection == null && effectiveSelection != null,
                 translation = translation,
+                inpainted = inpainted,
                 translationTypeface = translationTypeface,
                 highlightBubble = highlightBubble,
                 verticalText = verticalText,
@@ -436,6 +442,8 @@ private fun PageContent(
     selection: PageRect?,
     selectionCommitted: Boolean,
     translation: ComicPageTranslation?,
+    /** 抹除后的整页位图（M31 inpaint）：非空时代替原图绘制，覆盖层不铺底色。 */
+    inpainted: ImageBitmap?,
     translationTypeface: Typeface?,
     highlightBubble: Int,
     /** 竖排默认（M31）：日漫 RTL 传 true。 */
@@ -447,6 +455,9 @@ private fun PageContent(
     when (image) {
         is PagedPageImage.Still -> {
             val bitmap = remember(image) { image.bitmap.asImageBitmap() }
+            // 抹除位图与原图同尺寸同坐标系（引擎按原图整页产出），几何仍按原图算；
+            // 只在确有覆盖层时启用——抹除图是为译文准备的，没有译文别单独展示干净页
+            val shown = if (translation != null) inpainted ?: bitmap else bitmap
             // 气泡底色按页图片现算：键只取几何（流式追加译文不重采样）
             val bubbleRects = translation?.bubbles?.map { it.rect }
             val bubbleBackgrounds = remember(image.bitmap, bubbleRects) {
@@ -463,7 +474,7 @@ private fun PageContent(
                         fitMode,
                     )
                     drawScaledBitmap(
-                        bitmap = bitmap,
+                        bitmap = shown,
                         drawW = baseW * transform.scale,
                         drawH = baseH * transform.scale,
                         offsetX = transform.offsetX,
@@ -481,6 +492,8 @@ private fun PageContent(
                             typeface = translationTypeface,
                             highlightBubble = highlightBubble,
                             verticalText = verticalText,
+                            // 抹除位图里原文已被重建掉：气泡不再铺底色，译文直接画在干净页面上
+                            fillBubbles = inpainted == null,
                             // 拖动中：被拖气泡按预览矩形画底色与译文，松手才落盘
                             rectOverride = if (adjustIndex >= 0) adjustIndex to adjustRect else null,
                         )
@@ -774,6 +787,11 @@ private fun DrawScope.drawTranslationOverlay(
     highlightBubble: Int,
     /** 竖排默认（M31）：日漫 RTL 传入 true——气泡译文默认竖排；瘦长气泡（高>宽）无论方向都竖排。 */
     verticalText: Boolean = false,
+    /**
+     * 气泡是否铺采样底色（M31）：false = 页面已被 inpaint 抹除（原文不存在了），
+     * 译文直接画在干净页面上、只加一圈采样底色描边保持可读；抹除续段条目也随之不画。
+     */
+    fillBubbles: Boolean = true,
     /** 微调拖动预览：(气泡序号, 预览矩形)；该气泡按预览矩形绘制。 */
     rectOverride: Pair<Int, OcrRect?>? = null,
 ) {
@@ -786,9 +804,13 @@ private fun DrawScope.drawTranslationOverlay(
         textAlign = Paint.Align.CENTER
         this.typeface = typeface
     }
+    // 免铺底色模式（M31 inpaint）的文字描边：跟着气泡采样底色走，压住抹除边缘的杂色
+    val haloPaint = Paint(textPaint).apply { style = Paint.Style.STROKE }
     val rectF = RectF()
     translation.bubbles.forEachIndexed { index, bubble ->
-        // 抹除条目（跨页合并续段）只铺底色；未译出的不画
+        // 抹除条目（跨页合并续段）只铺底色；未译出的不画。
+        // 免铺底色模式下原文续段已随图抹掉，条目整体不画
+        if (bubble.erased && !fillBubbles) return@forEachIndexed
         if (!bubble.erased && bubble.text == null) return@forEachIndexed
         val r = if (rectOverride?.first == index) rectOverride.second ?: bubble.rect else bubble.rect
         val left = rect.left + r.left * rect.width
@@ -800,11 +822,13 @@ private fun DrawScope.drawTranslationOverlay(
         if (w <= 4f || h <= 4f) return@forEachIndexed
         rectF.set(left, top, right, bottom)
         val bg = backgrounds.getOrNull(index) ?: 0xFFFFFFFF.toInt()
-        fillPaint.color = bg
-        // 抹除要盖死原文（不透明）；译文块略透一点，边框/底色与原图融合更自然
-        fillPaint.alpha = if (bubble.erased) 255 else 235
         val corner = minOf(w, h) * 0.12f
-        canvas.drawRoundRect(rectF, corner, corner, fillPaint)
+        if (fillBubbles) {
+            fillPaint.color = bg
+            // 抹除要盖死原文（不透明）；译文块略透一点，边框/底色与原图融合更自然
+            fillPaint.alpha = if (bubble.erased) 255 else 235
+            canvas.drawRoundRect(rectF, corner, corner, fillPaint)
+        }
         if (bubble.erased) return@forEachIndexed
         val text = bubble.text ?: return@forEachIndexed
         val borderColor = when {
@@ -828,6 +852,12 @@ private fun DrawScope.drawTranslationOverlay(
         )
         textPaint.color = BubbleRender.textColorFor(bg)
         textPaint.textSize = layout.fontSize
+        haloPaint.color = bg
+        haloPaint.strokeWidth = layout.fontSize * 0.18f
+        fun drawText(text_: String, x: Float, y: Float) {
+            if (!fillBubbles) canvas.drawText(text_, x, y, haloPaint)
+            canvas.drawText(text_, x, y, textPaint)
+        }
         if (layout.vertical) {
             // 列从右往左排，列内自上而下逐字画；半角字符在竖排里仍直立画出
             // （不做 90° 旋转——估算与绘制保持同一口径，偏差可预期）
@@ -836,23 +866,17 @@ private fun DrawScope.drawTranslationOverlay(
                     columnIndex * layout.lineHeight - layout.fontSize / 2f
                 var y = top + (h - layout.columnHeight(column)) / 2f
                 for (c in column) {
-                    canvas.drawText(
-                        c.toString(),
-                        columnX,
-                        y + layout.fontSize * 0.85f,
-                        textPaint,
-                    )
+                    drawText(c.toString(), columnX, y + layout.fontSize * 0.85f)
                     y += BubbleRender.charEm(c) * layout.charAdvance
                 }
             }
         } else {
             val blockTop = top + (h - layout.textHeight) / 2f
             layout.lines.forEachIndexed { lineIndex, line ->
-                canvas.drawText(
+                drawText(
                     line,
                     (left + right) / 2f,
                     blockTop + lineIndex * layout.lineHeight + layout.fontSize * 0.85f,
-                    textPaint,
                 )
             }
         }

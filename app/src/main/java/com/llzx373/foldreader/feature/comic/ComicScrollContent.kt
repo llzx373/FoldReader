@@ -64,6 +64,7 @@ fun ComicScrollContent(
                     zoomEnabled = false,
                     pageIndex = index,
                     translation = translationFor(index),
+                    inpainted = viewModel.inpaintedPages[index],
                     translationTypeface = translationTypeface,
                     verticalText = rtl,
                     // 条漫里页是竖向连成一条的，「页内」坐标与屏幕坐标不是一套换算，暂不接受锚点手势；
@@ -73,7 +74,11 @@ fun ComicScrollContent(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            LaunchedEffect(index) { viewModel.ensurePage(index) }
+            LaunchedEffect(index) {
+                viewModel.ensurePage(index)
+                // 有覆盖层的条目顺带补抹除位图（无模型/无译文时内部直接返回）
+                viewModel.ensureInpainted(index)
+            }
         }
     }
 }

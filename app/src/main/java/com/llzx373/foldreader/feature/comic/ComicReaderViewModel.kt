@@ -48,7 +48,9 @@ import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.ai.AiTargetLang
+import com.llzx373.foldreader.core.inpaint.InpaintMask
 import com.llzx373.foldreader.core.ocr.OcrBubble
+import com.llzx373.foldreader.core.ocr.OcrRect
 import com.llzx373.foldreader.core.reader.dayStartMs
 import com.llzx373.foldreader.core.translate.ComicPageTranslation
 import com.llzx373.foldreader.core.translate.TranslatedBubble
@@ -147,6 +149,11 @@ class ComicReaderViewModel(
     val comicTranslation: ComicTranslationController? = null,
     /** 整卷批量入队（生产 = ComicTranslationQueue.enqueueBook + 前台服务拉起）；vision = 视觉模式（M30）。 */
     private val enqueueVolumeTranslation: ((AiTargetLang, Boolean) -> Unit)? = null,
+    /**
+     * 气泡抹除（M31 inpaint）：输入裁后页位图与裁后坐标系的气泡矩形，成功返回抹除后的
+     * 整页位图；模型未就绪 / 推理失败返回 null（渲染回落气泡铺采样底色）。null = 无引擎。
+     */
+    private val inpaintErase: (suspend (Bitmap, List<OcrRect>) -> Bitmap?)? = null,
     private val initialPage: Int = -1,
 ) : ViewModel() {
 
@@ -373,6 +380,21 @@ class ComicReaderViewModel(
     /** 已加载的覆盖层（页序号 → 气泡+译文）；流式翻译中逐气泡就地更新。 */
     val translationOverlays: SnapshotStateMap<Int, ComicPageTranslation> = mutableStateMapOf()
 
+    /**
+     * 抹除后的整页位图（M31 inpaint，页序号 → 位图）：覆盖层视角下优先于原图绘制，
+     * 气泡不再铺采样底色。只生成当前跨页（生成是 CPU 重活，预取页不值得）；
+     * 限量淘汰见 [putInpainted]。模型未就绪 / 失败的页不在表里（静默回落）。
+     */
+    val inpaintedPages: SnapshotStateMap<Int, ImageBitmap> = mutableStateMapOf()
+    private val inpaintedOrder = ArrayDeque<Int>()
+    private val inpaintInFlight = mutableSetOf<Int>()
+
+    /**
+     * 抹除位图表与登记集合的锁：生成协程（Default）、覆盖层加载（IO）与解码清表
+     * 会同时改这三个结构，与缩略图表同因（ArrayDeque 并发写会撞坏内部数组）。
+     */
+    private val inpaintLock = Any()
+
     /** 对照面板点中的气泡序号（覆盖层高亮边框）；-1 = 无。 */
     private val _highlightBubble = MutableStateFlow(-1)
     val highlightBubble: StateFlow<Int> = _highlightBubble.asStateFlow()
@@ -400,7 +422,65 @@ class ComicReaderViewModel(
                 val overlay = runCatching { controller.overlayFor(lang, page) }.getOrNull() ?: continue
                 if (closed.get()) return@launch
                 Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                // 抹除位图只生成当前跨页（CPU 重活，预取页不值得）
+                if (page in currentPages()) ensureInpainted(page)
             }
+        }
+    }
+
+    /**
+     * 生成一页的抹除位图（M31 inpaint）。翻页模式只服务当前跨页（生成是 CPU 重活，
+     * 预取页不值得），滚动模式由进入视口的条目直接调用。生成失败 / 模型未就绪
+     * 静默回落（覆盖层照常铺采样底色）。
+     * 气泡坐标是原页归一化，位图是裁后的——裁边启用时先按裁框映射（[InpaintMask.remapToCrop]）。
+     */
+    fun ensureInpainted(page: Int) {
+        val erase = inpaintErase ?: return
+        synchronized(inpaintLock) {
+            if (inpaintedPages.containsKey(page) || !inpaintInFlight.add(page)) return
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val still = images[page] as? PagedPageImage.Still ?: return@launch
+                val overlay = translationOverlays[page] ?: return@launch
+                val (cropEnabled, cropBox) = comicCrop.value
+                val rects = overlay.bubbles.mapNotNull { bubble ->
+                    if (cropEnabled && cropBox != null) {
+                        InpaintMask.remapToCrop(bubble.rect, cropBox)
+                    } else {
+                        bubble.rect
+                    }
+                }
+                if (rects.isEmpty()) return@launch
+                val erased = erase(still.bitmap, rects) ?: return@launch
+                if (closed.get()) return@launch
+                synchronized(inpaintLock) {
+                    Snapshot.withMutableSnapshot { putInpainted(page, erased.asImageBitmap()) }
+                }
+            } finally {
+                synchronized(inpaintLock) { inpaintInFlight.remove(page) }
+            }
+        }
+    }
+
+    /** 该页抹除位图作废（气泡微调变了坐标）：下次用到时重新生成。 */
+    private fun invalidateInpainted(page: Int) {
+        synchronized(inpaintLock) {
+            Snapshot.withMutableSnapshot { inpaintedPages.remove(page) }
+            inpaintedOrder.remove(page)
+        }
+    }
+
+    /** 抹除位图表按插入序限量淘汰（整页位图很重，只留当前附近几页）。 */
+    private fun putInpainted(page: Int, image: ImageBitmap) {
+        if (inpaintedPages.put(page, image) == null) inpaintedOrder.addLast(page)
+        while (inpaintedOrder.size > MAX_INPAINTED_PAGES) {
+            val victim = inpaintedOrder.removeFirst()
+            if (victim == page) {
+                inpaintedOrder.addLast(victim)
+                break
+            }
+            inpaintedPages.remove(victim)
         }
     }
 
@@ -453,6 +533,7 @@ class ComicReaderViewModel(
                 result.onSuccess {
                     runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
                         Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                        ensureInpainted(page)
                     }
                     _translationMode.value = ComicTranslationMode.OVERLAY
                 }.onFailure { error ->
@@ -503,6 +584,9 @@ class ComicReaderViewModel(
                 result.onSuccess {
                     runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
                         Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                        // 视觉模式会重写气泡框：旧抹除位图的坐标系已失效，作废重建
+                        invalidateInpainted(page)
+                        ensureInpainted(page)
                     }
                     _translationMode.value = ComicTranslationMode.OVERLAY
                 }.onFailure { error ->
@@ -581,6 +665,9 @@ class ComicReaderViewModel(
             ?: controller.adjustedBubblesFor(page)?.let { ComicPageTranslation.of(it, null) }
             ?: return
         Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+        // 气泡坐标变了：抹除位图作废重建
+        invalidateInpainted(page)
+        ensureInpainted(page)
     }
 
     /** 对照面板（视角③）：当前页的气泡原文 + 译文对。 */
@@ -1288,6 +1375,10 @@ class ComicReaderViewModel(
                 evictFarImages()
             }
         }
+        // 页位图晚于覆盖层到达时补生成抹除位图（只限当前跨页）
+        if (index in currentPages() && translationOverlays.containsKey(index)) {
+            ensureInpainted(index)
+        }
     }
 
     /**
@@ -1320,9 +1411,16 @@ class ComicReaderViewModel(
         // 不 recycle：位图可能正被当前帧的绘制持有，回收会直接崩在绘制阶段，
         // 这里只断开引用让 GC 回收（与 ReaderViewModel 的插图缓存同一策略）。
         // 失败标记一并清掉：低内存导致的解码失败多是暂时的，留着会让那一页永远显示「无法显示此页」
+        // 抹除位图是从已解码页派生的（且裁框/目标尺寸变化后坐标系已变），一并清掉
         Snapshot.withMutableSnapshot {
             images.clear()
             failedPages.clear()
+        }
+        synchronized(inpaintLock) {
+            Snapshot.withMutableSnapshot {
+                inpaintedPages.clear()
+                inpaintedOrder.clear()
+            }
         }
         imageBytes = 0
     }
@@ -1515,6 +1613,9 @@ class ComicReaderViewModel(
         const val THUMB_QUALITY = 80
         const val MAX_THUMBNAILS = 160
 
+        /** 抹除位图（整页位图副本）最多保留的张数：当前跨页 + 前后各一页的量。 */
+        const val MAX_INPAINTED_PAGES = 4
+
         fun factory(
             container: AppContainer,
             bookId: Long,
@@ -1533,6 +1634,7 @@ class ComicReaderViewModel(
                     fileSizeMb = container::fileSizeMb,
                     ocrTextLayerReady = { container.modelManager.ocrReady() },
                     comicTranslation = container.comicTranslationController(bookId),
+                    inpaintErase = { bitmap, rects -> container.inpaintEngine.erase(bitmap, rects) },
                     enqueueVolumeTranslation = { lang, vision ->
                         container.enqueueComicVolumeTranslation(bookId, lang, vision)
                     },
