@@ -254,6 +254,8 @@ fun BookDetailDialog(
                         com.llzx373.foldreader.feature.translate.BookTranslateEntry(bookId)
                         // M29：同上口径，摘要预生成确认页含外发范围与成本预估
                         com.llzx373.foldreader.feature.summary.BookSummaryEntry(bookId)
+                        // M30：仅 TXT + AI 已配置时渲染（组件内部自查）；结果落批注，只标不改
+                        ProofreadAiEntry(bookId)
                         if (book.format == BookFormat.TXT) {
                             val cleanDefaults by viewModel.cleanDefaults.collectAsState()
                             val cleanPreview by viewModel.cleanPreview.collectAsState()

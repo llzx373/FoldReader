@@ -215,6 +215,7 @@ class BookshelfRepositoryGroupTest {
         override suspend fun update(annotation: AnnotationEntity) = Unit
         override suspend fun deleteById(id: Long) = Unit
         override suspend fun deleteByBookIds(bookIds: List<Long>) = Unit
+        override suspend fun deleteByBookAndNotePrefix(bookId: Long, notePrefix: String) = Unit
     }
 
     private class FakeSessionDao : ReadingSessionDao {

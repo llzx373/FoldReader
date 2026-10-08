@@ -83,6 +83,8 @@ interface SettingsRepository {
     suspend fun setAiSummaryConfirmed(confirmed: Boolean)
     /** M29：问书的首次外发一次性确认（幂等）。 */
     suspend fun setAiQaConfirmed(confirmed: Boolean)
+    /** M30：AI 校对的首次外发一次性确认（幂等）。 */
+    suspend fun setAiProofreadConfirmed(confirmed: Boolean)
     suspend fun setAiComicTranslateConfirmed(confirmed: Boolean)
     /** M23：漫画视觉翻译（页图像外发）对某书的明示确认落账（幂等）。 */
     suspend fun confirmAiComicVisionForBook(bookId: Long)

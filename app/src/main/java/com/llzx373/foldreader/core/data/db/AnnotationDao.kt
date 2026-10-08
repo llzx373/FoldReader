@@ -26,4 +26,8 @@ interface AnnotationDao {
 
     @Query("DELETE FROM annotations WHERE bookId IN (:bookIds)")
     suspend fun deleteByBookIds(bookIds: List<Long>)
+
+    /** 删除某书笔记以 [notePrefix] 开头的批注（M30：AI 校对重跑前清掉上一轮的校对批注）。 */
+    @Query("DELETE FROM annotations WHERE bookId = :bookId AND note LIKE :notePrefix || '%'")
+    suspend fun deleteByBookAndNotePrefix(bookId: Long, notePrefix: String)
 }

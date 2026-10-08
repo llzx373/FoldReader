@@ -336,6 +336,7 @@ class BookPrefsRepositoryTest {
         override suspend fun setAiExplainConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiSummaryConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiQaConfirmed(confirmed: Boolean) = Unit
+        override suspend fun setAiProofreadConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) = Unit
         override suspend fun confirmAiComicVisionForBook(bookId: Long) = Unit
         override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) = Unit

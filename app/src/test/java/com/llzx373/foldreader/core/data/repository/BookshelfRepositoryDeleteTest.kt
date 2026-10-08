@@ -318,6 +318,9 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun deleteByBookIds(bookIds: List<Long>) {
             rows.removeAll { it.bookId in bookIds }
         }
+        override suspend fun deleteByBookAndNotePrefix(bookId: Long, notePrefix: String) {
+            rows.removeAll { it.bookId == bookId && it.note.orEmpty().startsWith(notePrefix) }
+        }
     }
 
     private class RecordingPageDiskCache : com.llzx373.foldreader.core.reader.PageDiskCache {
