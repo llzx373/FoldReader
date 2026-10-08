@@ -678,6 +678,12 @@ fun ChapterListDialog(
     /** M19：该章是否可点「重译」（存在已译/失败单位），下标与 [chapters] 对齐。 */
     chapterRetranslatable: List<Boolean> = emptyList(),
     onRetranslateChapter: ((Int) -> Unit)? = null,
+    /** M29：每章的摘要状态（下标与 [chapters] 对齐）。 */
+    chapterSummary: List<com.llzx373.foldreader.feature.summary.ChapterSummaryRow> = emptyList(),
+    onViewSummary: ((Int) -> Unit)? = null,
+    onGenerateSummary: ((Int) -> Unit)? = null,
+    /** M29：全书大纲入口（null = 不给）。 */
+    onOpenOutline: (() -> Unit)? = null,
 ) {
     var showPersons by remember { mutableStateOf(false) }
     AlertDialog(
@@ -705,6 +711,14 @@ fun ChapterListDialog(
                         label = "人物",
                         onCheckedChange = { showPersons = true },
                         weight = 1f)
+                }
+                if (onOpenOutline != null) {
+                    TextButton(
+                        onClick = onOpenOutline,
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .padding(top = 4.dp),
+                    ) { Text("全书大纲") }
                 }
             }
         },
@@ -809,6 +823,40 @@ fun ChapterListDialog(
                                             .clickable { onRetranslateChapter(index) }
                                             .padding(start = 8.dp),
                                     )
+                                }
+                                // M29：摘要状态与查看 / 生成入口（与翻译状态同排展示）
+                                chapterSummary.getOrNull(index)?.let { summaryRow ->
+                                    summaryRow.label?.let { label ->
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.accent,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(start = 8.dp),
+                                        )
+                                    }
+                                    if (onViewSummary != null && summaryRow.viewable) {
+                                        Text(
+                                            text = "摘要",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.accent,
+                                            maxLines = 1,
+                                            modifier = Modifier
+                                                .clickable { onViewSummary(index) }
+                                                .padding(start = 8.dp),
+                                        )
+                                    }
+                                    if (onGenerateSummary != null && summaryRow.generatable) {
+                                        Text(
+                                            text = "生成摘要",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.accent,
+                                            maxLines = 1,
+                                            modifier = Modifier
+                                                .clickable { onGenerateSummary(index) }
+                                                .padding(start = 8.dp),
+                                        )
+                                    }
                                 }
                             }
                         }

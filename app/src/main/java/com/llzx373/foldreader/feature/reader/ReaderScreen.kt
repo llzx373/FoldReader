@@ -228,6 +228,9 @@ fun ReaderScreen(
     }
     var searchVisible by remember { mutableStateOf(false) }
     var sleepTimerVisible by remember { mutableStateOf(false) }
+    // M29：摘要查看（章号）与全书大纲视图
+    var summaryViewChapter by remember { mutableStateOf<Int?>(null) }
+    var outlineVisible by remember { mutableStateOf(false) }
     val searchState by viewModel.searchState.collectAsState()
     val searchHighlight by viewModel.searchHighlight.collectAsState()
 
@@ -2012,6 +2015,8 @@ fun ReaderScreen(
             }
             val translationUnits by viewModel.translationUnits.collectAsState()
             val unitStatuses by viewModel.unitStatuses.collectAsState()
+            // M29：目录行摘要状态——与翻译状态同一份单位清单
+            val summaryStatuses by viewModel.summaryStatuses.collectAsState()
             val catalogChapters = viewModel.chapterList()
             val chapterStatus = remember(catalogChapters, translationUnits, unitStatuses, aiConfigured) {
                 if (aiConfigured) {
@@ -2026,6 +2031,15 @@ fun ReaderScreen(
                 if (aiConfigured) {
                     com.llzx373.foldreader.feature.translate.chapterRetranslatable(
                         catalogChapters, translationUnits, unitStatuses,
+                    )
+                } else {
+                    emptyList()
+                }
+            }
+            val chapterSummary = remember(catalogChapters, translationUnits, summaryStatuses, aiConfigured) {
+                if (aiConfigured) {
+                    com.llzx373.foldreader.feature.summary.chapterSummaryRows(
+                        catalogChapters, translationUnits, summaryStatuses,
                     )
                 } else {
                     emptyList()
@@ -2054,6 +2068,87 @@ fun ReaderScreen(
                     }
                 } else {
                     null
+                },
+                chapterSummary = chapterSummary,
+                onViewSummary = if (aiConfigured) {
+                    { index -> summaryViewChapter = index }
+                } else {
+                    null
+                },
+                onGenerateSummary = if (aiConfigured && !viewModeTranslated) {
+                    { index -> viewModel.summarizeChapter(index) }
+                } else {
+                    null
+                },
+                onOpenOutline = if (aiConfigured) {
+                    { outlineVisible = true }
+                } else {
+                    null
+                },
+            )
+        }
+
+        // M29：单章摘要查看（目录章行「摘要」入口）
+        summaryViewChapter?.let { index ->
+            val summaryStatuses by viewModel.summaryStatuses.collectAsState()
+            val translationUnits by viewModel.translationUnits.collectAsState()
+            val chapter = viewModel.chapterList().getOrNull(index)
+            if (chapter == null) {
+                summaryViewChapter = null
+            } else {
+                val summaries = remember(summaryStatuses, translationUnits, index) {
+                    val unitIndexes = com.llzx373.foldreader.feature.translate.unitsOfChapter(
+                        chapter, translationUnits,
+                    ).mapTo(HashSet()) { it.index }
+                    summaryStatuses
+                        .filter {
+                            it.unitIndex in unitIndexes &&
+                                it.status ==
+                                com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE
+                        }
+                        .sortedBy { it.unitIndex }
+                }
+                com.llzx373.foldreader.feature.summary.ChapterSummaryDialog(
+                    chapterTitle = chapter.title,
+                    summaries = summaries,
+                    onDismiss = { summaryViewChapter = null },
+                )
+            }
+        }
+
+        // M29：全书大纲视图（目录面板顶部「大纲」入口）
+        if (outlineVisible) {
+            val outline by viewModel.bookOutline.collectAsState()
+            val outlineRunning by viewModel.outlineRunning.collectAsState()
+            val summaryStatuses by viewModel.summaryStatuses.collectAsState()
+            com.llzx373.foldreader.feature.summary.BookOutlineDialog(
+                outline = outline,
+                doneSummaryCount = summaryStatuses.count {
+                    it.status == com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE
+                },
+                running = outlineRunning,
+                onGenerate = viewModel::generateOutline,
+                onDismiss = { outlineVisible = false },
+            )
+        }
+
+        // M29：章行「生成摘要」的首次外发一次性确认
+        val summaryConfirmChapter by viewModel.summaryConfirmChapter.collectAsState()
+        summaryConfirmChapter?.let {
+            AlertDialog(
+                onDismissRequest = viewModel::dismissSummaryConfirm,
+                title = { Text("生成章节摘要") },
+                text = {
+                    Text(
+                        "该章正文将发往你配置的服务商生成摘要。此后摘要功能不再重复提示；" +
+                            "正文外发的隐私影响请自行评估服务商政策。",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmSummaryChapter) { Text("同意并生成") }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissSummaryConfirm) { Text("取消") }
                 },
             )
         }

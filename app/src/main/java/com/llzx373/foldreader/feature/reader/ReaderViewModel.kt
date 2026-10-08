@@ -180,6 +180,13 @@ class ReaderViewModel(
     private val dictionaryLookupService: com.llzx373.foldreader.core.dict.DictionaryLookupService? = null,
     /** M28 生词本落库；null = 卡片不出「收藏」（测试中默认不挂）。 */
     private val wordEntryDao: com.llzx373.foldreader.core.data.db.WordEntryDao? = null,
+    /** M29：章节摘要台账（目录面板摘要状态行的数据源）；null = 摘要不挂。 */
+    private val chapterSummaryDao: com.llzx373.foldreader.core.data.db.ChapterSummaryDao? = null,
+    /** M29：全书大纲（目录面板「大纲」视图的数据源）。 */
+    private val bookOutlineDao: com.llzx373.foldreader.core.data.db.BookOutlineDao? = null,
+    /** M29：按当前设置装配摘要引擎（Provider 未配置时引擎内失败返回）。 */
+    private val summaryEngine: suspend () -> com.llzx373.foldreader.feature.summary.SummaryEngine? =
+        { null },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -842,6 +849,16 @@ class ReaderViewModel(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** M29：当前目标语言下各单位的摘要台账（目录面板行状态：未摘要/摘要中/已摘要/失败）。 */
+    val summaryStatuses: StateFlow<List<com.llzx373.foldreader.core.data.db.ChapterSummaryEntity>> =
+        settingsRepository.preferences
+            .map { it.aiTargetLang.name }
+            .distinctUntilChanged()
+            .flatMapLatest { lang ->
+                chapterSummaryDao?.observeForBook(bookId, lang) ?: flowOf(emptyList())
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // 切到译文时暂存的原文侧现场（切回时原样恢复）
     private var originalContent: BookContent? = null
     private var originalChapters: List<Chapter>? = null
@@ -1397,6 +1414,114 @@ class ReaderViewModel(
                 }
             } finally {
                 _unitTranslateRunning.value = false
+            }
+        }
+    }
+
+    // ---------- M29 章节摘要 / 全书大纲 ----------
+
+    private var summaryJob: kotlinx.coroutines.Job? = null
+    private val _summaryChapterRunning = MutableStateFlow(false)
+    val summaryChapterRunning: StateFlow<Boolean> = _summaryChapterRunning.asStateFlow()
+
+    /** 待首次外发一次性确认的章号（null = 无待确认）；确认后自动继续摘要。 */
+    private val _summaryConfirmChapter = MutableStateFlow<Int?>(null)
+    val summaryConfirmChapter: StateFlow<Int?> = _summaryConfirmChapter.asStateFlow()
+
+    /**
+     * 目录行「生成摘要」：该章覆盖到的未 done 单位逐个后台摘要（done 跳过 = 断点续做）。
+     * 首次外发先走一次性确认（aiSummaryConfirmed），确认后不再弹。
+     */
+    fun summarizeChapter(chapterIndex: Int) {
+        if (_summaryChapterRunning.value) return
+        val chapter = chapterList().getOrNull(chapterIndex) ?: return
+        summaryJob = viewModelScope.launch {
+            if (!settingsRepository.preferences.first().aiSummaryConfirmed) {
+                _summaryConfirmChapter.value = chapterIndex
+                return@launch
+            }
+            runChapterSummary(chapter)
+        }
+    }
+
+    /** 确认框「同意并生成」：落一次性确认标记后开始摘要。 */
+    fun confirmSummaryChapter() {
+        val index = _summaryConfirmChapter.value ?: return
+        _summaryConfirmChapter.value = null
+        val chapter = chapterList().getOrNull(index) ?: return
+        summaryJob = viewModelScope.launch {
+            settingsRepository.setAiSummaryConfirmed(true)
+            runChapterSummary(chapter)
+        }
+    }
+
+    fun dismissSummaryConfirm() {
+        _summaryConfirmChapter.value = null
+    }
+
+    private suspend fun runChapterSummary(chapter: Chapter) {
+        val engine = summaryEngine() ?: run {
+            notices.tryEmit("请先在设置中完成 AI 服务配置")
+            return
+        }
+        val source = content ?: return
+        if (!source.isCharCountFinal) {
+            notices.tryEmit("章节索引完成后才能生成摘要")
+            return
+        }
+        val lang = settingsRepository.preferences.first().aiTargetLang
+        val units = loadUnits(lang)
+        if (units.isEmpty()) return
+        val statusByUnit = summaryStatuses.value.associateBy({ it.unitIndex }, { it.status })
+        val targets = com.llzx373.foldreader.feature.translate.unitsOfChapter(chapter, units)
+            .filter {
+                statusByUnit[it.index] !=
+                    com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE
+            }
+        if (targets.isEmpty()) return
+        _summaryChapterRunning.value = true
+        try {
+            for (unit in targets) {
+                val text = runCatching {
+                    source.read(unit.charStart until unit.charEnd)
+                }.getOrDefault("")
+                engine.summarizeUnit(bookId, _uiState.value.bookTitle, unit, text, lang)
+            }
+        } finally {
+            _summaryChapterRunning.value = false
+        }
+    }
+
+    /** M29 全书大纲（目录面板「大纲」视图数据源；null = 尚未生成）。 */
+    val bookOutline: StateFlow<com.llzx373.foldreader.core.data.db.BookOutlineEntity?> =
+        settingsRepository.preferences
+            .map { it.aiTargetLang.name }
+            .distinctUntilChanged()
+            .flatMapLatest { lang ->
+                bookOutlineDao?.observe(bookId, lang) ?: flowOf(null)
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _outlineRunning = MutableStateFlow(false)
+    val outlineRunning: StateFlow<Boolean> = _outlineRunning.asStateFlow()
+
+    /** 大纲生成 / 重新生成：聚合当前语言下全部已完成摘要（引擎内记「全书大纲」台账）。 */
+    fun generateOutline() {
+        if (_outlineRunning.value) return
+        viewModelScope.launch {
+            val engine = summaryEngine() ?: run {
+                notices.tryEmit("请先在设置中完成 AI 服务配置")
+                return@launch
+            }
+            _outlineRunning.value = true
+            try {
+                val lang = settingsRepository.preferences.first().aiTargetLang
+                val result = withContext(Dispatchers.IO) {
+                    engine.generateOutline(bookId, _uiState.value.bookTitle, lang)
+                }
+                result.onFailure { notices.tryEmit(it.message ?: "大纲生成失败") }
+            } finally {
+                _outlineRunning.value = false
             }
         }
     }
@@ -2656,6 +2781,9 @@ class ReaderViewModel(
                     translationQueue = container.bookTranslationQueue,
                     dictionaryLookupService = container.dictionaryLookupService,
                     wordEntryDao = container.database.wordEntryDao(),
+                    chapterSummaryDao = container.database.chapterSummaryDao(),
+                    bookOutlineDao = container.database.bookOutlineDao(),
+                    summaryEngine = { container.summaryEngine() },
                 )
             }
         }
