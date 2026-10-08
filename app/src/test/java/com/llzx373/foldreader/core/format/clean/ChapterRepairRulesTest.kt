@@ -18,8 +18,9 @@ class ChapterRepairRulesTest {
     }
 
     @Test
-    fun `带空格的标题不被内置规则识别但可规范化后识别`() {
-        assertFalse(ChapterRepairRules.isTitle("第 1 章 初入江湖"))
+    fun `带空格的标题内置规则直接识别，规范化仍幂等可用`() {
+        // 内置规则已兼容编号内外的空格（含全角），清洗期的规范化保留给其他链路复用
+        assertTrue(ChapterRepairRules.isTitle("第 1 章 初入江湖"))
         assertEquals("第1章 初入江湖", ChapterRepairRules.canonicalizeTitle("第 1 章 初入江湖"))
         assertTrue(ChapterRepairRules.isTitle(ChapterRepairRules.canonicalizeTitle("第 1 章 初入江湖")))
     }

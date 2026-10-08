@@ -84,7 +84,11 @@ class TxtBookParser(
             val sample = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
             val charset = effectiveCharset(sample, charsetOverride)
             val bom = EncodingDetector.bomLengthOf(sample)
-            TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules(effectiveBookId))
+            val rules = chapterRules(effectiveBookId)
+            val trace = ChapterScanTrace(effectiveBookId)
+            val result = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = rules, onTitle = trace.onTitle)
+            trace.logSummary(rules.size, result.chapters, result.charCount)
+            result
         }
     }
 
@@ -136,7 +140,10 @@ class TxtBookParser(
                         )
                     }
                 }
-                val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = chapterRules(effectiveBookId))
+                val rules = chapterRules(effectiveBookId)
+                val trace = ChapterScanTrace(effectiveBookId)
+                val index = TxtIndexer.index(channel, charset, bomLength = bom, chapterRules = rules, onTitle = trace.onTitle)
+                trace.logSummary(rules.size, index.chapters, index.charCount)
                 persistIndex(uri, index, effectiveBookId)
                 TxtBookContent(channel, charset, index.offsetIndex)
             } catch (t: Throwable) {
@@ -180,8 +187,9 @@ class TxtBookParser(
             try {
                 indexChannel = UriChannels.open(context, uri)
                 store.begin(key)
+                val trace = ChapterScanTrace(bookId)
                 var batch = ArrayList<OffsetIndexBlock>(PERSIST_BATCH_BLOCKS)
-                val chapters = TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules) { chunkIndex, startByteOffset, endByteOffset ->
+                val chapters = TxtIndexer.indexInto(indexChannel, charset, shared, bomLength = bom, chapterRules = rules, onTitle = trace.onTitle) { chunkIndex, startByteOffset, endByteOffset ->
                     if (!isActive) throw CancellationException()
                     progress.value = if (fileLength > 0) {
                         (endByteOffset.toFloat() / fileLength).coerceIn(0f, 1f)
@@ -205,6 +213,7 @@ class TxtBookParser(
                 persistJob.join()
                 store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
                 progress.value = 1f
+                trace.logSummary(rules.size, chapters, shared.totalChars)
                 runCatching { onChaptersIndexed(bookId, chapters) }
                 runCatching { onBookIndexed(bookId, shared.totalChars) }
             } catch (t: Throwable) {
@@ -243,6 +252,37 @@ class TxtBookParser(
     private fun describeContentUri(uri: Uri): String =
         if (uri.scheme == "file") "私有文件:${uri.lastPathSegment}" else "外部源:${uri.scheme}"
 
+    /**
+     * 目录自动分章的判定过程记录（诊断日志）：
+     * 命中的标题逐条记（前 [LOGGED_TITLES] 条，防大书刷屏），扫完记一条汇总
+     * （规则数/命中数/章节数/是否落入「全文」「卷首」兜底/前几个标题）。
+     * 标题是书籍内容，只进本地诊断日志（设置页可导出），不经网络外发。
+     */
+    private class ChapterScanTrace(private val bookId: Long?) {
+        var matched = 0
+            private set
+
+        val onTitle: (Long, String, Int) -> Unit = { offset, title, ruleIndex ->
+            matched++
+            if (matched <= LOGGED_TITLES) {
+                DiagnosticLog.line("txt目录: bookId=$bookId 命中#$matched 规则[$ruleIndex] @$offset 「$title」")
+            }
+        }
+
+        fun logSummary(ruleCount: Int, chapters: List<Chapter>, charCount: Long) {
+            val fallback = when {
+                chapters.size == 1 && chapters[0].title == "全文" -> " 兜底=全文(一条标题都没切出)"
+                chapters.firstOrNull()?.title == "卷首" -> " 含卷首"
+                else -> ""
+            }
+            DiagnosticLog.line(
+                "txt目录: bookId=$bookId 字符=$charCount 规则=${ruleCount}条 命中标题=$matched" +
+                    " → 章节=${chapters.size}$fallback" +
+                    " 前几个=${chapters.take(SUMMARY_TITLES).joinToString(" | ") { it.title }}",
+            )
+        }
+    }
+
     private fun contentHash(channel: SeekableByteChannel, fileLength: Long): String =
         ContentHasher.hash(fileLength) { offset, length -> UriChannels.readAt(channel, offset, length) }
 
@@ -254,6 +294,10 @@ class TxtBookParser(
 
     private companion object {
         const val PERSIST_BATCH_BLOCKS = 512
+        /** 诊断日志里逐条记录的命中标题上限（大书可能上千章，逐条记会撑爆日志）。 */
+        const val LOGGED_TITLES = 50
+        /** 汇总行里展示的标题示例数。 */
+        const val SUMMARY_TITLES = 5
     }
 }
 

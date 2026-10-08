@@ -50,11 +50,10 @@ internal object ChapterRepairRules {
     }
 
     /**
-     * 行是不是章节标题，**含需要先规范化才认得出的写法**（`第 2 章 风起云涌`——内置规则
-     * 不允许 `第` 与数字之间有空格）。
+     * 行是不是章节标题：先命名规范化（去编号内空格、全角数字转半角）再按内置规则判定。
      *
-     * 段落重组要用这个：只用 [isTitle] 的话，`第 2 章 …` 会被当成正文并进上一段，
-     * 标题就再也提不出来了。
+     * 内置规则现已直接兼容编号内外的空格与全角数字，规范化在判定上基本幂等；
+     * 保留它是为了让段落重组与重复标题去重看到统一的写法（`第 1 章` → `第1章`）。
      */
     fun looksLikeTitle(line: String): Boolean = isTitle(canonicalizeTitle(line))
 
@@ -84,8 +83,8 @@ internal object ChapterRepairRules {
     /**
      * 把行中的章节标题切出来。返回 `(正文, 标题)`；行本身就是标题或找不到标题时返回 null。
      *
-     * 标题侧会先做命名规范化再判定——`第 1 章 风起` 这种带空格的写法内置规则不认，
-     * 但它确实是标题（问题 6）。
+     * 标题侧会先做命名规范化再判定——内置规则已认空格变形，规范化是为了切出来的
+     * 标题写法统一（`第 1 章 风起` → `第1章 风起`）（问题 6）。
      */
     fun splitMidLineTitle(line: String): Pair<String, String>? {
         val trimmed = line.trim()

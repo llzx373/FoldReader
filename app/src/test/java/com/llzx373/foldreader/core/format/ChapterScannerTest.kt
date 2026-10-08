@@ -109,6 +109,73 @@ class ChapterScannerTest {
     }
 
     @Test
+    fun `章节编号带空格的变形也能命中`() {
+        val text = buildString {
+            append("第 1 章 半角空格\n")
+            append("正文。\n")
+            append("第　2　章 全角空格\n")
+            append("正文。\n")
+            append("　第3章 行首全角缩进　\n")
+            append("正文。\n")
+            append("第 两百 章 编号中间有空格\n")
+            append("正文。\n")
+            append("第 3 天他离开了，这不是标题。\n")
+            append("结尾。")
+        }
+        val chapters = scanAll(text)
+
+        assertEquals(
+            listOf(
+                "第 1 章 半角空格",
+                "第　2　章 全角空格",
+                "第3章 行首全角缩进",
+                "第 两百 章 编号中间有空格",
+            ),
+            chapters.map { it.title },
+        )
+    }
+
+    @Test
+    fun `大写数字编号与特别番外命中`() {
+        val text = buildString {
+            append("番外#1：黑牢，木马，与公共便器\n")
+            append("正文内容。\n")
+            append("特别番外: 马车，走绳，与烟火大会\n")
+            append("正文内容。\n")
+            append("零. 楔子\n")
+            append("正文。\n")
+            append("壹. 密室\n")
+            append("正文。\n")
+            append("贰拾叁. 夜袭\n")
+            append("正文。\n")
+            append("叁. 长夜（上）\n")
+            append("结尾。")
+        }
+        val chapters = scanAll(text)
+
+        assertEquals(
+            listOf("番外#1：黑牢，木马，与公共便器", "特别番外: 马车，走绳，与烟火大会", "零. 楔子", "壹. 密室", "贰拾叁. 夜袭", "叁. 长夜（上）"),
+            chapters.map { it.title },
+        )
+    }
+
+    @Test
+    fun `大写数字正文行不误判为章节`() {
+        val text = buildString {
+            append("第一章 开始\n")
+            append("四十\n")
+            append("三十九\n")
+            append("拾金不昧是好事。\n")
+            append("零。零散的数字没有分隔符。\n")
+            append("一、小写数字枚举不收。\n")
+            append("结尾。")
+        }
+        val chapters = scanAll(text)
+
+        assertEquals(listOf("第一章 开始"), chapters.map { it.title })
+    }
+
+    @Test
     fun `自定义规则命中默认规则不识别的标题`() {
         val rules = ChapterRules.merge(listOf("^【.+】$"))
         val scanner = ChapterScanner(rules)
@@ -131,5 +198,21 @@ class ChapterScannerTest {
     @Test
     fun `非法自定义正则被跳过`() {
         assertEquals(ChapterRules.DEFAULT, ChapterRules.merge(listOf("(", "[")))
+    }
+
+    @Test
+    fun `命中标题经回调上报规则序号`() {
+        val hits = mutableListOf<Triple<Long, String, Int>>()
+        // 自定义规则排在内置规则之前，所以「第N章」命中的是序号 1
+        val scanner = ChapterScanner(ChapterRules.merge(listOf("^【.+】$"))) { offset, title, ruleIndex ->
+            hits += Triple(offset, title, ruleIndex)
+        }
+        scanner.feed("【第一回 起】\n正文。\n第二章 落\n")
+        scanner.finish()
+
+        assertEquals(
+            listOf(Triple(0L, "【第一回 起】", 0), Triple(12L, "第二章 落", 1)),
+            hits,
+        )
     }
 }

@@ -27,9 +27,10 @@ object TxtIndexer {
         bomLength: Int = 0,
         blockChars: Int = OffsetIndex.DEFAULT_BLOCK_CHARS,
         chapterRules: List<Regex> = ChapterRules.DEFAULT,
+        onTitle: (offset: Long, title: String, ruleIndex: Int) -> Unit = { _, _, _ -> },
     ): TxtIndex {
         val offsets = OffsetIndex(blockChars = blockChars, initialByteOffset = bomLength.toLong())
-        val chapters = indexInto(channel, charset, offsets, bomLength, chapterRules = chapterRules)
+        val chapters = indexInto(channel, charset, offsets, bomLength, chapterRules = chapterRules, onTitle = onTitle)
         return TxtIndex(
             charset = charset,
             charCount = offsets.totalChars,
@@ -44,6 +45,8 @@ object TxtIndexer {
         target: OffsetIndex,
         bomLength: Int = 0,
         chapterRules: List<Regex> = ChapterRules.DEFAULT,
+        onTitle: (offset: Long, title: String, ruleIndex: Int) -> Unit = { _, _, _ -> },
+        // onBlock 必须保持为最后一个参数：既有的尾随 lambda 调用点绑定的是它
         onBlock: (blockIndex: Int, startByteOffset: Long, endByteOffset: Long) -> Unit = { _, _, _ -> },
     ): List<Chapter> {
         val blockChars = target.blockChars
@@ -54,7 +57,7 @@ object TxtIndexer {
         val inBuf = ByteBuffer.allocate(READ_CHUNK_BYTES)
         inBuf.limit(0)
         val outBuf = CharBuffer.allocate(blockChars)
-        val scanner = ChapterScanner(chapterRules)
+        val scanner = ChapterScanner(chapterRules, onTitle)
         var totalRead = bomLength.toLong()
         var blockStartByteOffset = bomLength.toLong()
         var eof = false

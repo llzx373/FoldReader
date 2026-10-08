@@ -15,6 +15,7 @@ import com.llzx373.foldreader.core.data.repository.BookshelfRepositoryImpl
 import com.llzx373.foldreader.core.data.settings.FileBrowserRootsStore
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.SettingsRepositoryImpl
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.foldable.FoldableStateProvider
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookSource
@@ -172,7 +173,10 @@ class AppContainer(context: Context) {
         val override = com.llzx373.foldreader.core.format.EncodingDetector.forNameOrNull(book.encoding)
         val scanned = runCatching {
             bookParsers.parserFor(book.format).parseChapters(Uri.parse(book.fileUri), override, bookId)
+        }.onFailure {
+            DiagnosticLog.line("rebuild目录: bookId=$bookId 格式=${book.format} 重扫失败: ${it.message}")
         }.getOrDefault(emptyList())
+        DiagnosticLog.line("rebuild目录: bookId=$bookId 格式=${book.format} → ${scanned.size}章")
         bookshelfRepository.saveChapters(bookId, scanned)
         // 章节变了人物出场索引跟着重算；失败不影响重扫本身
         runCatching { refreshPersonAppearances(bookId) }

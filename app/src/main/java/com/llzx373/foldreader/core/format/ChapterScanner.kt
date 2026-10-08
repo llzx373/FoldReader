@@ -2,6 +2,8 @@ package com.llzx373.foldreader.core.format
 
 class ChapterScanner(
     private val rules: List<Regex> = ChapterRules.DEFAULT,
+    /** 每命中一个标题回调一次（偏移、标题、命中的规则序号）；默认空实现，供诊断/预览观察判定过程。 */
+    private val onTitle: (offset: Long, title: String, ruleIndex: Int) -> Unit = { _, _, _ -> },
 ) {
     private val pending = StringBuilder()
     private var pendingStart = 0L
@@ -41,11 +43,13 @@ class ChapterScanner(
     }
 
     private fun processLine(rawLine: String, lineStart: Long) {
-        val trimmed = rawLine.trim()
+        // trim() 只去半角空白；网文常见全角空格（U+3000）缩进的标题行，一并去掉
+        val trimmed = rawLine.trim { it <= ' ' || it == '　' }
         if (trimmed.isEmpty() || trimmed.length > ChapterRules.MAX_TITLE_LENGTH) return
-        for (rule in rules) {
+        for ((index, rule) in rules.withIndex()) {
             if (rule.matches(trimmed)) {
                 titles += lineStart to trimmed
+                onTitle(lineStart, trimmed, index)
                 return
             }
         }
