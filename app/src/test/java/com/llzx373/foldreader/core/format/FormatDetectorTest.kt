@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.core.format
 
 import com.llzx373.foldreader.core.data.db.BookFormat
+import com.llzx373.foldreader.core.format.docx.TestDocx
 import com.llzx373.foldreader.core.format.epub.TestEpubs
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -88,6 +89,71 @@ class FormatDetectorTest {
     fun `未知内容返回 null`() {
         assertNull(FormatDetector.detect("data.bin", null, "hello world".toByteArray()))
         assertNull(FormatDetector.detect(null, null, ByteArray(0)))
+    }
+
+    @Test
+    fun `DOCX 首条目 word 前缀按魔数判定`() {
+        val head = zipHead("word/document.xml", ByteArray(0))
+        assertEquals(BookFormat.DOCX, FormatDetector.detect("x.bin", null, head))
+        assertTrue(FormatDetector.isDocx(head, null, null))
+    }
+
+    @Test
+    fun `DOCX 首条目 Content_Types 需扩展名或 MIME 佐证`() {
+        val head = zipHead("[Content_Types].xml", ByteArray(0))
+        assertEquals(BookFormat.DOCX, FormatDetector.detect("a.docx", null, head))
+        assertEquals(
+            BookFormat.DOCX,
+            FormatDetector.detect(null, FormatDetector.DOCX_MIME_TYPE, head),
+        )
+        // 其他 OOXML 包（xlsx 等）首条目也常是它：无佐证不收，按漫画容器处理
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("a.xlsx", null, head))
+    }
+
+    @Test
+    fun `docx 扩展名与 MIME 单独可判定`() {
+        assertEquals(BookFormat.DOCX, FormatDetector.detect("report.DOCX", null, ByteArray(0)))
+        assertEquals(
+            BookFormat.DOCX,
+            FormatDetector.detect(null, FormatDetector.DOCX_MIME_TYPE, ByteArray(0)),
+        )
+    }
+
+    @Test
+    fun `真实构造的 DOCX 文件头部判定为 DOCX`() {
+        // Word 典型顺序：[Content_Types].xml 打头，需扩展名佐证
+        val file = File.createTempFile("detector", ".bin")
+        try {
+            TestDocx.write(file, TestDocx.minimal())
+            val head = file.inputStream().use { it.readNBytes(64 * 1024) }
+            assertEquals(BookFormat.DOCX, FormatDetector.detect("随便.docx", null, head))
+        } finally {
+            file.delete()
+        }
+        // word/ 打头的 zip 无需佐证（有些生成器不保证 Content_Types 在最前）
+        val entries = TestDocx.minimal()
+        val wordFirst = linkedMapOf<String, String>()
+        wordFirst["word/document.xml"] = entries.getValue("word/document.xml")
+        wordFirst.putAll(entries - "word/document.xml")
+        val file2 = File.createTempFile("detector", ".bin")
+        try {
+            TestDocx.write(file2, wordFirst)
+            val head = file2.inputStream().use { it.readNBytes(64 * 1024) }
+            assertEquals(BookFormat.DOCX, FormatDetector.detect("随便.bin", null, head))
+        } finally {
+            file2.delete()
+        }
+    }
+
+    @Test
+    fun `DOCX 判定不误伤 EPUB 与普通 zip`() {
+        // EPUB 魔数判定在 DOCX 之前：即使扩展名是 docx 也按 EPUB
+        val epubHead = zipHead("mimetype", epubMagic)
+        assertEquals(BookFormat.EPUB, FormatDetector.detect("x.docx", null, epubHead))
+        // 普通 zip（首条目既非 word/ 也非 [Content_Types].xml）仍按漫画容器
+        val plainZip = zipHead("AndroidManifest.xml", ByteArray(0))
+        assertEquals(BookFormat.COMIC, FormatDetector.detect("app.zip", null, plainZip))
+        assertFalse(FormatDetector.isDocx(plainZip, "app.zip", null))
     }
 
     @Test

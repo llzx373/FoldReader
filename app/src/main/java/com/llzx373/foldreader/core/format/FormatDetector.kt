@@ -5,13 +5,14 @@ import com.llzx373.foldreader.core.data.db.BookFormat
 
 /**
  * 电子书格式识别：magic bytes 优先，扩展名/MIME 兜底。
- * 识别不出返回 null（上层按 TXT 处理，保持既有行为）；
- * PDF 用 [isPdf] 单独判定，由上层报「暂不支持」。
+ * 支持 TXT / EPUB / FB2（裸 XML 与 .fb2.zip）/ DOCX / PDF / 漫画容器；
+ * 识别不出返回 null（上层按 TXT 处理，保持既有行为）。
  */
 object FormatDetector {
 
     const val EPUB_MIME_TYPE = "application/epub+zip"
     const val PDF_MIME_TYPE = "application/pdf"
+    const val DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     /**
      * FB2 没有注册的正式 MIME，两种写法都遇到过。
@@ -25,6 +26,9 @@ object FormatDetector {
         if (isEpub(head)) return BookFormat.EPUB
         if (isFb2Zip(head)) return BookFormat.FB2
         if (isFb2(head)) return BookFormat.FB2
+        // DOCX 判定放在 EPUB/FB2 之后（它们也是 zip）、漫画之前
+        // （把 docx 当漫画解只会报「压缩包内没有可显示的图片」）
+        if (isDocx(head, displayName, mimeType)) return BookFormat.DOCX
         // PDF 的魔数是唯一的，也不与任何容器冲突，放在漫画判定之前
         if (isPdf(head)) return BookFormat.PDF
         val name = displayName?.lowercase()
@@ -33,6 +37,7 @@ object FormatDetector {
             ext == "epub" || mimeType == EPUB_MIME_TYPE -> BookFormat.EPUB
             ext == "fb2" || name?.endsWith(".fb2.zip") == true || mimeType in FB2_MIME_TYPES ->
                 BookFormat.FB2
+            ext == "docx" || mimeType == DOCX_MIME_TYPE -> BookFormat.DOCX
             ext == "pdf" || mimeType == PDF_MIME_TYPE -> BookFormat.PDF
             // 漫画判定放在 EPUB/FB2 之后（它们也是 zip）、TXT 之前
             // （把 zip/rar 当纯文本解只会得到乱码）
@@ -94,6 +99,19 @@ object FormatDetector {
             }
         }
         return false
+    }
+
+    /**
+     * DOCX（OOXML zip）：首条目名以 `word/` 开头即可认定（EPUB/FB2 已先行排除）；
+     * 首条目是 `[Content_Types].xml`（Word 产物的典型顺序）时需扩展名/MIME 佐证，
+     * 以免把其他 OOXML 包（xlsx/pptx 首条目也常是它）错认成文档书。
+     */
+    fun isDocx(head: ByteArray, displayName: String?, mimeType: String?): Boolean {
+        val firstEntry = firstZipEntryName(head) ?: return false
+        if (firstEntry.startsWith("word/")) return true
+        if (firstEntry != "[Content_Types].xml") return false
+        val ext = displayName?.lowercase()?.substringAfterLast('.', "")
+        return ext == "docx" || mimeType == DOCX_MIME_TYPE
     }
 
     fun isPdf(head: ByteArray): Boolean {

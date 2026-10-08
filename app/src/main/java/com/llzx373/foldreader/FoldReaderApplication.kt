@@ -26,6 +26,7 @@ import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.format.ChapterRules
 import com.llzx373.foldreader.core.format.android.load
 import com.llzx373.foldreader.core.format.clean.TsCharMap
+import com.llzx373.foldreader.core.format.docx.DocxBookParser
 import com.llzx373.foldreader.core.format.epub.EpubBookParser
 import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
 import com.llzx373.foldreader.core.format.txt.TxtBookParser
@@ -585,6 +586,15 @@ class AppContainer(context: Context) {
         bookIdResolver = bookIdForUri,
         onChaptersIndexed = onChaptersIndexed,
     )
+    /** DOCX 只读支持：mammoth 转 HTML 后复用 EPUB 的压平管线。 */
+    val docxBookParser = DocxBookParser(
+        convertedDir = convertedDir,
+        openFlattenedContent = openFlattenedContent,
+        openChannel = { uri -> UriChannels.open(context, uri) },
+        displayNameOf = { uri -> UriChannels.displayName(context, uri) },
+        bookIdResolver = bookIdForUri,
+        onChaptersIndexed = onChaptersIndexed,
+    )
     /**
      * 文本型 PDF 的「当电子书读」入口：抽正文压平后进 TXT 管线。
      * 扫描件不会产出压平产物，所以这个解析器对扫描件是"存在但用不上"。
@@ -603,6 +613,7 @@ class AppContainer(context: Context) {
             BookFormat.TXT to txtBookParser,
             BookFormat.EPUB to epubBookParser,
             BookFormat.FB2 to fb2BookParser,
+            BookFormat.DOCX to docxBookParser,
             // PDF 只在文本模式下走这里（扫描件没有压平产物，会走页式阅读器）
             BookFormat.PDF to pdfBookParser,
         ),
@@ -898,6 +909,7 @@ class AppContainer(context: Context) {
         convertedParsers = mapOf(
             BookFormat.EPUB to epubBookParser,
             BookFormat.FB2 to fb2BookParser,
+            BookFormat.DOCX to docxBookParser,
         ),
         coversDir = coversDir,
         enqueuePrewarm = bookPrewarmQueue::enqueue,
