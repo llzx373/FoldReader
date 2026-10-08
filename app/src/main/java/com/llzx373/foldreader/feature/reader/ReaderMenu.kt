@@ -281,6 +281,8 @@ fun ReaderMenuPanel(
     onTranslatePage: () -> Unit = {},
     onTranslateUnit: () -> Unit = {},
     onToggleViewMode: () -> Unit = {},
+    /** M29：问书入口（null = 不给；译文视角下摘要/单位口径是原文坐标，不给）。 */
+    onOpenBookQa: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var showBrightness by remember { mutableStateOf(false) }
@@ -602,6 +604,15 @@ fun ReaderMenuPanel(
                             onClick = onToggleViewMode,
                             label = if (viewModeTranslated) "视角：译文" else "视角：原文",
                             weight = 1f)
+                    }
+                }
+                // M29 问书：与翻译组同区（AI 配置即出现），译文视角不给
+                if (onOpenBookQa != null && !viewModeTranslated) {
+                    ButtonGroup(
+                        overflowIndicator = {},
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        clickableItem(onClick = onOpenBookQa, label = "问书", weight = 1f)
                     }
                 }
                 // 视角 2/3：与当前版式互斥的两个对照入口（双页对照只在双页翻页布局，

@@ -85,6 +85,7 @@ class SettingsRepositoryImpl(
         val AI_TRANSLATION_CONFIRMED = booleanPreferencesKey("ai_translation_confirmed")
         val AI_EXPLAIN_CONFIRMED = booleanPreferencesKey("ai_explain_confirmed")
         val AI_SUMMARY_CONFIRMED = booleanPreferencesKey("ai_summary_confirmed")
+        val AI_QA_CONFIRMED = booleanPreferencesKey("ai_qa_confirmed")
         val AI_COMIC_TRANSLATE_CONFIRMED = booleanPreferencesKey("ai_comic_translate_confirmed")
         val AI_COMIC_VISION_CONFIRMED_BOOKS = stringPreferencesKey("ai_comic_vision_confirmed_books")
         val AI_CLEAN_RECIPE_CONFIRMED = booleanPreferencesKey("ai_clean_recipe_confirmed")
@@ -186,6 +187,8 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiExplainConfirmed,
                 aiSummaryConfirmed = prefs[Keys.AI_SUMMARY_CONFIRMED]
                     ?: defaults.aiSummaryConfirmed,
+                aiQaConfirmed = prefs[Keys.AI_QA_CONFIRMED]
+                    ?: defaults.aiQaConfirmed,
                 aiComicTranslateConfirmed = prefs[Keys.AI_COMIC_TRANSLATE_CONFIRMED]
                     ?: defaults.aiComicTranslateConfirmed,
                 aiComicVisionConfirmedBooks = prefs[Keys.AI_COMIC_VISION_CONFIRMED_BOOKS]
@@ -485,6 +488,10 @@ class SettingsRepositoryImpl(
 
     override suspend fun setAiSummaryConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.AI_SUMMARY_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setAiQaConfirmed(confirmed: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AI_QA_CONFIRMED] = confirmed }
     }
 
     override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) {

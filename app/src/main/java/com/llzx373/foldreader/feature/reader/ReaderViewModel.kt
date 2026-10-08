@@ -1526,6 +1526,173 @@ class ReaderViewModel(
         }
     }
 
+    // ---------- M29 问书（上下文 = 当前章 + 前序摘要链） ----------
+
+    /** 问书对话状态；null = 提问页关闭。 */
+    sealed interface BookQaUi {
+        /** 首次外发一次性确认：附外发范围说明与服务商地址。 */
+        data class AwaitConfirmation(
+            val question: String,
+            val scopeText: String,
+            val baseUrl: String,
+        ) : BookQaUi
+
+        /** 流式回答（running=false = 流已结束）。 */
+        data class Streaming(
+            val question: String,
+            val scopeText: String,
+            val answer: String,
+            val running: Boolean,
+        ) : BookQaUi
+
+        data class Error(val message: String, val question: String, val scopeText: String) : BookQaUi
+    }
+
+    private val _qaState = MutableStateFlow<BookQaUi?>(null)
+    val qaState: StateFlow<BookQaUi?> = _qaState.asStateFlow()
+
+    private var qaJob: kotlinx.coroutines.Job? = null
+    private var qaQuestion = ""
+    private var qaScopeText = ""
+
+    /** 提问：组装上下文（当前章 + 前序摘要链）→ 首次外发一次性确认 → 流式回答。 */
+    fun askBook(question: String) {
+        val q = question.trim()
+        if (q.isEmpty()) return
+        qaJob?.cancel()
+        qaJob = viewModelScope.launch {
+            qaQuestion = q
+            val assembled = assembleBookQaContext()
+            if (assembled == null) {
+                _qaState.value = BookQaUi.Error(
+                    "还没有可用上下文：先读到一些内容，或先生成章节摘要", q, "",
+                )
+                return@launch
+            }
+            qaScopeText = assembled.second
+            val prefs = settingsRepository.preferences.first()
+            if (prefs.aiQaConfirmed) {
+                streamQa(assembled.first)
+            } else {
+                _qaState.value = BookQaUi.AwaitConfirmation(q, assembled.second, prefs.aiBaseUrl)
+            }
+        }
+    }
+
+    /** 确认框「同意并提问」：落一次性确认标记后开始回答。 */
+    fun confirmQa() {
+        if (_qaState.value !is BookQaUi.AwaitConfirmation) return
+        qaJob?.cancel()
+        qaJob = viewModelScope.launch {
+            settingsRepository.setAiQaConfirmed(true)
+            val assembled = assembleBookQaContext() ?: return@launch
+            streamQa(assembled.first)
+        }
+    }
+
+    /** 失败重试：问题与上下文装配重走（上下文随阅读进度现取）。 */
+    fun retryQa() {
+        if (_qaState.value !is BookQaUi.Error) return
+        qaJob?.cancel()
+        qaJob = viewModelScope.launch {
+            val assembled = assembleBookQaContext() ?: return@launch
+            streamQa(assembled.first)
+        }
+    }
+
+    /** 关闭提问页：取消进行中的请求并清状态。 */
+    fun closeQa() {
+        qaJob?.cancel()
+        qaJob = null
+        _qaState.value = null
+    }
+
+    /**
+     * 组装问书上下文 + 外发范围说明。
+     *
+     * 范围限定「已读范围」：前序摘要只取当前单位之前的 done 摘要；当前章正文
+     * （超长按 core/summary 的策略截头）。返回 null = 拿不出任何上下文。
+     */
+    private suspend fun assembleBookQaContext():
+        Pair<com.llzx373.foldreader.core.summary.BookQaContext, String>? {
+        val source = content ?: return null
+        val lang = settingsRepository.preferences.first().aiTargetLang
+        val chapter = chapterList().getOrNull(_readingPosition.value.chapterIndex)
+        val chapterTitle = chapter?.title ?: "当前位置"
+        val chapterText = if (chapter != null && chapter.charEnd > chapter.charStart) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    source.read(chapter.charStart until minOf(chapter.charEnd, source.charCount))
+                }.getOrDefault("")
+            }
+        } else {
+            ""
+        }
+        // 前序摘要链：只取当前单位之前的 done 摘要（已读范围）；单位清单不可用时退化为仅当前章
+        val units = loadUnits(lang)
+        val currentUnitIndex = locateUnit(units, anchorOffset.value)?.first ?: Int.MAX_VALUE
+        val doneRows = chapterSummaryDao?.getDoneForBook(bookId, lang.name).orEmpty()
+        val priorSummaries = doneRows
+            .filter { it.unitIndex < currentUnitIndex }
+            .map { it.unitTitle to it.summary }
+        val context = com.llzx373.foldreader.core.summary.assembleQaContext(
+            currentChapterTitle = chapterTitle,
+            currentChapterText = chapterText,
+            priorSummaries = priorSummaries,
+        ) ?: return null
+        val truncated = context.currentChapter != null &&
+            context.currentChapter.second.length < chapterText.trim().length
+        val scope = buildString {
+            append("当前章《").append(chapterTitle).append("》")
+            if (truncated) append("（超长已截头）")
+            if (context.summaries.isNotEmpty()) {
+                append(" + ").append(context.summaries.size).append(" 条前序章节摘要")
+            }
+        }
+        return context to scope
+    }
+
+    private suspend fun streamQa(context: com.llzx373.foldreader.core.summary.BookQaContext) {
+        val provider = aiProvider() ?: run {
+            _qaState.value = BookQaUi.Error("请先在设置中完成 AI 服务配置", qaQuestion, qaScopeText)
+            return
+        }
+        val prefs = settingsRepository.preferences.first()
+        // 外发台账：feature=问书，估算口径同其他功能（字符数 / 2）
+        val outboundChars = context.summaries.sumOf { it.second.length } +
+            (context.currentChapter?.second?.length ?: 0) + qaQuestion.length
+        recordOutbound("问书", _uiState.value.bookTitle, outboundChars / 2)
+        val reply = StringBuilder()
+        try {
+            provider.chat(
+                com.llzx373.foldreader.core.ai.prompt.BookQaPrompt.buildMessages(
+                    qaQuestion, context, prefs.aiTargetLang,
+                ),
+                prefs.aiModelGeneral,
+            ).collect { delta ->
+                reply.append(delta)
+                _qaState.value = BookQaUi.Streaming(
+                    question = qaQuestion,
+                    scopeText = qaScopeText,
+                    answer = reply.toString(),
+                    running = true,
+                )
+            }
+            _qaState.value = BookQaUi.Streaming(
+                question = qaQuestion,
+                scopeText = qaScopeText,
+                answer = reply.toString(),
+                running = false,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AiException) {
+            _qaState.value = BookQaUi.Error(e.message ?: "回答失败", qaQuestion, qaScopeText)
+        } catch (e: Exception) {
+            _qaState.value = BookQaUi.Error("网络不可达或响应异常", qaQuestion, qaScopeText)
+        }
+    }
+
     private suspend fun translateOneUnit(
         engine: com.llzx373.foldreader.feature.translate.TranslateEngine,
         units: List<TranslationUnit>,

@@ -231,6 +231,8 @@ fun ReaderScreen(
     // M29：摘要查看（章号）与全书大纲视图
     var summaryViewChapter by remember { mutableStateOf<Int?>(null) }
     var outlineVisible by remember { mutableStateOf(false) }
+    // M29：问书提问页
+    var qaVisible by remember { mutableStateOf(false) }
     val searchState by viewModel.searchState.collectAsState()
     val searchHighlight by viewModel.searchHighlight.collectAsState()
 
@@ -1980,6 +1982,14 @@ fun ReaderScreen(
                     menuVisible = false
                     viewModel.toggleViewMode()
                 },
+                onOpenBookQa = if (aiConfigured && !viewModeTranslated) {
+                    {
+                        menuVisible = false
+                        qaVisible = true
+                    }
+                } else {
+                    null
+                },
                 // M20 视角 2：仅双页翻页布局 + 已有译本时给入口（单页/悬停退回视角 1）
                 bilingualCompareAvailable = aiConfigured && translationReady && dual && !viewModeTranslated,
                 bilingualCompareActive = bilingualCompare,
@@ -2149,6 +2159,21 @@ fun ReaderScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = viewModel::dismissSummaryConfirm) { Text("取消") }
+                },
+            )
+        }
+
+        // M29：问书（阅读菜单入口；未配置 AI 时菜单不给入口）
+        if (qaVisible) {
+            val qaState by viewModel.qaState.collectAsState()
+            BookQaDialog(
+                state = qaState,
+                onAsk = viewModel::askBook,
+                onConfirm = viewModel::confirmQa,
+                onRetry = viewModel::retryQa,
+                onDismiss = {
+                    qaVisible = false
+                    viewModel.closeQa()
                 },
             )
         }

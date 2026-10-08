@@ -149,6 +149,8 @@ data class ReadingPreferences(
     val aiExplainConfirmed: Boolean = false,
     /** M29：AI 章节摘要的首次外发一次性确认；确认后不再弹。 */
     val aiSummaryConfirmed: Boolean = false,
+    /** M29：问书（当前章 + 摘要链外发）的首次外发一次性确认；确认后不再弹。 */
+    val aiQaConfirmed: Boolean = false,
     /** M22：漫画翻译的首次外发一次性确认；确认后不再弹。 */
     val aiComicTranslateConfirmed: Boolean = false,
     /** M23：漫画视觉翻译（页图像外发）逐书明示确认的书 id（逗号分隔）。 */

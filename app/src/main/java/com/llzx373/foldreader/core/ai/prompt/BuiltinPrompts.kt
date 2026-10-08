@@ -20,6 +20,7 @@ object BuiltinPrompts {
     val comicVisionTranslation = BuiltinPrompt("漫画视觉翻译", ComicVisionTranslatePrompt.SYSTEM_PROMPT)
     val chapterSummary = BuiltinPrompt("章节摘要", ChapterSummaryPrompt.SYSTEM_PROMPT)
     val bookOutline = BuiltinPrompt("全书大纲", BookOutlinePrompt.SYSTEM_PROMPT)
+    val bookQa = BuiltinPrompt("问书", BookQaPrompt.SYSTEM_PROMPT)
 
     val all: List<BuiltinPrompt> =
         listOf(
@@ -34,5 +35,6 @@ object BuiltinPrompts {
             comicVisionTranslation,
             chapterSummary,
             bookOutline,
+            bookQa,
         )
 }
