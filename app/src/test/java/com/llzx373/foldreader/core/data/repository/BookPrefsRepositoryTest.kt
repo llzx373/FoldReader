@@ -333,6 +333,7 @@ class BookPrefsRepositoryTest {
         override suspend fun setAiTargetLang(targetLang: AiTargetLang) = Unit
         override suspend fun setAiChapterRuleConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiTranslationConfirmed(confirmed: Boolean) = Unit
+        override suspend fun setAiExplainConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) = Unit
         override suspend fun confirmAiComicVisionForBook(bookId: Long) = Unit
         override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) = Unit

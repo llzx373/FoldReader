@@ -176,6 +176,10 @@ class ReaderViewModel(
         { null },
     /** M20 全书翻译队列（R5 插队）：null = 不挂（测试中默认不挂）。 */
     private val translationQueue: com.llzx373.foldreader.feature.translate.BookTranslationQueue? = null,
+    /** M28 词典查词服务（本地优先，AI 回落判据在服务端注入）：null = 查词不挂。 */
+    private val dictionaryLookupService: com.llzx373.foldreader.core.dict.DictionaryLookupService? = null,
+    /** M28 生词本落库；null = 卡片不出「收藏」（测试中默认不挂）。 */
+    private val wordEntryDao: com.llzx373.foldreader.core.data.db.WordEntryDao? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -624,6 +628,191 @@ class ReaderViewModel(
                 TranslateCardUi.Error(e.message ?: "翻译失败", lang)
         } catch (e: Exception) {
             _translationCardState.value = TranslateCardUi.Error("网络不可达或响应异常", lang)
+        }
+    }
+
+    // ---------- M28 词典取词（本地优先，AI 划词解释回落） ----------
+
+    /** 查词卡片状态；null = 卡片关闭。状态机见 [DictCardUi]。 */
+    private val _dictCardState = MutableStateFlow<DictCardUi?>(null)
+    val dictCardState: StateFlow<DictCardUi?> = _dictCardState.asStateFlow()
+
+    private var dictJob: kotlinx.coroutines.Job? = null
+    private var dictWord = ""
+    private var dictSelStart = 0L
+    private var dictSelEnd = 0L
+    private var dictLang = AiTargetLang.ZH_HANS
+
+    /**
+     * 选区操作条「查词」入口：本地词典命中直接展示（零网络零确认）；
+     * 未命中且 AI 已配置时给出「AI 解释」回落（走一次性确认 + 台账）。
+     */
+    fun lookupSelection(start: Long, end: Long) {
+        val service = dictionaryLookupService ?: return
+        dictJob?.cancel()
+        dictJob = viewModelScope.launch {
+            val text = selectedTextOf(start, end)
+            val word = service.normalize(text)
+            if (word == null) {
+                notices.tryEmit("选中内容太长，不适合查词")
+                return@launch
+            }
+            dictWord = word
+            dictSelStart = start
+            dictSelEnd = end
+            when (
+                val outcome = withContext(Dispatchers.IO) { service.lookup(word) }
+            ) {
+                is com.llzx373.foldreader.core.dict.LookupOutcome.LocalHit ->
+                    _dictCardState.value = DictCardUi.LocalHit(
+                        word = outcome.word,
+                        definition = outcome.definition,
+                        dictName = outcome.dictName,
+                    )
+                is com.llzx373.foldreader.core.dict.LookupOutcome.Miss ->
+                    if (outcome.aiAvailable) {
+                        startExplainFlow()
+                    } else {
+                        _dictCardState.value = DictCardUi.Miss(word, aiAvailable = false)
+                    }
+            }
+        }
+    }
+
+    /** Miss 卡片上的「AI 解释」回落入口。 */
+    fun explainWithAi() {
+        val s = _dictCardState.value as? DictCardUi.Miss ?: return
+        if (!s.aiAvailable) return
+        dictJob?.cancel()
+        dictJob = viewModelScope.launch { startExplainFlow() }
+    }
+
+    /** AI 解释：确认过就直接解释，否则先走一次性确认卡片。 */
+    private suspend fun startExplainFlow() {
+        val prefs = settingsRepository.preferences.first()
+        dictLang = prefs.aiTargetLang
+        if (prefs.aiExplainConfirmed) {
+            streamExplanation()
+        } else {
+            _dictCardState.value = DictCardUi.AwaitConfirmation(
+                word = dictWord,
+                baseUrl = prefs.aiBaseUrl,
+                lang = dictLang,
+            )
+        }
+    }
+
+    /** 确认框「同意并解释」：落一次性确认标记后开始解释。 */
+    fun confirmExplain() {
+        if (_dictCardState.value !is DictCardUi.AwaitConfirmation) return
+        startExplainJob {
+            settingsRepository.setAiExplainConfirmed(true)
+        }
+    }
+
+    /** 失败重试：选中词还在内存，直接重走解释，不重读正文。 */
+    fun retryExplain() {
+        if (_dictCardState.value !is DictCardUi.Error) return
+        startExplainJob()
+    }
+
+    /** 关闭卡片：取消进行中的请求并清状态。 */
+    fun closeDictCard() {
+        dictJob?.cancel()
+        dictJob = null
+        _dictCardState.value = null
+    }
+
+    /** 生词本是否挂载（决定查词卡片「收藏」入口是否出现）。 */
+    val vocabularyEnabled: Boolean = wordEntryDao != null
+
+    /**
+     * 查词卡片「收藏」：词条 + 当前释义 + 上下文例句（选区所在句）+ 来源书与位置落生词本。
+     * 本地命中与 AI 解释（流未停也照存当前内容）都可收藏。
+     */
+    fun saveWordToVocabulary() {
+        val dao = wordEntryDao ?: return
+        val s = _dictCardState.value ?: return
+        val (definition, source) = when (s) {
+            is DictCardUi.LocalHit -> s.definition to s.dictName
+            is DictCardUi.AiStreaming -> s.text to "AI"
+            else -> return
+        }
+        if (definition.isBlank()) return
+        viewModelScope.launch {
+            val context = withContext(Dispatchers.IO) {
+                val content = content ?: return@withContext dictWord
+                val windowStart = maxOf(0L, dictSelStart - CONTEXT_WINDOW_CHARS)
+                val windowEnd = minOf(content.charCount, dictSelStart + dictWord.length + CONTEXT_WINDOW_CHARS)
+                val window = runCatching { content.read(windowStart until windowEnd) }.getOrDefault("")
+                com.llzx373.foldreader.core.dict.extractContextSentence(
+                    window,
+                    (dictSelStart - windowStart).toInt(),
+                    dictWord.length,
+                )
+            }
+            dao.insert(
+                com.llzx373.foldreader.core.data.db.WordEntryEntity(
+                    bookId = bookId,
+                    word = dictWord,
+                    definition = definition.trim(),
+                    contextSentence = context,
+                    charOffset = dictSelStart,
+                    source = source,
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+            notices.tryEmit("已加入生词本")
+            closeDictCard()
+        }
+    }
+
+    private fun startExplainJob(before: suspend () -> Unit = {}) {
+        dictJob?.cancel()
+        dictJob = viewModelScope.launch {
+            before()
+            streamExplanation()
+        }
+    }
+
+    private suspend fun streamExplanation() {
+        val word = dictWord
+        val provider = aiProvider()
+        if (provider == null) {
+            _dictCardState.value = DictCardUi.Error("请先在设置中完成 AI 服务配置", word)
+            return
+        }
+        _dictCardState.value = DictCardUi.Loading(word, dictLang)
+        // 外发台账：feature=划词解释，估算口径同选中即译（字符数 / 2）
+        recordOutbound("划词解释", _uiState.value.bookTitle, word.length / 2)
+        val model = settingsRepository.preferences.first().aiModelGeneral
+        val reply = StringBuilder()
+        try {
+            provider.chat(
+                com.llzx373.foldreader.core.ai.prompt.SelectionExplainPrompt
+                    .buildMessages(word, dictLang),
+                model,
+            ).collect { delta ->
+                reply.append(delta)
+                _dictCardState.value = DictCardUi.AiStreaming(
+                    word = word,
+                    text = reply.toString(),
+                    lang = dictLang,
+                    running = true,
+                )
+            }
+            _dictCardState.value = DictCardUi.AiStreaming(
+                word = word,
+                text = reply.toString(),
+                lang = dictLang,
+                running = false,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AiException) {
+            _dictCardState.value = DictCardUi.Error(e.message ?: "解释失败", word)
+        } catch (e: Exception) {
+            _dictCardState.value = DictCardUi.Error("网络不可达或响应异常", word)
         }
     }
 
@@ -2412,6 +2601,9 @@ class ReaderViewModel(
     }
 
     companion object {
+        /** 生词本例句抽取的窗口半径（字符）：词前/词后各取这么长找句边界。 */
+        private const val CONTEXT_WINDOW_CHARS = 120L
+
         /** 锚点深于该字数且页边界缓存未覆盖时，才启用段首播种起排（浅位置从 0 排足够快）。 */
         private const val SEED_MIN_ANCHOR_CHARS = 30_000L
 
@@ -2462,6 +2654,8 @@ class ReaderViewModel(
                     translationDao = container.database.translationDao(),
                     translateEngine = { container.translateEngine() },
                     translationQueue = container.bookTranslationQueue,
+                    dictionaryLookupService = container.dictionaryLookupService,
+                    wordEntryDao = container.database.wordEntryDao(),
                 )
             }
         }

@@ -85,6 +85,7 @@ private fun ColorDots(
  * 传 null 的项不显示——页式（漫画 / PDF）没有笔记与文字层，那里只给
  * 「色点高亮 / 下划线 / 书签 / 复制（有文字层时）/ 取消」。
  * 「翻译」（M18 选中即译）只在 AI 服务已配置时由调用方传入。
+ * 「查词」（M28 词典取词）在有本地词典或 AI 已配置时由调用方传入。
  * 「章节规则」（选中行生成切割规则）只在 TXT 书原文模式下由调用方传入。
  * 译文视角（M19）下标注写入全部禁用：调用方把色点/笔记/下划线/书签/翻译都传 null，
  * 只留「复制 / 取消」。
@@ -102,6 +103,7 @@ fun SelectionActionBar(
     onUnderline: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
     onTranslate: (() -> Unit)? = null,
+    onLookup: (() -> Unit)? = null,
     onMakeChapterRule: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -125,6 +127,7 @@ fun SelectionActionBar(
             if (onBookmark != null) TextButton(onClick = onBookmark) { Text("书签") }
             if (onCopy != null) TextButton(onClick = onCopy) { Text("复制") }
             if (onTranslate != null) TextButton(onClick = onTranslate) { Text("翻译") }
+            if (onLookup != null) TextButton(onClick = onLookup) { Text("查词") }
             if (onMakeChapterRule != null) TextButton(onClick = onMakeChapterRule) { Text("章节规则") }
             TextButton(onClick = onCancel) { Text("取消") }
         }

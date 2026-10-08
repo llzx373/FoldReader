@@ -103,6 +103,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showBuiltinPromptsDialog by remember { mutableStateOf(false) }
     var showGlossaryDialog by remember { mutableStateOf(false) }
     var showDictionaryDialog by remember { mutableStateOf(false) }
+    var showVocabularyDialog by remember { mutableStateOf(false) }
     val dictionaries by viewModel.dictionaries.collectAsState()
     var showAiClearKeyConfirm by remember { mutableStateOf(false) }
     var showAiClearDataConfirm by remember { mutableStateOf(false) }
@@ -719,6 +720,11 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 },
                 modifier = Modifier.clickable { showDictionaryDialog = true },
             )
+            ListItem(
+                headlineContent = { Text("生词本") },
+                supportingContent = { Text("查词卡片「收藏」的词条（释义 / 例句 / 来源书），按书或按时间浏览") },
+                modifier = Modifier.clickable { showVocabularyDialog = true },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("OCR 模型（离线识别）")
@@ -1117,6 +1123,12 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
         DictionaryDialog(
             viewModel = viewModel,
             onDismiss = { showDictionaryDialog = false },
+        )
+    }
+    if (showVocabularyDialog) {
+        VocabularyDialog(
+            viewModel = viewModel,
+            onDismiss = { showVocabularyDialog = false },
         )
     }
     if (showModelManagerDialog) {

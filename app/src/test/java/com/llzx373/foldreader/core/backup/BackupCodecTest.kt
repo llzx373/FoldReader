@@ -731,6 +731,9 @@ class BackupCodecTest {
         override suspend fun setAiTranslationConfirmed(confirmed: Boolean) =
             update { copy(aiTranslationConfirmed = confirmed) }
 
+        override suspend fun setAiExplainConfirmed(confirmed: Boolean) =
+            update { copy(aiExplainConfirmed = confirmed) }
+
         override suspend fun setAiComicTranslateConfirmed(confirmed: Boolean) =
             update { copy(aiComicTranslateConfirmed = confirmed) }
 

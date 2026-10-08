@@ -60,6 +60,8 @@ class SettingsViewModel(
     private val dictionaryStore: com.llzx373.foldreader.core.dict.DictionaryStore,
     private val importDictionariesAction: (Uri) -> com.llzx373.foldreader.core.dict.android.DictionaryImporter.Summary,
     private val invalidateDictionariesAction: () -> Unit,
+    /** M28：生词本表（列表/删除/导出）。 */
+    private val wordEntryDao: com.llzx373.foldreader.core.data.db.WordEntryDao,
     /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
     private val clearAiDataAction: suspend () -> Unit = {},
 ) : ViewModel() {
@@ -547,6 +549,25 @@ class SettingsViewModel(
         }
     }
 
+    // ---- 生词本（M28）----
+
+    /** 列表项：词条 + 来源书名（书被连带删除时只剩孤儿的情况不会发生——外键级联）。 */
+    data class VocabularyItem(
+        val entry: com.llzx373.foldreader.core.data.db.WordEntryEntity,
+        val bookTitle: String,
+    )
+
+    val vocabulary: StateFlow<List<VocabularyItem>> =
+        kotlinx.coroutines.flow.combine(
+            wordEntryDao.observeAll(),
+            bookshelfRepository.observeBookshelf(),
+        ) { entries, books ->
+            val titles = books.associateBy({ it.id }, { it.title })
+            entries.map { VocabularyItem(it, titles[it.bookId] ?: "（未知书）") }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun deleteWordEntry(id: Long) = launch { wordEntryDao.deleteById(id) }
+
     fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
         launch {
             val error = runCatching { backupManager.exportTo(uri) }.exceptionOrNull()?.message
@@ -584,6 +605,7 @@ class SettingsViewModel(
                     dictionaryStore = container.dictionaryStore,
                     importDictionariesAction = container.dictionaryImporter::importFromTree,
                     invalidateDictionariesAction = container.dictionaryLookupService::invalidate,
+                    wordEntryDao = container.database.wordEntryDao(),
                     clearAiDataAction = container::clearAiData,
                 )
             }

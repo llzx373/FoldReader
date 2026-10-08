@@ -704,6 +704,13 @@ fun ReaderScreen(
     var aiConfigured by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { aiConfigured = app.container.aiConfigured() }
 
+    // M28 查词：有本地词典或 AI 已配置才给「查词」入口（两者皆无时界面零变化）
+    var lookupAvailable by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        lookupAvailable = app.container.aiConfigured() ||
+            withContext(Dispatchers.IO) { app.container.dictionaryLookupService.hasDictionaries() }
+    }
+
     // 「选中行生成章节规则」入口判据：仅 TXT（规则只在 TXT 解析管线生效）。
     // 一次性检查，不在重组路径上反复做 suspend 判据
     val chapterRuleEligible by produceState(initialValue = false, bookId) {
@@ -1657,6 +1664,17 @@ fun ReaderScreen(
                 } else {
                     null
                 },
+                onLookup = if (lookupAvailable && !viewModeTranslated) {
+                    {
+                        viewModel.lookupSelection(
+                            activeSelection.start,
+                            selectionEnd(activeSelection),
+                        )
+                        clearSelection()
+                    }
+                } else {
+                    null
+                },
                 // 译文坐标系不是原文行坐标，规则切分只对 TXT 原文有意义
                 onMakeChapterRule = if (chapterRuleEligible && !viewModeTranslated) {
                     {
@@ -1693,6 +1711,33 @@ fun ReaderScreen(
                     onSaveAsNote = viewModel::saveTranslationAsNote,
                     onRetry = viewModel::retryTranslation,
                     onClose = viewModel::closeTranslationCard,
+                )
+            }
+        }
+
+        // M28 查词卡片：本地命中直显 / 未命中回落 AI 解释（一次性确认 + 台账）
+        val dictCard by viewModel.dictCardState.collectAsState()
+        AnimatedVisibility(
+            visible = dictCard != null,
+            enter = fadeIn(tween(MENU_ANIM_MS)) + slideInVertically { it / 3 },
+            exit = fadeOut(tween(MENU_ANIM_MS)) + slideOutVertically { it / 3 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        ) {
+            dictCard?.let { cardState ->
+                DictCard(
+                    state = cardState,
+                    colors = colors,
+                    onAiExplain = viewModel::explainWithAi,
+                    onConfirm = viewModel::confirmExplain,
+                    onRetry = viewModel::retryExplain,
+                    onClose = viewModel::closeDictCard,
+                    onSaveWord = if (viewModel.vocabularyEnabled) {
+                        viewModel::saveWordToVocabulary
+                    } else {
+                        null
+                    },
                 )
             }
         }
