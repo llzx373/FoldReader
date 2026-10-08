@@ -111,16 +111,42 @@ class AppContainer(context: Context) {
     val dictsDir = File(context.filesDir, "dicts").apply { mkdirs() }
     val dictionaryStore = com.llzx373.foldreader.core.dict.DictionaryStore(dictsDir)
     /**
+     * M35：ONNX 会话的 NNAPI 开关镜像（DataStore → 进程内易失标志）。
+     * 引擎建会话时读取；[startOcrBackendSync] 监听设置变化并作废现有会话重建。
+     */
+    @Volatile
+    private var onnxNnapiEnabled = false
+
+    /**
      * ONNX 会话层（M21）。对象本身很轻（会话全部惰性：模型未导入不创建 OrtEnvironment），
      * 但进程级共享一把锁，必须与阅读器同生命周期，所以挂容器单例。
      */
     val ocrEngine: com.llzx373.foldreader.core.ocr.android.OcrEngine by lazy {
-        com.llzx373.foldreader.core.ocr.android.OcrEngine(appContext, modelManager)
+        com.llzx373.foldreader.core.ocr.android.OcrEngine(
+            appContext, modelManager, nnapiEnabled = { onnxNnapiEnabled },
+        )
     }
 
     /** 气泡抹除会话层（M31）：与 OcrEngine 同一惰性纪律——inpaint 模型未导入不创建会话。 */
     val inpaintEngine: com.llzx373.foldreader.core.ocr.android.InpaintEngine by lazy {
-        com.llzx373.foldreader.core.ocr.android.InpaintEngine(modelManager)
+        com.llzx373.foldreader.core.ocr.android.InpaintEngine(
+            modelManager, nnapiEnabled = { onnxNnapiEnabled },
+        )
+    }
+
+    /** M35：NNAPI 开关变化 → 作废两个引擎的现有会话（经各自互斥锁，不拆在跑的推理）。 */
+    private fun startOcrBackendSync() {
+        maintenanceScope.launch {
+            settingsRepository.preferences
+                .map { it.ocrNnapiEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enabled == onnxNnapiEnabled) return@collect
+                    onnxNnapiEnabled = enabled
+                    runCatching { ocrEngine.invalidateSessions() }
+                    runCatching { inpaintEngine.invalidateSessions() }
+                }
+        }
     }
 
     /**
@@ -1169,6 +1195,7 @@ class AppContainer(context: Context) {
         }
         startWidgetSync()
         startSearchIndexSync()
+        startOcrBackendSync()
     }
 
     /**

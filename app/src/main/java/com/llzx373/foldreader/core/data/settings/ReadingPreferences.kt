@@ -174,6 +174,12 @@ data class ReadingPreferences(
      * 空串 = 自动（优先中文模型——中日英混排覆盖最好——未导入则取第一个已导入的）。
      */
     val ocrRecLang: String = "",
+    /**
+     * M35：ONNX 会话的 NNAPI 硬件加速开关（det/rec/气泡检测/inpaint 全部会话共用）。
+     * 默认关——NNAPI 驱动质量因设备/芯片而异，且 ORT 对不支持的算子自动回落 CPU，
+     * 开启前建议用整卷漫画翻译实测对比（见 docs/OCR推理后端评审.md）。
+     */
+    val ocrNnapiEnabled: Boolean = false,
     /** 以下为 WebDAV 备份（M25）；密码不走这里，由 WebDavCredentialStore 加密托管。 */
     /** WebDAV 备份目录的完整地址；空串 = 未配置（未配置时零网络请求）。 */
     val webdavBaseUrl: String = "",

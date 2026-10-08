@@ -527,6 +527,9 @@ class SettingsViewModel(
 
     fun updateOcrRecLang(modelId: String) = launch { settingsRepository.setOcrRecLang(modelId) }
 
+    /** M35：NNAPI 开关——写设置即可，容器侧监听流变化负责作废现有 ONNX 会话。 */
+    fun updateOcrNnapiEnabled(enabled: Boolean) = launch { settingsRepository.setOcrNnapiEnabled(enabled) }
+
     // ---- 词典管理（M28）----
 
     private val _dictionaries = MutableStateFlow<List<com.llzx373.foldreader.core.dict.DictInfo>>(emptyList())

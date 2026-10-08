@@ -96,6 +96,21 @@ class ReadingPreferencesTest {
     }
 
     @Test
+    fun `OCR NNAPI 加速默认关闭`() {
+        assertFalse(ReadingPreferences().ocrNnapiEnabled)
+    }
+
+    @Test
+    fun `OCR NNAPI 开关按值读写`() {
+        val prefs = ReadingPreferences(ocrNnapiEnabled = true)
+
+        assertTrue(prefs.ocrNnapiEnabled)
+        val restored = prefs.copy()
+        assertEquals(prefs, restored)
+        assertEquals(prefs.hashCode(), restored.hashCode())
+    }
+
+    @Test
     fun `自定义章节规则默认为空列表`() {
         assertEquals(emptyList<String>(), ReadingPreferences().customChapterRules)
     }

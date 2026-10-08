@@ -96,6 +96,7 @@ class SettingsRepositoryImpl(
         val TTS_PITCH = floatPreferencesKey("tts_pitch")
         val AI_PRICE_PER_MILLION = doublePreferencesKey("ai_price_per_million")
         val OCR_REC_LANG = stringPreferencesKey("ocr_rec_lang")
+        val OCR_NNAPI_ENABLED = booleanPreferencesKey("ocr_nnapi_enabled")
         val WEBDAV_BASE_URL = stringPreferencesKey("webdav_base_url")
         val WEBDAV_USERNAME = stringPreferencesKey("webdav_username")
         val WEBDAV_CONFIRMED = booleanPreferencesKey("webdav_confirmed")
@@ -209,6 +210,7 @@ class SettingsRepositoryImpl(
                 ttsPitch = prefs[Keys.TTS_PITCH] ?: defaults.ttsPitch,
                 aiPricePerMillion = prefs[Keys.AI_PRICE_PER_MILLION] ?: defaults.aiPricePerMillion,
                 ocrRecLang = prefs[Keys.OCR_REC_LANG] ?: defaults.ocrRecLang,
+                ocrNnapiEnabled = prefs[Keys.OCR_NNAPI_ENABLED] ?: defaults.ocrNnapiEnabled,
                 webdavBaseUrl = prefs[Keys.WEBDAV_BASE_URL] ?: defaults.webdavBaseUrl,
                 webdavUsername = prefs[Keys.WEBDAV_USERNAME] ?: defaults.webdavUsername,
                 webdavConfirmed = prefs[Keys.WEBDAV_CONFIRMED] ?: defaults.webdavConfirmed,
@@ -553,6 +555,10 @@ class SettingsRepositoryImpl(
 
     override suspend fun setOcrRecLang(modelId: String) {
         context.readingPreferencesStore.edit { it[Keys.OCR_REC_LANG] = modelId }
+    }
+
+    override suspend fun setOcrNnapiEnabled(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.OCR_NNAPI_ENABLED] = enabled }
     }
 
     override suspend fun setWebDavBaseUrl(baseUrl: String) {

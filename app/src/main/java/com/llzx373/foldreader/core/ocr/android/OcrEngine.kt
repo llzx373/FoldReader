@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import com.llzx373.foldreader.core.ai.android.ModelManager
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.ocr.BubbleGrouping
 import com.llzx373.foldreader.core.ocr.ModelCatalog
 import com.llzx373.foldreader.core.ocr.OcrBubble
@@ -35,6 +36,11 @@ import kotlinx.coroutines.withContext
 class OcrEngine(
     private val context: Context,
     private val modelManager: ModelManager,
+    /**
+     * M35：NNAPI 硬件加速开关（设置页「OCR 硬件加速」），建会话时读取。
+     * 切换后由容器调 [invalidateSessions] 作废现有会话，下次使用按新开关重建。
+     */
+    private val nnapiEnabled: () -> Boolean = { false },
 ) : Closeable {
 
     private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
@@ -187,22 +193,51 @@ class OcrEngine(
     }
 
     private fun detSession(): OrtSession =
-        detSession ?: env.createSession(modelManager.resolvedFileOf(ModelCatalog.DET).absolutePath)
+        detSession ?: createSession(modelManager.resolvedFileOf(ModelCatalog.DET).absolutePath)
             .also { detSession = it }
 
     private fun recSession(spec: OcrModelSpec): OrtSession =
         recSessions.getOrPut(spec.id) {
-            env.createSession(modelManager.resolvedFileOf(spec).absolutePath)
+            createSession(modelManager.resolvedFileOf(spec).absolutePath)
         }
 
     private fun bubbleSession(): OrtSession =
-        bubbleSession ?: env.createSession(modelManager.resolvedFileOf(ModelCatalog.BUBBLE).absolutePath)
+        bubbleSession ?: createSession(modelManager.resolvedFileOf(ModelCatalog.BUBBLE).absolutePath)
             .also { bubbleSession = it }
 
-    override fun close() {
+    /**
+     * 建会话（M35）：开关开启时优先 NNAPI 执行后端（onnxruntime-mobile 内置该 EP，
+     * 不支持的算子由 ORT 自动拆回 CPU）；NNAPI 注册失败（无驱动/老系统）回落纯 CPU。
+     */
+    private fun createSession(modelPath: String): OrtSession {
+        if (!nnapiEnabled()) return env.createSession(modelPath)
+        return runCatching {
+            OrtSession.SessionOptions().use { options ->
+                options.addNnapi()
+                env.createSession(modelPath, options)
+            }
+        }.getOrElse { error ->
+            DiagnosticLog.line("OCR 会话: NNAPI 不可用，回落 CPU（${error.javaClass.simpleName}）")
+            env.createSession(modelPath)
+        }
+    }
+
+    /**
+     * 作废全部会话（NNAPI 开关切换后调用）：经 [mutex] 等正在跑的推理结束再关，
+     * 不会在会话使用中强拆；下次使用时按新开关重建。
+     */
+    fun invalidateSessions() {
+        kotlinx.coroutines.runBlocking { mutex.withLock { closeSessionsLocked() } }
+    }
+
+    private fun closeSessionsLocked() {
         detSession?.close(); detSession = null
         recSessions.values.forEach { it.close() }; recSessions.clear()
         bubbleSession?.close(); bubbleSession = null
+    }
+
+    override fun close() {
+        closeSessionsLocked()
     }
 
     private fun scaled(src: Bitmap, w: Int, h: Int): Bitmap =

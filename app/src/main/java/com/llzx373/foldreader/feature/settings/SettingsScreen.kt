@@ -757,12 +757,19 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     )
                 },
             )
+            SwitchSetting(
+                "OCR 硬件加速（NNAPI）",
+                prefs.ocrNnapiEnabled,
+                viewModel::updateOcrNnapiEnabled,
+            )
             ListItem(
                 headlineContent = { Text("关于 OCR") },
                 supportingContent = {
                     Text(
                         "识别完全在本机离线运行，不产生任何网络请求；" +
-                            "扫描版 PDF 在模型就绪后可全文搜索、可拖框选字。",
+                            "扫描版 PDF 在模型就绪后可全文搜索、可拖框选字。" +
+                            "硬件加速（NNAPI）调用系统神经网络加速驱动，不支持的算子自动回落 CPU；" +
+                            "驱动质量因设备而异，默认关闭，建议配合整卷翻译实测后再开启。",
                     )
                 },
             )

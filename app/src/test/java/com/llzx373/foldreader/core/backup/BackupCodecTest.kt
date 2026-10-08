@@ -1070,6 +1070,9 @@ class BackupCodecTest {
         override suspend fun setOcrRecLang(modelId: String) =
             update { copy(ocrRecLang = modelId) }
 
+        override suspend fun setOcrNnapiEnabled(enabled: Boolean) =
+            update { copy(ocrNnapiEnabled = enabled) }
+
         override suspend fun setWebDavBaseUrl(baseUrl: String) =
             update { copy(webdavBaseUrl = baseUrl) }
 

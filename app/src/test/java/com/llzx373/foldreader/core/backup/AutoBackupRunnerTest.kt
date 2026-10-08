@@ -181,6 +181,7 @@ class AutoBackupRunnerTest {
         override suspend fun setTtsPitch(pitch: Float) = Unit
         override suspend fun setAiPricePerMillion(price: Double) = Unit
         override suspend fun setOcrRecLang(modelId: String) = Unit
+        override suspend fun setOcrNnapiEnabled(enabled: Boolean) = Unit
         override suspend fun setWebDavBaseUrl(baseUrl: String) = Unit
         override suspend fun setWebDavUsername(username: String) = Unit
         override suspend fun setWebDavConfirmed(confirmed: Boolean) = Unit

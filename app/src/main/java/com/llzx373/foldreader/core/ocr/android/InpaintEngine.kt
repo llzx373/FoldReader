@@ -7,6 +7,7 @@ import ai.onnxruntime.TensorInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import com.llzx373.foldreader.core.ai.android.ModelManager
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.inpaint.InpaintMask
 import com.llzx373.foldreader.core.ocr.ModelCatalog
 import com.llzx373.foldreader.core.ocr.OcrRect
@@ -31,6 +32,11 @@ import kotlinx.coroutines.withContext
  */
 class InpaintEngine(
     private val modelManager: ModelManager,
+    /**
+     * M35：NNAPI 硬件加速开关（与 [OcrEngine] 共用同一设置项），建会话时读取。
+     * 切换后由容器调 [invalidateSessions] 作废现有会话，下次使用按新开关重建。
+     */
+    private val nnapiEnabled: () -> Boolean = { false },
 ) : Closeable {
 
     private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
@@ -114,8 +120,35 @@ class InpaintEngine(
     }
 
     private fun session(): OrtSession =
-        session ?: env.createSession(modelManager.resolvedFileOf(ModelCatalog.INPAINT).absolutePath)
+        session ?: createSession(modelManager.resolvedFileOf(ModelCatalog.INPAINT).absolutePath)
             .also { session = it }
+
+    /** 与 [OcrEngine.createSession] 同一口径：开关开启优先 NNAPI，注册失败回落 CPU。 */
+    private fun createSession(modelPath: String): OrtSession {
+        if (!nnapiEnabled()) return env.createSession(modelPath)
+        return runCatching {
+            OrtSession.SessionOptions().use { options ->
+                options.addNnapi()
+                env.createSession(modelPath, options)
+            }
+        }.getOrElse { error ->
+            DiagnosticLog.line("Inpaint 会话: NNAPI 不可用，回落 CPU（${error.javaClass.simpleName}）")
+            env.createSession(modelPath)
+        }
+    }
+
+    /** 作废现有会话（NNAPI 开关切换后调用）：经 [mutex] 串行，下次使用时重建。 */
+    fun invalidateSessions() {
+        kotlinx.coroutines.runBlocking { mutex.withLock { closeLocked() } }
+    }
+
+    private fun closeLocked() {
+        session?.close(); session = null
+    }
+
+    override fun close() {
+        closeLocked()
+    }
 
     /** RGB → NCHW float，值域 0..1。 */
     private fun imageNchw(bitmap: Bitmap, w: Int, h: Int): FloatArray {
@@ -144,9 +177,5 @@ class InpaintEngine(
             pixels[i] = (0xFF shl 24) or (ch(0) shl 16) or (ch(plane) shl 8) or ch(2 * plane)
         }
         return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
-    }
-
-    override fun close() {
-        session?.close(); session = null
     }
 }
