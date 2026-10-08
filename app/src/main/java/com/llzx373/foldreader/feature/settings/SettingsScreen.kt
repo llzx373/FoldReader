@@ -105,6 +105,26 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showAiClearDataConfirm by remember { mutableStateOf(false) }
     var showModelManagerDialog by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<BackupManager.ImportResult?>(null) }
+    val webDavPasswordConfigured by viewModel.webDavPasswordConfigured.collectAsState()
+    val webDavTestState by viewModel.webDavTestState.collectAsState()
+    val webDavBackups by viewModel.webDavBackups.collectAsState()
+    val webDavUploading by viewModel.webDavUploading.collectAsState()
+    var showWebDavListDialog by remember { mutableStateOf(false) }
+    /** 远端备份的待恢复确认：预览 + 已下载的备份原文（确认后不再二次下载）。 */
+    var webDavPendingRestore by remember {
+        mutableStateOf<Pair<BackupManager.BackupPreview, String>?>(null)
+    }
+    var webDavPreviewLoading by remember { mutableStateOf<String?>(null) }
+    var showWebDavUrlDialog by remember { mutableStateOf(false) }
+    var showWebDavUsernameDialog by remember { mutableStateOf(false) }
+    var showWebDavPasswordDialog by remember { mutableStateOf(false) }
+    var showWebDavClearPasswordConfirm by remember { mutableStateOf(false) }
+    /** M25：首个 WebDAV 网络动作前的一次性明示确认；非 null = 等待确认，确认后执行。 */
+    var pendingWebDavAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    /** M25：任何 WebDAV 网络动作的统一闸门——首次先弹一次性明示确认。 */
+    fun webDavAction(action: () -> Unit) {
+        if (prefs.webdavConfirmed) action() else pendingWebDavAction = action
+    }
     var logEnabled by remember { mutableStateOf(DiagnosticLog.isEnabled) }
     val clipboard = LocalClipboardManager.current
 
@@ -752,6 +772,85 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("WebDAV 备份")
+            ListItem(
+                headlineContent = { Text("服务器地址") },
+                supportingContent = {
+                    Text(prefs.webdavBaseUrl.ifBlank { "未配置（备份目录的完整地址，如 https://dav.jianguoyun.com/dav/FoldReader/）" })
+                },
+                modifier = Modifier.clickable { showWebDavUrlDialog = true },
+            )
+            ListItem(
+                headlineContent = { Text("账号") },
+                supportingContent = { Text(prefs.webdavUsername.ifBlank { "未配置" }) },
+                modifier = Modifier.clickable { showWebDavUsernameDialog = true },
+            )
+            ListItem(
+                headlineContent = { Text("密码") },
+                supportingContent = {
+                    Text(if (webDavPasswordConfigured) "已配置（本地加密存储）" else "未配置")
+                },
+                modifier = Modifier.clickable { showWebDavPasswordDialog = true },
+            )
+            ListItem(
+                headlineContent = { Text("测试连接") },
+                supportingContent = { Text(webDavTestSummary(webDavTestState)) },
+                modifier = Modifier.clickable {
+                    webDavAction { viewModel.testWebDavConnection() }
+                },
+            )
+            ListItem(
+                headlineContent = { Text("上传备份") },
+                supportingContent = {
+                    Text(
+                        if (webDavUploading) {
+                            "上传中…"
+                        } else {
+                            "导出 JSON 并上传到服务器（按时间戳命名，同名自动区分）"
+                        },
+                    )
+                },
+                modifier = Modifier.clickable(enabled = !webDavUploading) {
+                    webDavAction {
+                        viewModel.uploadBackupToWebDav { name, error ->
+                            val message = when {
+                                error != null -> "上传失败：$error"
+                                else -> "已上传：$name"
+                            }
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
+            ListItem(
+                headlineContent = { Text("远端备份列表") },
+                supportingContent = { Text("查看服务器上的备份，恢复前可预览版本与内容规模") },
+                modifier = Modifier.clickable {
+                    webDavAction {
+                        showWebDavListDialog = true
+                        viewModel.refreshWebDavBackups()
+                    }
+                },
+            )
+            if (webDavPasswordConfigured) {
+                ListItem(
+                    headlineContent = { Text("清除密码") },
+                    supportingContent = { Text("删除已保存的 WebDAV 密码；地址与账号保留") },
+                    modifier = Modifier.clickable { showWebDavClearPasswordConfirm = true },
+                )
+            }
+            ListItem(
+                headlineContent = { Text("关于 WebDAV 备份") },
+                supportingContent = {
+                    Text(
+                        "备份只发往你在上方自配的服务器，请自行评估其隐私政策；" +
+                            "密码仅在本机加密存储，不进备份、不写日志；" +
+                            "未配置时不会产生任何网络请求；每次传输记入「外发历史」。",
+                    )
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("诊断（返回跳动 / 折叠适配）")
             SwitchSetting("记录诊断日志", logEnabled) { enabled ->
                 logEnabled = enabled
@@ -951,6 +1050,137 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
     if (showLicensesDialog) {
         OpenSourceLicensesDialog(onDismiss = { showLicensesDialog = false })
+    }
+
+    if (showWebDavUrlDialog) {
+        AiTextInputDialog(
+            title = "WebDAV 服务器地址",
+            current = prefs.webdavBaseUrl,
+            onSave = {
+                viewModel.updateWebDavBaseUrl(it)
+                showWebDavUrlDialog = false
+            },
+            onDismiss = { showWebDavUrlDialog = false },
+        )
+    }
+    if (showWebDavUsernameDialog) {
+        AiTextInputDialog(
+            title = "WebDAV 账号",
+            current = prefs.webdavUsername,
+            onSave = {
+                viewModel.updateWebDavUsername(it)
+                showWebDavUsernameDialog = false
+            },
+            onDismiss = { showWebDavUsernameDialog = false },
+        )
+    }
+    if (showWebDavPasswordDialog) {
+        WebDavPasswordDialog(
+            onSave = {
+                viewModel.saveWebDavPassword(it)
+                showWebDavPasswordDialog = false
+            },
+            onDismiss = { showWebDavPasswordDialog = false },
+        )
+    }
+    if (showWebDavClearPasswordConfirm) {
+        AlertDialog(
+            onDismissRequest = { showWebDavClearPasswordConfirm = false },
+            title = { Text("清除密码") },
+            text = { Text("将删除本机保存的 WebDAV 密码，备份上传/恢复随即不可用。服务器地址与账号保留。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearWebDavPassword()
+                    showWebDavClearPasswordConfirm = false
+                }) { Text("清除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWebDavClearPasswordConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+    pendingWebDavAction?.let { action ->
+        AlertDialog(
+            onDismissRequest = { pendingWebDavAction = null },
+            title = { Text("WebDAV 备份") },
+            text = {
+                Text(
+                    "备份将上传到你配置的服务器：\n${prefs.webdavBaseUrl.ifBlank { "（未配置）"}}\n\n" +
+                        "传输内容为备份 JSON（书架数据与阅读偏好，不含书籍文件本体）。" +
+                        "服务器由你自托管/自行选择，请自行评估其隐私政策；每次传输会记入「外发历史」。" +
+                        "此确认只提示一次。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.confirmWebDav()
+                    pendingWebDavAction = null
+                    action()
+                }) { Text("同意并继续") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingWebDavAction = null }) { Text("取消") }
+            },
+        )
+    }
+
+    if (showWebDavListDialog) {
+        WebDavRemoteListDialog(
+            state = webDavBackups,
+            loadingName = webDavPreviewLoading,
+            onRefresh = { viewModel.refreshWebDavBackups() },
+            onRestore = { name ->
+                webDavPreviewLoading = name
+                viewModel.previewWebDavBackup(name) { preview, text, error ->
+                    webDavPreviewLoading = null
+                    if (preview != null && text != null) {
+                        webDavPendingRestore = preview to text
+                    } else {
+                        Toast.makeText(context, "下载失败：${error ?: "未知错误"}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            onDismiss = { showWebDavListDialog = false },
+        )
+    }
+    webDavPendingRestore?.let { (preview, backupText) ->
+        val exportedAt = remember(preview.exportedAt) {
+            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(preview.exportedAt))
+        }
+        AlertDialog(
+            onDismissRequest = { webDavPendingRestore = null },
+            title = { Text("恢复备份") },
+            text = {
+                Column {
+                    Text("版本 v${preview.version} · ${preview.bookCount} 本书 · 导出于 $exportedAt")
+                    Text(
+                        "恢复按书籍内容哈希匹配既有书籍：匹配上的恢复进度/书签/标注/偏好，" +
+                            "未匹配的会列入「文件缺失」清单。",
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    webDavPendingRestore = null
+                    showWebDavListDialog = false
+                    viewModel.restoreWebDavBackup(backupText) { result, error ->
+                        if (error != null || result == null) {
+                            Toast.makeText(
+                                context,
+                                "恢复失败：${error ?: "未知错误"}",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        } else {
+                            importResult = result
+                        }
+                    }
+                }) { Text("恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = { webDavPendingRestore = null }) { Text("取消") }
+            },
+        )
     }
 
     importResult?.let { result ->
@@ -1420,6 +1650,14 @@ private fun aiTestSummary(state: SettingsViewModel.AiTestState?): String = when 
     is SettingsViewModel.AiTestState.Failure -> "失败：${state.message}"
 }
 
+private fun webDavTestSummary(state: SettingsViewModel.WebDavTestState?): String = when (state) {
+    null -> "PROPFIND 目标目录验证配置；目录不存在时会自动创建"
+    SettingsViewModel.WebDavTestState.Running -> "测试中…"
+    is SettingsViewModel.WebDavTestState.Success ->
+        if (state.createdDirectory) "成功（目录不存在，已自动创建）" else "连接成功"
+    is SettingsViewModel.WebDavTestState.Failure -> "失败：${state.message}"
+}
+
 /** 预设只填地址，协议仍需在上方按服务商文档选择。 */
 private val aiPresets = listOf(
     "DeepSeek" to "https://api.deepseek.com",
@@ -1527,6 +1765,116 @@ private fun AiApiKeyDialog(
     )
 }
 
+/** WebDAV 密码掩码输入（M25）；只交给 WebDavCredentialStore，不落任何状态与日志。 */
+@Composable
+private fun WebDavPasswordDialog(
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("WebDAV 密码") },
+        text = {
+            Column {
+                Text(
+                    text = "密码仅在本机加密存储，不进备份、不写日志。坚果云等服务请使用「应用密码」而非登录密码。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("密码 / 应用密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(password) }, enabled = password.isNotEmpty()) {
+                Text("保存")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 远端备份列表（M25）：点条目 = 下载 + 恢复前预览。 */
+@Composable
+private fun WebDavRemoteListDialog(
+    state: SettingsViewModel.WebDavListState?,
+    loadingName: String?,
+    onRefresh: () -> Unit,
+    onRestore: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("远端备份") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when (state) {
+                    null, SettingsViewModel.WebDavListState.Loading -> Text(
+                        text = "加载中…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    is SettingsViewModel.WebDavListState.Failed -> Column {
+                        Text(
+                            text = "加载失败：${state.message}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = onRefresh) { Text("重试") }
+                    }
+                    is SettingsViewModel.WebDavListState.Ready -> {
+                        if (state.entries.isEmpty()) {
+                            Text(
+                                text = "服务器上还没有备份，先在上方「上传备份」",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        state.entries.forEach { entry ->
+                            ListItem(
+                                headlineContent = { Text(entry.name) },
+                                supportingContent = {
+                                    Text(
+                                        listOfNotNull(
+                                            formatBytes(entry.sizeBytes),
+                                            entry.lastModified,
+                                        ).joinToString(" · ") +
+                                            if (loadingName == entry.name) " · 下载中…" else "",
+                                    )
+                                },
+                                modifier = Modifier.clickable(enabled = loadingName == null) {
+                                    onRestore(entry.name)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
+}
+
 @Composable
 private fun AiOutboundHistoryDialog(
     records: List<AiContentGate.OutboundRecord>,
@@ -1560,7 +1908,12 @@ private fun AiOutboundHistoryDialog(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = "${record.scope} · ≈${record.estimatedTokens} token",
+                            text = if (record.estimatedTokens > 0) {
+                                "${record.scope} · ≈${record.estimatedTokens} token"
+                            } else {
+                                // WebDAV 备份等非 AI 记录没有 token 概念，scope 里已含文件名与大小
+                                record.scope
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
