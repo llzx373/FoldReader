@@ -225,6 +225,8 @@ fun AnnotationListDialog(
     /** 页式（漫画 / PDF）没有章节分组可言，按页平铺即可。 */
     groupByChapter: Boolean = true,
     emptyText: String = "还没有划线，长按正文选中文字即可划线",
+    /** M27：非 null 时底部多一个「导出」入口（Markdown 另存为，选项由宿主对话框给）。 */
+    onExport: (() -> Unit)? = null,
 ) {
     // 排序对两种锚点都给对顺序：文本按字符偏移（pageIndex 恒 null），页式按页序号 + 页内纵向位置
     val sorted = remember(annotations) {
@@ -236,7 +238,12 @@ fun AnnotationListDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            Row {
+                if (onExport != null) {
+                    TextButton(onClick = onExport) { Text("导出") }
+                }
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
         },
         title = { Text("标注") },
         text = {

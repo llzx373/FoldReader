@@ -114,6 +114,7 @@ import com.llzx373.foldreader.feature.reader.isBrightnessGesture
 import com.llzx373.foldreader.feature.reader.pageLabelOf
 import com.llzx373.foldreader.feature.reader.readerColors
 import com.llzx373.foldreader.feature.reader.rememberReaderExit
+import com.llzx373.foldreader.feature.reader.rememberAnnotationExport
 import com.llzx373.foldreader.feature.reader.resolvePageLayoutMode
 import com.llzx373.foldreader.feature.reader.resolveMiddleTap
 import com.llzx373.foldreader.feature.reader.resolveTabletopLayout
@@ -217,6 +218,12 @@ fun ComicReaderScreen(
     var outlineVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
     var annotationsVisible by remember { mutableStateOf(false) }
+    // M27：批注导出宿主——选项对话框与 SAF「另存为」都在它内部
+    val annotationExport = rememberAnnotationExport { options ->
+        com.llzx373.foldreader.core.export.AnnotationExport.render(
+            app.container.bookshelfRepository, bookId, options,
+        )
+    }
     var seriesVisible by remember { mutableStateOf(false) }
     var jumpVisible by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
@@ -1824,6 +1831,11 @@ fun ComicReaderScreen(
                     editingAnnotation = annotation
                 },
                 onDismiss = { annotationsVisible = false },
+                // 先收列表再弹导出选项：两个 AlertDialog 叠着只会互相抢焦点
+                onExport = {
+                    annotationsVisible = false
+                    annotationExport.open()
+                },
             )
         }
 

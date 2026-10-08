@@ -220,6 +220,12 @@ fun ReaderScreen(
     var catalogVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
     var annotationsVisible by remember { mutableStateOf(false) }
+    // M27：批注导出宿主——选项对话框（含笔记/含颜色）与 SAF「另存为」都在它内部
+    val annotationExport = rememberAnnotationExport { options ->
+        com.llzx373.foldreader.core.export.AnnotationExport.render(
+            app.container.bookshelfRepository, bookId, options,
+        )
+    }
     var searchVisible by remember { mutableStateOf(false) }
     var sleepTimerVisible by remember { mutableStateOf(false) }
     val searchState by viewModel.searchState.collectAsState()
@@ -2132,6 +2138,11 @@ fun ReaderScreen(
                 },
                 onEdit = { ann -> editingAnnotation = ann },
                 onDismiss = { annotationsVisible = false },
+                // 先收列表再弹导出选项：两个 AlertDialog 叠着只会互相抢焦点
+                onExport = {
+                    annotationsVisible = false
+                    annotationExport.open()
+                },
             )
         }
 

@@ -81,6 +81,15 @@ fun BookDetailDialog(
             }
         }
     }
+    // M27：批注导出（Markdown）宿主——选项对话框与 SAF「另存为」都在它内部；
+    // 页式锚点（漫画/PDF）在导出里降级为「第 N 页 + 区域描述」，所以入口对全格式开放
+    val annotationExport = com.llzx373.foldreader.feature.reader.rememberAnnotationExport { options ->
+        (context.applicationContext as? FoldReaderApplication)?.container?.let { container ->
+            com.llzx373.foldreader.core.export.AnnotationExport.render(
+                container.bookshelfRepository, bookId, options,
+            )
+        }
+    }
     val detail by produceState<Triple<BookEntity?, ReadingProgressEntity?, Int>?>(
         initialValue = null,
         bookId,
@@ -196,6 +205,9 @@ fun BookDetailDialog(
                     Spacer(modifier = Modifier.height(8.dp))
                     TextButton(onClick = { showEditMetadata = true }) {
                         Text("编辑信息")
+                    }
+                    TextButton(onClick = { annotationExport.open() }) {
+                        Text("导出批注（Markdown）")
                     }
                     if (isComic) {
                         Spacer(modifier = Modifier.height(8.dp))
