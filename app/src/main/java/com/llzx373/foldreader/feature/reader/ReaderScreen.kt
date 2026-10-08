@@ -221,6 +221,7 @@ fun ReaderScreen(
     var bookmarksVisible by remember { mutableStateOf(false) }
     var annotationsVisible by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
+    var sleepTimerVisible by remember { mutableStateOf(false) }
     val searchState by viewModel.searchState.collectAsState()
     val searchHighlight by viewModel.searchHighlight.collectAsState()
 
@@ -1890,6 +1891,8 @@ fun ReaderScreen(
                 onOpenSettings = { exit.leaveTo(onOpenSettings) },
                 ttsPlaying = ttsPlaying,
                 ttsPaused = ttsPaused,
+                ttsSleepText = ttsState.sleepText.takeIf { ttsPlaying },
+                onSleepTimer = { sleepTimerVisible = true },
                 onSpeakFromHere = {
                     ensureNotificationPermission()
                     scope.launch { viewModel.speakFromHere() }
@@ -1933,6 +1936,14 @@ fun ReaderScreen(
                     menuVisible = false
                     viewModel.toggleParagraphCompare()
                 },
+            )
+        }
+
+        if (sleepTimerVisible) {
+            TtsSleepTimerDialog(
+                current = ttsState.sleepOption ?: com.llzx373.foldreader.core.tts.TtsSleepOption.OFF,
+                onSelect = { viewModel.setSleepTimer(it) },
+                onDismiss = { sleepTimerVisible = false },
             )
         }
 

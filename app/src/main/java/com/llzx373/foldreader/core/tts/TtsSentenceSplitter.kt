@@ -20,6 +20,10 @@ data class TtsState(
     val chapterTitle: String = "",
     /** 一次性错误文案（引擎不可用/不支持中文等）；下次 speak/stop 清空。 */
     val error: String? = null,
+    /** 睡眠定时档位（M26）；null = 未开。 */
+    val sleepOption: TtsSleepOption? = null,
+    /** 通知/菜单共用的定时文案（如「12 分钟后停止」「读完本章停止」），分钟档每分钟刷新。 */
+    val sleepText: String? = null,
 )
 
 /**

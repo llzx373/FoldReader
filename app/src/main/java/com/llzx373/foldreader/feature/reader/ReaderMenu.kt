@@ -68,6 +68,7 @@ import com.llzx373.foldreader.core.data.settings.PageTurnMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.tts.TtsSleepOption
 import com.llzx373.foldreader.feature.bookshelf.ReaderChapterRuleAiEntry
 import com.llzx373.foldreader.ui.EncodingPickerDialog
 import kotlinx.coroutines.launch
@@ -247,6 +248,9 @@ fun ReaderMenuPanel(
     /** TTS 听书（M13.1）：朗读中操作区显示「暂停/继续朗读」+「停止朗读」。 */
     ttsPlaying: Boolean,
     ttsPaused: Boolean = false,
+    /** M26 睡眠定时：当前定时文案（null = 未开）；朗读中菜单显示「定时」入口。 */
+    ttsSleepText: String? = null,
+    onSleepTimer: () -> Unit = {},
     onSpeakFromHere: () -> Unit,
     onSpeakChapter: () -> Unit,
     onToggleSpeakPause: () -> Unit = {},
@@ -516,6 +520,10 @@ fun ReaderMenuPanel(
                             onClick = onToggleSpeakPause,
                             label = if (ttsPaused) "继续朗读" else "暂停朗读",
                             weight = 1f)
+                        clickableItem(
+                            onClick = onSleepTimer,
+                            label = "定时：${ttsSleepText ?: "关"}",
+                            weight = 1f)
                         clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
                     } else {
                         clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
@@ -753,6 +761,56 @@ fun ChapterListDialog(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** 睡眠定时选项（M26）：关 / 15/30/45/60 分钟 / 读完本章。 */
+@Composable
+fun TtsSleepTimerDialog(
+    current: TtsSleepOption,
+    onSelect: (TtsSleepOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = listOf(
+        TtsSleepOption.OFF to "关",
+        TtsSleepOption.MIN_15 to "15 分钟",
+        TtsSleepOption.MIN_30 to "30 分钟",
+        TtsSleepOption.MIN_45 to "45 分钟",
+        TtsSleepOption.MIN_60 to "60 分钟",
+        TtsSleepOption.CHAPTER_END to "读完本章",
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        title = { Text("睡眠定时") },
+        text = {
+            Column {
+                options.forEach { (option, label) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelect(option)
+                                onDismiss()
+                            }
+                            .padding(vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (option == current) {
+                            Icon(Icons.Filled.Check, contentDescription = null)
                         }
                     }
                 }

@@ -7,6 +7,8 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.llzx373.foldreader.core.tts.TtsSegment
+import com.llzx373.foldreader.core.tts.TtsSleepOption
+import com.llzx373.foldreader.core.tts.TtsSleepTimer
 import com.llzx373.foldreader.core.tts.TtsState
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +44,91 @@ class ReaderTtsController(context: Context) {
     private var currentIndex = 0
     /** 引擎异步初始化期间到达的播放请求，初始化完成后补放。 */
     private var pendingLaunch: (() -> Unit)? = null
+
+    // 睡眠定时（M26）：分钟档由 sleepStopToken 到点精确停（tick 兜底），
+    // sleepTickToken 每 30s 刷新一次剩余时间文案；「读完本章」档与自然播完同口径。
+    private var sleepOption = TtsSleepOption.OFF
+    private var sleepDeadlineMs = 0L
+    private var sleepStopToken: Runnable? = null
+    private var sleepTickToken: Runnable? = null
+
+    /** 设置/取消睡眠定时；只在朗读会话（含暂停）中生效，非播放时调用是 no-op。 */
+    fun setSleepTimer(option: TtsSleepOption) {
+        main.post {
+            cancelSleepTasks()
+            sleepOption = option
+            if (option == TtsSleepOption.OFF || !_state.value.playing) {
+                sleepOption = TtsSleepOption.OFF
+                _state.update { it.copy(sleepOption = null, sleepText = null) }
+                return@post
+            }
+            val now = System.currentTimeMillis()
+            sleepDeadlineMs = TtsSleepTimer.deadlineMs(option, now) ?: 0L
+            updateSleepText(now)
+            val deadline = sleepDeadlineMs
+            if (deadline > 0L) {
+                val stop = Runnable { onSleepExpired() }
+                sleepStopToken = stop
+                main.postDelayed(stop, deadline - now)
+            }
+            scheduleSleepTick()
+        }
+    }
+
+    /** 分钟档到点：停队列（state.playing=false → 服务退出前台），并留一条提示。 */
+    private fun onSleepExpired() {
+        sleepStopToken = null
+        if (!_state.value.playing) {
+            clearSleepTimer()
+            return
+        }
+        stopInternal(notice = "睡眠定时到点，已停止朗读")
+    }
+
+    /** 30s 一跳刷新剩余时间文案（通知与菜单据此每分钟变化一次），兼做到点补停。 */
+    private fun scheduleSleepTick() {
+        val tick = Runnable {
+            if (sleepOption == TtsSleepOption.OFF) return@Runnable
+            val now = System.currentTimeMillis()
+            updateSleepText(now)
+            val deadline = sleepDeadlineMs
+            if (deadline > 0L && TtsSleepTimer.expired(deadline, now)) {
+                onSleepExpired()
+                return@Runnable
+            }
+            sleepTickToken?.let { main.postDelayed(it, SLEEP_TICK_MS) }
+        }
+        sleepTickToken = tick
+        main.postDelayed(tick, SLEEP_TICK_MS)
+    }
+
+    private fun updateSleepText(nowMs: Long) {
+        val option = sleepOption
+        _state.update {
+            it.copy(
+                sleepOption = option.takeIf { o -> o != TtsSleepOption.OFF },
+                sleepText = TtsSleepTimer.remainingText(
+                    option,
+                    sleepDeadlineMs.takeIf { d -> d > 0L },
+                    nowMs,
+                ),
+            )
+        }
+    }
+
+    private fun cancelSleepTasks() {
+        sleepStopToken?.let { main.removeCallbacks(it) }
+        sleepStopToken = null
+        sleepTickToken?.let { main.removeCallbacks(it) }
+        sleepTickToken = null
+    }
+
+    private fun clearSleepTimer() {
+        cancelSleepTasks()
+        sleepOption = TtsSleepOption.OFF
+        sleepDeadlineMs = 0L
+    }
+
 
     /** 从 [segments] 第一句开始整段朗读（QUEUE_ADD 逐句排队）。标题只用于通知/MediaSession。 */
     fun speak(
@@ -109,13 +196,16 @@ class ReaderTtsController(context: Context) {
     }
 
     fun stop() {
-        main.post {
-            generation++
-            segments = emptyList()
-            pendingLaunch = null
-            engine?.stop()
-            _state.value = TtsState()
-        }
+        main.post { stopInternal(notice = null) }
+    }
+
+    private fun stopInternal(notice: String?) {
+        generation++
+        segments = emptyList()
+        pendingLaunch = null
+        engine?.stop()
+        clearSleepTimer()
+        _state.value = TtsState(error = notice)
     }
 
     /** 初始化完成后的引擎；未就绪（初始化中）返回 null，失败记 [engineFailed]。 */
@@ -168,6 +258,7 @@ class ReaderTtsController(context: Context) {
     private fun failNow(message: String) {
         segments = emptyList()
         pendingLaunch = null
+        clearSleepTimer()
         _state.value = TtsState(error = message)
     }
 
@@ -184,7 +275,22 @@ class ReaderTtsController(context: Context) {
                     currentIndex = next
                     _state.update { it.copy(charOffset = segments[next].charOffset) }
                 } else {
-                    _state.update { it.copy(playing = false, paused = false) }
+                    // 自然播完：「读完本章」档补一条提示（朗读范围本就截到章末）
+                    val notice = if (sleepOption == TtsSleepOption.CHAPTER_END) {
+                        "读完本章，已停止朗读"
+                    } else {
+                        null
+                    }
+                    clearSleepTimer()
+                    _state.update {
+                        it.copy(
+                            playing = false,
+                            paused = false,
+                            error = notice,
+                            sleepOption = null,
+                            sleepText = null,
+                        )
+                    }
                 }
             }
         }
@@ -197,6 +303,9 @@ class ReaderTtsController(context: Context) {
 
     private companion object {
         const val engineFailMessage = "TTS 引擎初始化失败"
+
+        /** 睡眠定时剩余时间的刷新节奏：30s 一跳（通知限频口径，文案分钟粒度）。 */
+        const val SLEEP_TICK_MS = 30_000L
 
         fun utteranceId(generation: Int, index: Int) = "g$generation-seg$index"
 

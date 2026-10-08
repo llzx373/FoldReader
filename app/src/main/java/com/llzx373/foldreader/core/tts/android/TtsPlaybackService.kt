@@ -37,8 +37,16 @@ class TtsPlaybackService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var mediaSession: MediaSession? = null
     private var foreground = false
-    /** 上次上屏通知的签名（暂停态/标题变化才重建通知，逐句的 charOffset 推进不刷通知）。 */
-    private var lastNotificationSig: Triple<Boolean, String, String>? = null
+    /** 上次上屏通知的签名（暂停态/标题/定时文案变化才重建通知，逐句的 charOffset 推进不刷通知）。 */
+    private var lastNotificationSig: NotificationSig? = null
+
+    private data class NotificationSig(
+        val paused: Boolean,
+        val bookTitle: String,
+        val chapterTitle: String,
+        /** 睡眠定时剩余文案（分钟粒度变化，天然满足通知限频口径）。 */
+        val sleepText: String?,
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -90,7 +98,7 @@ class TtsPlaybackService : Service() {
             stopSelf()
             return
         }
-        val sig = Triple(state.paused, state.bookTitle, state.chapterTitle)
+        val sig = NotificationSig(state.paused, state.bookTitle, state.chapterTitle, state.sleepText)
         if (!foreground || sig != lastNotificationSig) {
             lastNotificationSig = sig
             val notification = buildNotification(state)
@@ -167,6 +175,7 @@ class TtsPlaybackService : Service() {
                 buildList {
                     if (state.chapterTitle.isNotBlank()) add(state.chapterTitle)
                     add(if (state.paused) "已暂停" else "朗读中")
+                    state.sleepText?.let { add("定时：$it") }
                 }.joinToString(" · "),
             )
             .setContentIntent(contentIntent)

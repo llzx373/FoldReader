@@ -1424,6 +1424,10 @@ class ReaderViewModel(
 
     fun resumeSpeaking() = ttsController.resume()
 
+    /** M26 睡眠定时：档位直达控制器；非播放中调用是 no-op。 */
+    fun setSleepTimer(option: com.llzx373.foldreader.core.tts.TtsSleepOption) =
+        ttsController.setSleepTimer(option)
+
     /**
      * 重开正文：编码变了（换解码方式）或清洗副本换了（智能整理/撤销清理）时调用。
      * 保留当前阅读位置，清掉分页器与章节，重新走一次 [openBook]。
