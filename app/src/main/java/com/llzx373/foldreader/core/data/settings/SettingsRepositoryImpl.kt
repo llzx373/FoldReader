@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.llzx373.foldreader.core.ai.AiProtocol
@@ -92,6 +93,10 @@ class SettingsRepositoryImpl(
         val WEBDAV_BASE_URL = stringPreferencesKey("webdav_base_url")
         val WEBDAV_USERNAME = stringPreferencesKey("webdav_username")
         val WEBDAV_CONFIRMED = booleanPreferencesKey("webdav_confirmed")
+        val AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
+        val AUTO_BACKUP_DIR_URI = stringPreferencesKey("auto_backup_dir_uri")
+        val AUTO_BACKUP_KEEP_COUNT = intPreferencesKey("auto_backup_keep_count")
+        val AUTO_BACKUP_LAST_RUN_AT = longPreferencesKey("auto_backup_last_run_at")
     }
 
     override val preferences: Flow<ReadingPreferences> =
@@ -188,6 +193,10 @@ class SettingsRepositoryImpl(
                 webdavBaseUrl = prefs[Keys.WEBDAV_BASE_URL] ?: defaults.webdavBaseUrl,
                 webdavUsername = prefs[Keys.WEBDAV_USERNAME] ?: defaults.webdavUsername,
                 webdavConfirmed = prefs[Keys.WEBDAV_CONFIRMED] ?: defaults.webdavConfirmed,
+                autoBackupEnabled = prefs[Keys.AUTO_BACKUP_ENABLED] ?: defaults.autoBackupEnabled,
+                autoBackupDirUri = prefs[Keys.AUTO_BACKUP_DIR_URI] ?: defaults.autoBackupDirUri,
+                autoBackupKeepCount = prefs[Keys.AUTO_BACKUP_KEEP_COUNT] ?: defaults.autoBackupKeepCount,
+                autoBackupLastRunAt = prefs[Keys.AUTO_BACKUP_LAST_RUN_AT] ?: defaults.autoBackupLastRunAt,
             )
         }
 
@@ -504,5 +513,21 @@ class SettingsRepositoryImpl(
 
     override suspend fun setWebDavConfirmed(confirmed: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.WEBDAV_CONFIRMED] = confirmed }
+    }
+
+    override suspend fun setAutoBackupEnabled(enabled: Boolean) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_BACKUP_ENABLED] = enabled }
+    }
+
+    override suspend fun setAutoBackupDirUri(treeUri: String) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_BACKUP_DIR_URI] = treeUri }
+    }
+
+    override suspend fun setAutoBackupKeepCount(keep: Int) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_BACKUP_KEEP_COUNT] = keep.coerceIn(1, 50) }
+    }
+
+    override suspend fun setAutoBackupLastRunAt(timestamp: Long) {
+        context.readingPreferencesStore.edit { it[Keys.AUTO_BACKUP_LAST_RUN_AT] = timestamp }
     }
 }

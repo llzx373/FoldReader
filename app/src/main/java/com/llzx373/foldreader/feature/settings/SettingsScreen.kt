@@ -109,6 +109,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     val webDavTestState by viewModel.webDavTestState.collectAsState()
     val webDavBackups by viewModel.webDavBackups.collectAsState()
     val webDavUploading by viewModel.webDavUploading.collectAsState()
+    val autoBackupRunning by viewModel.autoBackupRunning.collectAsState()
     var showWebDavListDialog by remember { mutableStateOf(false) }
     /** 远端备份的待恢复确认：预览 + 已下载的备份原文（确认后不再二次下载）。 */
     var webDavPendingRestore by remember {
@@ -212,6 +213,21 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     importResult = result
                 }
             }
+        }
+    }
+
+    // M25：自动备份目录（SAF 树）；授权持久化，否则重启后写不进去
+    val autoBackupDirPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.updateAutoBackupDirUri(uri.toString())
         }
     }
 
@@ -770,6 +786,77 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                     backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                 },
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("自动备份")
+            SwitchSetting("每日自动备份", prefs.autoBackupEnabled, viewModel::updateAutoBackupEnabled)
+            if (prefs.autoBackupEnabled) {
+                ListItem(
+                    headlineContent = { Text("备份目录") },
+                    supportingContent = {
+                        Text(
+                            prefs.autoBackupDirUri
+                                .takeIf { it.isNotBlank() }
+                                ?.let { android.net.Uri.decode(android.net.Uri.parse(it).lastPathSegment) }
+                                ?: "未选择（选一个目录，备份 JSON 会导出到这里）",
+                        )
+                    },
+                    modifier = Modifier.clickable { autoBackupDirPicker.launch(null) },
+                )
+                SegmentedSetting(
+                    label = "保留份数",
+                    options = listOf("3", "5", "10", "20"),
+                    selectedIndex = when (prefs.autoBackupKeepCount) {
+                        3 -> 0
+                        10 -> 2
+                        20 -> 3
+                        else -> 1
+                    },
+                    onSelect = { index ->
+                        viewModel.updateAutoBackupKeepCount(
+                            when (index) {
+                                0 -> 3
+                                2 -> 10
+                                3 -> 20
+                                else -> 5
+                            },
+                        )
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("立即备份一次") },
+                    supportingContent = {
+                        Text(
+                            when {
+                                autoBackupRunning -> "备份中…"
+                                prefs.autoBackupLastRunAt > 0 ->
+                                    "上次成功：" + SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                        .format(Date(prefs.autoBackupLastRunAt))
+                                else -> "还未成功备份过"
+                            },
+                        )
+                    },
+                    modifier = Modifier.clickable(enabled = !autoBackupRunning) {
+                        viewModel.runAutoBackupNow { name, error ->
+                            val message = when {
+                                error != null -> "备份失败：$error"
+                                else -> "已备份：$name"
+                            }
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("关于自动备份") },
+                    supportingContent = {
+                        Text(
+                            "每天首次打开应用时检查一次，距上次成功超过 24 小时即导出到所选目录，" +
+                                "只保留最近 N 份（只动本应用命名的备份文件）。" +
+                                "全程本地写入，不产生任何网络请求。",
+                        )
+                    },
+                )
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("WebDAV 备份")

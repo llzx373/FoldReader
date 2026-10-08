@@ -91,4 +91,9 @@ interface SettingsRepository {
     suspend fun setWebDavUsername(username: String)
     /** M25：WebDAV 首次连接的一次性明示确认（幂等）。 */
     suspend fun setWebDavConfirmed(confirmed: Boolean)
+    /** M25：本地自动备份（SAF 目录 + 每日一次 + 轮转 N 份）。 */
+    suspend fun setAutoBackupEnabled(enabled: Boolean)
+    suspend fun setAutoBackupDirUri(treeUri: String)
+    suspend fun setAutoBackupKeepCount(keep: Int)
+    suspend fun setAutoBackupLastRunAt(timestamp: Long)
 }

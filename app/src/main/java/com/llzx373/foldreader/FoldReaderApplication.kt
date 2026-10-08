@@ -694,6 +694,13 @@ class AppContainer(context: Context) {
         clientFor = { webDavClient() },
         gate = aiContentGate,
     )
+    /** 本地自动备份（M25）：每日一次导出到 SAF 指定目录并轮转保留最近 N 份。 */
+    val autoBackupRunner = com.llzx373.foldreader.core.backup.AutoBackupRunner(
+        context = appContext,
+        settingsRepository = settingsRepository,
+        exportJsonText = backupManager::exportJsonText,
+        safTree = safTree,
+    )
     /** 漫画容器读取（zip 随机访问 / tar·7z·rar 解压缓存 / SAF 目录）。 */
     val comicArchiveFactory = com.llzx373.foldreader.core.comic.ComicArchiveFactory(
         extractionStore = comicExtractionStore,
@@ -1026,6 +1033,8 @@ class AppContainer(context: Context) {
             }
             // full 变体首启铺底内置模型（M24）：lite 下是零成本空转
             runCatching { modelManager.seedBundledModels() }
+            // M25：本地自动备份——距上次成功超过 24h 才导出；未启用/未选目录时零成本跳过
+            runCatching { autoBackupRunner.runIfDue() }
         }
     }
 

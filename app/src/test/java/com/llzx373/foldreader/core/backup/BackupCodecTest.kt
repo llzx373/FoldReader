@@ -760,6 +760,18 @@ class BackupCodecTest {
         override suspend fun setWebDavConfirmed(confirmed: Boolean) =
             update { copy(webdavConfirmed = confirmed) }
 
+        override suspend fun setAutoBackupEnabled(enabled: Boolean) =
+            update { copy(autoBackupEnabled = enabled) }
+
+        override suspend fun setAutoBackupDirUri(treeUri: String) =
+            update { copy(autoBackupDirUri = treeUri) }
+
+        override suspend fun setAutoBackupKeepCount(keep: Int) =
+            update { copy(autoBackupKeepCount = keep) }
+
+        override suspend fun setAutoBackupLastRunAt(timestamp: Long) =
+            update { copy(autoBackupLastRunAt = timestamp) }
+
         private fun update(block: ReadingPreferences.() -> ReadingPreferences) {
             state.value = state.value.block()
         }

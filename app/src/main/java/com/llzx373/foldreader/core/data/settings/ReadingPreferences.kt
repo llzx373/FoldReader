@@ -169,6 +169,14 @@ data class ReadingPreferences(
     val webdavUsername: String = "",
     /** M25：WebDAV 首次连接的一次性明示确认；确认后不再弹。 */
     val webdavConfirmed: Boolean = false,
+    /** 以下为本地自动备份（M25）：导出到 SAF 指定目录，纯本地不联网。 */
+    val autoBackupEnabled: Boolean = false,
+    /** SAF 树 Uri（takePersistableUriPermission 持久化）；空串 = 未选择。 */
+    val autoBackupDirUri: String = "",
+    /** 轮转保留最近 N 份。 */
+    val autoBackupKeepCount: Int = 5,
+    /** 上次成功自动备份时间；0 = 从未成功。 */
+    val autoBackupLastRunAt: Long = 0,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

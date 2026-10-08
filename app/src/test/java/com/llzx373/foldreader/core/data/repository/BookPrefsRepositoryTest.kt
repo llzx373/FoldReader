@@ -343,5 +343,9 @@ class BookPrefsRepositoryTest {
         override suspend fun setWebDavBaseUrl(baseUrl: String) = Unit
         override suspend fun setWebDavUsername(username: String) = Unit
         override suspend fun setWebDavConfirmed(confirmed: Boolean) = Unit
+        override suspend fun setAutoBackupEnabled(enabled: Boolean) = Unit
+        override suspend fun setAutoBackupDirUri(treeUri: String) = Unit
+        override suspend fun setAutoBackupKeepCount(keep: Int) = Unit
+        override suspend fun setAutoBackupLastRunAt(timestamp: Long) = Unit
     }
 }

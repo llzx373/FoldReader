@@ -52,6 +52,8 @@ class SettingsViewModel(
     private val webDavClientProvider: suspend () -> com.llzx373.foldreader.core.backup.webdav.WebDavClient?,
     /** M25：上传/列表/下载恢复编排（无状态，装配单例）。 */
     private val webDavBackupManager: com.llzx373.foldreader.core.backup.webdav.WebDavBackupManager,
+    /** M25：本地自动备份（SAF 目录 + 轮转）。 */
+    private val autoBackupRunner: com.llzx373.foldreader.core.backup.AutoBackupRunner,
     /** M21：OCR/气泡模型管理（导入/校验/删除/就绪状态）。 */
     private val modelManager: com.llzx373.foldreader.core.ai.android.ModelManager,
     /** 「清除全部 AI 数据」的实际执行（M19）：挂在容器上，测试可传空实现。 */
@@ -403,6 +405,36 @@ class SettingsViewModel(
         }
     }
 
+    // ---- 本地自动备份（M25）----
+
+    fun updateAutoBackupEnabled(enabled: Boolean) =
+        launch { settingsRepository.setAutoBackupEnabled(enabled) }
+
+    fun updateAutoBackupDirUri(treeUri: String) =
+        launch { settingsRepository.setAutoBackupDirUri(treeUri) }
+
+    fun updateAutoBackupKeepCount(keep: Int) =
+        launch { settingsRepository.setAutoBackupKeepCount(keep) }
+
+    private val _autoBackupRunning = MutableStateFlow(false)
+    val autoBackupRunning: StateFlow<Boolean> = _autoBackupRunning.asStateFlow()
+
+    /** 「立即备份一次」：无条件导出 + 轮转。 */
+    fun runAutoBackupNow(onResult: (String?, String?) -> Unit) {
+        launch {
+            _autoBackupRunning.value = true
+            try {
+                onResult(autoBackupRunner.runNow(), null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(null, e.message ?: "备份失败")
+            } finally {
+                _autoBackupRunning.value = false
+            }
+        }
+    }
+
     fun importFont(uri: Uri, displayName: String?, onResult: (Boolean) -> Unit) {
         launch {
             val key = fontManager.import(uri, displayName)
@@ -489,6 +521,7 @@ class SettingsViewModel(
                     webDavCredentialStore = container.webDavCredentialStore,
                     webDavClientProvider = container::webDavClient,
                     webDavBackupManager = container.webDavBackupManager,
+                    autoBackupRunner = container.autoBackupRunner,
                     modelManager = container.modelManager,
                     clearAiDataAction = container::clearAiData,
                 )
