@@ -43,7 +43,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -54,6 +57,11 @@ class AppContainer(context: Context) {
      * 用列表而不是单个 Uri：`ACTION_SEND_MULTIPLE` 一次可能送好几个，进程里排着队等用户逐个确认。
      */
     val pendingImportUris = MutableStateFlow<List<Uri>>(emptyList())
+    /**
+     * M34 桌面小部件「继续阅读」点行带进来的待打开书 id；
+     * FoldReaderApp 在前台消费后清回 null（与 pendingImportUris 同一重放口径）。
+     */
+    val pendingOpenBookId = MutableStateFlow<Long?>(null)
     val activeReaderBookId = MutableStateFlow<Long?>(null)
     val appContext: Context = context.applicationContext
     val foldableStateProvider = FoldableStateProvider(
@@ -1154,6 +1162,29 @@ class AppContainer(context: Context) {
             runCatching { modelManager.seedBundledModels() }
             // M25：本地自动备份——距上次成功超过 24h 才导出；未启用/未选目录时零成本跳过
             runCatching { autoBackupRunner.runIfDue() }
+        }
+        startWidgetSync()
+    }
+
+    /**
+     * M34 桌面小部件「继续阅读」的数据推送：书架流去抖 5s 后刷新全部小部件实例
+     * （进度/隐藏状态变化都经这条链路；小部件自身的 onUpdate 还会现取一份兜底）。
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun startWidgetSync() {
+        maintenanceScope.launch {
+            bookshelfRepository.observeBookshelfWithProgress()
+                .map { com.llzx373.foldreader.feature.widget.ContinueReadingWidget.pickRecent(it) }
+                .distinctUntilChanged()
+                .debounce(5_000)
+                .collect { recent ->
+                    runCatching {
+                        com.llzx373.foldreader.feature.widget.ContinueReadingWidget.refresh(
+                            appContext,
+                            recent,
+                        )
+                    }
+                }
         }
     }
 

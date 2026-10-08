@@ -131,6 +131,20 @@ fun FoldReaderApp() {
     // 进书时封面共享元素需要与书架同一份标题（阅读页加载态用它承接飞入封面）
     var readerCoverTitle by remember { mutableStateOf<String?>(null) }
 
+    // M34 桌面小部件「继续阅读」点行：导航到该书阅读页。应用锁开着时锁定页盖在上面，
+    // 解锁后落地阅读页（消费即清 null，StateFlow 语义保证后台到达也不丢）。
+    LaunchedEffect(Unit) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            container.pendingOpenBookId.collect { bookId ->
+                if (bookId == null) return@collect
+                container.pendingOpenBookId.value = null
+                val title = container.bookshelfRepository.getBook(bookId)?.title.orEmpty()
+                readerCoverTitle = title
+                navController.navigate(Routes.reader(bookId))
+            }
+        }
+    }
+
     // 离开阅读页后的一小段窗口内，抑制"超出沉浸前实测快照的额外 inset"：
     // 真机上每次系统栏显隐变化（hide/show）之后，平台都会补报一次挖孔侧边 inset（140px），
     // 约 500ms 后才消失；书架若在这段窗口内首帧布局，就会先窄后宽 → 右边缘外扩、整体右跳。

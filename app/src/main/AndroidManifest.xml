@@ -166,6 +166,19 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- M34 桌面小部件「继续阅读」（RemoteViews，数据由 App 内书架流推送） -->
+        <receiver
+            android:name=".feature.widget.ContinueReadingWidget"
+            android:exported="true"
+            android:label="继续阅读">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/continue_reading_widget" />
+        </receiver>
+
         <!-- 诊断日志分享（设置 → 诊断 → 分享日志文件）：仅暴露 cacheDir/diagnostics -->
         <provider
             android:name="androidx.core.content.FileProvider"

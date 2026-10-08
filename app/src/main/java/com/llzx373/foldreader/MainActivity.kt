@@ -23,6 +23,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         stashIncomingIntent(intent)
+        stashWidgetOpenBook(intent)
         val settings = (application as FoldReaderApplication).container.settingsRepository
         setContent {
             val prefs by settings.preferences.collectAsState(initial = null)
@@ -42,6 +43,20 @@ class MainActivity : FragmentActivity() {
         // 不更新的话，后续 getIntent() 拿到的还是第一次那个（例如重建时）
         setIntent(intent)
         stashIncomingIntent(intent)
+        stashWidgetOpenBook(intent)
+    }
+
+    /**
+     * M34 桌面小部件「继续阅读」点行进来：把书 id 投进容器，由 FoldReaderApp 导航到阅读页。
+     * 应用锁开着时会被锁定页挡住，解锁后照常生效（StateFlow 重放口径）。
+     */
+    private fun stashWidgetOpenBook(intent: Intent?) {
+        val bookId = intent?.getLongExtra(
+            com.llzx373.foldreader.feature.widget.ContinueReadingWidget.EXTRA_OPEN_BOOK_ID,
+            0L,
+        ) ?: 0L
+        if (bookId == 0L) return
+        (application as FoldReaderApplication).container.pendingOpenBookId.value = bookId
     }
 
     /**
