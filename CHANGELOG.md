@@ -6,12 +6,15 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-08
+
 ### Fixed
 
 - **App 在后台时收到「打开方式 / 分享」，导入弹窗有时不立即出现、要等到下次打开 App 才弹**：URI 消费方（切回书架、书架弹导入框）原先是不感知生命周期的常驻 `LaunchedEffect`，后台（STOPPED）送达的 intent 会撞上 Compose 效果协程在后台不可靠的调度时序。两处收集器改为 `repeatOnLifecycle(STARTED)` 驱动——只在界面可见时消费，后台到达的 URI 留在 StateFlow 里，回到前台重放出来立刻导航 + 弹窗；书架消费时补一条诊断日志，真机可在「设置 → 诊断」对齐「intent 到达 / 切回书架 / 消费弹窗」三条记录。
 
 ### Added
 
+- **书架新增「按最近阅读」排序**：排序菜单新增一档，读完一本书返回书架时它浮到最前；从未打开过的书（`lastReadAt` 为空）沉底、按导入时间兜底。`books.lastReadAt` 三个阅读器（文本/漫画/Markdown）本就在打开时打点，这里只消费不新增写路径；偏好随备份导出/恢复（枚举按名序列化，旧备份无损）。
 - **DOCX / HTML / Markdown 只读支持**：三种文档格式可导入、可阅读，「打开方式 / 分享 / 内置文件浏览器 / 批量导入」全入口可用。DOCX 经 Mammoth 转 HTML（`DocxSecurity` 安全校验：zip 条目 ≤4096、解压 ≤64MB、XML 部件禁 DOCTYPE）、HTML 经编码探测 + jsoup 消毒，两者复用 EPUB 压平管线进文本阅读器（TTS / 翻译 / 标注同权，h 系列标题自动成目录）；Markdown 不压平，由独立的 `MarkdownReaderScreen` 按 commonmark AST 逐块原生渲染（标题/引用/代码块/列表/GFM 表格与任务列表），主题字号行距跟随阅读设置，锚点沿用源文本字符偏移——进度、书签、目录与文本阅读器同一张表同一条链路。设计要点见 docs/需求与设计说明书.md 附录 v2.7。
 
 - **选中正文行生成章节切割规则**：TXT 书长按正文选中一行（如某个章节标题）后，选区操作条新增「章节规则」——自动从选中点吸附到源文件按 `\n` 分隔的原始整行（trim 口径与章节扫描器一致），本地合成候选正则（数字泛化优先 + 精确匹配兜底：阿拉伯/全角数字总是泛化、中文数字仅在编号语境下泛化、行内空白 run 折叠为可选、其余字面量转义），逐条真实试切预览（章数/标题样本/超长章/孤儿文本等异常警告），选定即存为本书自定义章节规则并重建目录。全程本地不外发，与 M15「AI 识别章节」共用试切预览（`ChapterRulePreview`）与保存重建链路，候选预览卡片组件提为两处共用；译文模式不给入口（坐标系不同）。新增纯 JVM 合成器 `core/format/ChapterRuleSynthesizer` 与状态机 `ChapterRuleFromSelectionViewModel`，各配单测。
@@ -162,7 +165,8 @@
 - 日期/时间文案在 Composable 内直接读 `Locale.getDefault()`，不可观察：应用存活期间切换系统语言后，
   书籍详情、书签列表、全书签总览、书架副标题与阅读器时钟的文案不会重排。改为经由配置对象读取语言。
 
-[Unreleased]: https://github.com/llzx373/FoldReader/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/llzx373/FoldReader/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/llzx373/FoldReader/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/llzx373/FoldReader/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/llzx373/FoldReader/releases/tag/v1.1.0
 [1.0.0]: https://github.com/llzx373/FoldReader/releases/tag/v1.0.0
