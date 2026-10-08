@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -168,6 +169,8 @@ fun BookshelfScreen(
     var showMoveToGroupDialog by rememberSaveable { mutableStateOf(false) }
     /** M17：批量 AI 补全的书单快照（点开动作时取定，不受后续选择变化影响）；null = 未在跑。 */
     var metadataBatchIds by remember { mutableStateOf<List<Long>?>(null) }
+    /** M27：批量导出批注——确认选项时取定的书单快照；null = 未在流程中。 */
+    var annotationExportIds by remember { mutableStateOf<List<Long>?>(null) }
     var importRequest by remember { mutableStateOf<Pair<Uri, Boolean>?>(null) }
     /** 外部一次可能送来多个文件（分享多选），排在这里逐个确认；只排不消费。 */
     val importQueue = remember { mutableStateListOf<Uri>() }
@@ -229,6 +232,24 @@ fun BookshelfScreen(
                 )
             }
             viewModel.enumerateBatchDirectory(uri)
+        }
+    }
+    // M27：批量导出批注的目录授权（选项对话框确认后经 annotationExportIds 带过来）。
+    // 写权限在导出协程里用，不需要持久化——这是一次性导出。
+    var annotationExportOptions by remember {
+        mutableStateOf<com.llzx373.foldreader.core.export.AnnotationExportOptions?>(null)
+    }
+    val annotationExportTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        val ids = annotationExportIds
+        val options = annotationExportOptions
+        annotationExportIds = null
+        annotationExportOptions = null
+        if (uri != null && ids != null && options != null) {
+            viewModel.exportAnnotationsBatch(ids, options, uri) { message ->
+                scope.launch { snackbarHostState.showSnackbar(message) }
+            }
         }
     }
     val launchImport = {
@@ -332,6 +353,10 @@ fun BookshelfScreen(
                         }
                         IconButton(onClick = { showMoveToGroupDialog = true }) {
                             FolderIcon(contentDescription = "移动到分组")
+                        }
+                        // M27：批量导出批注（逐书一个 Markdown，选目录落盘）
+                        IconButton(onClick = { annotationExportIds = selectedIds.toList() }) {
+                            Icon(Icons.Filled.Share, contentDescription = "导出批注")
                         }
                         // M17：批量 AI 补全信息（仅 AI 已配置时显示）
                         if (aiAvailable) {
@@ -725,6 +750,19 @@ fun BookshelfScreen(
                 viewModel.clearSelection()
             },
         )
+    }
+
+    // M27：批量导出批注——先问选项（书单已快照在 annotationExportIds），再选目录落盘
+    annotationExportIds?.let { ids ->
+        if (annotationExportOptions == null) {
+            com.llzx373.foldreader.feature.reader.AnnotationExportOptionsDialog(
+                onConfirm = { options ->
+                    annotationExportOptions = options
+                    annotationExportTreeLauncher.launch(null)
+                },
+                onDismiss = { annotationExportIds = null },
+            )
+        }
     }
 
     if (showDeleteDialog) {

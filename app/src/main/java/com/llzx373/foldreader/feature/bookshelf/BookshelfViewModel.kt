@@ -460,6 +460,56 @@ class BookshelfViewModel(
         }
     }
 
+    /**
+     * M27：书架多选批量导出批注——逐书一个 Markdown 文件，写入用户授权的 SAF 目录。
+     * 无批注的书跳过、单本失败不中断，最后汇总成一句提示。目录授权沿用自动备份的
+     * DocumentsContract.createDocument 链路（同名文件由文档提供方自行改名，不覆盖）。
+     */
+    fun exportAnnotationsBatch(
+        bookIds: List<Long>,
+        options: com.llzx373.foldreader.core.export.AnnotationExportOptions,
+        treeUri: Uri,
+        onResult: (String) -> Unit,
+    ) {
+        if (bookIds.isEmpty()) return
+        viewModelScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                val treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+                val dirUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
+                var exported = 0
+                var skipped = 0
+                var failed = 0
+                for (id in bookIds) {
+                    val export = runCatching {
+                        com.llzx373.foldreader.core.export.AnnotationExport.render(
+                            bookshelfRepository, id, options,
+                        )
+                    }.getOrNull()
+                    // null 覆盖两种情形：书没了、或这本书没有批注——都不值得落空文件
+                    if (export == null) {
+                        skipped++
+                        continue
+                    }
+                    val ok = runCatching {
+                        val docUri = android.provider.DocumentsContract.createDocument(
+                            appContext.contentResolver, dirUri, "text/markdown", export.fileName,
+                        ) ?: error("无法在目录中创建文件")
+                        appContext.contentResolver.openOutputStream(docUri)
+                            ?.bufferedWriter(Charsets.UTF_8)?.use { it.write(export.markdown) }
+                            ?: error("无法写入文件")
+                    }.isSuccess
+                    if (ok) exported++ else failed++
+                }
+                buildString {
+                    append("已导出 ").append(exported).append(" 本书的批注")
+                    if (skipped > 0) append("，").append(skipped).append(" 本无批注跳过")
+                    if (failed > 0) append("，").append(failed).append(" 本导出失败")
+                }
+            }
+            onResult(message)
+        }
+    }
+
     fun moveSelectedToGroup(groupName: String?) {
         val ids = _selectedIds.value.toList()
         if (ids.isEmpty()) return
