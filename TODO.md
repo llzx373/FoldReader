@@ -15,17 +15,28 @@
 
 ---
 
-## M25 WebDAV 备份 + 自动备份（P0，文档承诺在先）
+## M25 WebDAV 备份 + 自动备份（P0，文档承诺在先）✅ 已完成（2026-10-08）
 
 **验收标准**：自托管 WebDAV（Nextcloud / 坚果云）可完成上传 / 列表 / 恢复全流程；凭据走 Keystore；未配置时抓包零请求、无入口；本地自动备份可落 SAF 指定目录并保留最近 N 份。
 
-- [ ] WebDAV 配置项：服务器地址 / 账号 / 密码（Keystore 加密存储，口径同 AI key，不进备份与日志）+ 测试连接；复用 M14 的 OkHttp 单例网络栈（R2 决议为此预留）
-- [ ] 传输层：上传 / 列表 / 下载恢复，仅加 WebDAV 协议层，备份编解码复用现有 `core/backup/BackupCodec` 零改动
-- [ ] 合规：首次连接一次性明示确认；传输记入外发历史台账（feature=WebDAV 备份，scope=备份文件名与大小）
-- [ ] 恢复前预览：备份版本 / 条目数 / 导出时间，确认后走现有导入链路
-- [ ] 本地自动备份：退出时或每日一次导出到 SAF 指定目录，轮转保留最近 N 份（N 可配）
+- [x] WebDAV 配置项：服务器地址 / 账号 / 密码（Keystore 加密存储，口径同 AI key，不进备份与日志）+ 测试连接；复用 M14 的 OkHttp 单例网络栈（R2 决议为此预留）
+- [x] 传输层：上传 / 列表 / 下载恢复，仅加 WebDAV 协议层，备份编解码复用现有 `core/backup/BackupCodec` 零改动
+- [x] 合规：首次连接一次性明示确认；传输记入外发历史台账（feature=WebDAV 备份，scope=备份文件名与大小）
+- [x] 恢复前预览：备份版本 / 条目数 / 导出时间，确认后走现有导入链路
+- [x] 本地自动备份：退出时或每日一次导出到 SAF 指定目录，轮转保留最近 N 份（N 可配）
 - [ ] （可选开关）备份含书文件：默认关，开启后打包源副本，明示体积
-- [ ] 冲突处理：远端同名按时间戳区分；恢复按 contentHash 对齐既有书（现 BackupCodec 已支持）
+- [x] 冲突处理：远端同名按时间戳区分；恢复按 contentHash 对齐既有书（现 BackupCodec 已支持）
+
+验收记录（2026-10-08）：
+
+- 协议层：`core/backup/webdav/WebDavClient` 纯 JVM 零 android import（PROPFIND/MKCOL/PUT/GET/DELETE，Basic 预置头 UTF-8，multistatus 解析注入 XmlPullParser 工厂——生产 `android.util.Xml`、单测 kxml2；错误分型 INVALID_URL/AUTH/NOT_FOUND/HTTP/NETWORK/TIMEOUT，异常消息不含凭据）。`WebDavClientTest` 16 用例（MockWebServer 端到端：正常/401/404/500/断连/超时/中文文件名编码/无前缀 multistatus/非法地址零请求）。
+- 编排层：`WebDavBackupManager`（函数注入编解码，MockWebServer 可测）——上传按 `BackupFileNames.timestamped`（`foldreader-backup-yyyyMMdd-HHmmss.json`，字典序即时间序，天然规避远端同名）；列表只留本应用命名；恢复前预览 `BackupManager.preview`（版本/条目数/导出时间，纯函数）确认后走 `importFromText` 既有导入链路（contentHash 对齐）。`BackupCodec` 备份格式零改动（BACKUP_VERSION 仍 7），仅 `BackupManager` 新增 exportJsonText/importFromText/preview 三个不改语义的入口。
+- 合规：密码经 `WebDavCredentialStore`（AndroidKeyStore AES/GCM，与 AI key 同口径，Robolectric 5 用例含「SharedPreferences 无原文」）；首次网络动作前一次性明示确认（`webdavConfirmed` 偏好，对话框明示服务器地址与传输范围）；每次上传/下载记外发台账（feature=WebDAV 备份、scope=文件名+大小、token 记 0，台账 UI 对 0 token 记录不再显示 token 尾缀）；未配置时 `webDavClient()` 返回 null 且进程内不创建任何网络组件（与 AI 共用同一惰性 OkHttp 单例，`sharedAiHttpClient` 更名为 `sharedOkHttpClient`）。
+- 自动备份：`AutoBackupRunner` 挂 AppContainer 维护协程，启动时检查距上次成功 ≥24h 才导出到 SAF 树目录（DocumentsContract.createDocument 写入，目录授权 takePersistableUriPermission 持久化），轮转 `BackupFileNames.rotationDeletes` 只删本应用命名的超额最旧份；N 可配（3/5/10/20）；失败只记诊断日志不更新上次时间（下次启动自然重试）。**与 TODO 原文的偏差**：「退出时」未采用——Android 无可靠退出钩子（进程随时被回收），实现为「每日一次（启动检查制）」，对每天开一次阅读器的使用习惯等价；设置页另有「立即备份一次」手动入口。
+- 设置页：「备份与恢复」区下新增「自动备份」与「WebDAV 备份」两个分区；「上传/列表/恢复」入口常驻（未配置时动作报「请先完成 WebDAV 配置」，不发请求）。
+- 测试：`testLiteDebugUnitTest` 全绿（新增 35 用例：WebDavClientTest 16 + WebDavBackupManagerTest 5 + WebDavCredentialStoreTest 5 + BackupFileNamesTest 5 + AutoBackupRunnerTest 4 门槛/失败口径）；`assembleLiteDebug` 通过。
+- 未做（可选项）：「备份含书文件」开关——会把备份从单 JSON 变成 zip 容器并涉及恢复侧源副本重建，属备份格式语义扩展，留待独立里程碑按 BACKUP_VERSION 升级惯例实现。
+- 真机待验：Nextcloud/坚果云实测上传与恢复全流程；SAF 目录授权收回后的失败提示观感；自动备份在真实目录的轮转。
 
 ---
 

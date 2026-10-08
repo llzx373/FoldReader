@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **WebDAV 备份 + 本地自动备份**（M25）：「设置 → 备份与恢复」新增 WebDAV 备份与自动备份两个分区。WebDAV：服务器地址 / 账号 / 密码配置（密码经 Android Keystore AES/GCM 加密存储，不进备份与日志，口径同 AI key）+ 测试连接（目录不存在时自动创建）；「上传备份」按时间戳命名（`foldreader-backup-yyyyMMdd-HHmmss.json`，远端同名天然区分）；「远端备份列表」可下载恢复——恢复前预览备份版本 / 条目数 / 导出时间，确认后走既有导入链路（contentHash 对齐既有书，编解码复用 `BackupCodec` 零改动，BACKUP_VERSION 不变）。合规：首次连接一次性明示确认（对话框明示服务器地址与传输范围）；每次上传/下载记入「外发历史」台账（feature=WebDAV 备份，scope=文件名与大小）；未配置时不创建任何网络组件、零请求（与 AI 共用同一惰性 OkHttp 单例）。协议层 `core/backup/webdav/WebDavClient` 为纯 JVM（PROPFIND/MKCOL/PUT/GET/DELETE，multistatus 解析器工厂注入），MockWebServer 端到端单测覆盖 401/404/500/断连/超时。本地自动备份：每日一次（启动检查制，距上次成功 ≥24h）导出到 SAF 指定目录，轮转保留最近 N 份（3/5/10/20 可配），授权持久化、失败只记诊断日志不打扰；设置页可「立即备份一次」。偏差：TODO 原文「退出时」改为启动检查制（Android 无可靠退出钩子）；「备份含书文件」可选项未做（涉及备份格式容器化，留待独立里程碑）。
+
 ## [1.3.0] - 2026-10-08
 
 ### Fixed
