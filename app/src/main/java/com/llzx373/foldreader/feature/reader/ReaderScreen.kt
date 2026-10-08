@@ -29,6 +29,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -72,6 +73,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -399,6 +401,23 @@ fun ReaderScreen(
     var peelBackBmp by remember { mutableStateOf<Bitmap?>(null) }
     var peelGeneration by remember { mutableLongStateOf(0L) }
     var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
+
+    // M33 开书过渡（外屏 → 内屏续读）：单页翻成「双页书」的瞬间——最典型的一次就是
+    // 外屏合上再展开到内屏横持——正文以书脊（页面中缝）为轴做一次短促的张开
+    // （横向缩放 + 淡入），强化「打开一本书」的物理隐喻。
+    // 纯视觉层：锚点重排照常进行、阅读位置不动，动画只罩在重排完成后的内容上。
+    var bookOpenNonce by remember { mutableIntStateOf(0) }
+    var prevDualLayout by remember { mutableStateOf(pageDual) }
+    if (pageDual != prevDualLayout) {
+        prevDualLayout = pageDual
+        if (pageDual) bookOpenNonce++
+    }
+    val bookOpenProgress = remember { Animatable(1f) }
+    LaunchedEffect(bookOpenNonce) {
+        if (bookOpenNonce == 0) return@LaunchedEffect
+        bookOpenProgress.snapTo(0f)
+        bookOpenProgress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+    }
 
     val battery by rememberBatteryPercent()
     val time by rememberClock()
@@ -1403,7 +1422,16 @@ fun ReaderScreen(
                             imageProvider = viewModel.imageProvider,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .graphicsLayer { translationY = -autoScrollY },
+                                .graphicsLayer {
+                                    translationY = -autoScrollY
+                                    // M33 开书过渡：书脊在中缝，横向张开 + 淡入
+                                    val opening = bookOpenProgress.value
+                                    if (opening < 1f) {
+                                        alpha = 0.45f + 0.55f * opening
+                                        scaleX = 0.90f + 0.10f * opening
+                                        scaleY = 0.985f + 0.015f * opening
+                                    }
+                                },
                             leftHighlights = spansFor(spread.left),
                             // 双页对照的右页是译本坐标：标注 / 搜索高亮不挂（视角 2 口径）
                             rightHighlights = if (bilingualCompare) {
