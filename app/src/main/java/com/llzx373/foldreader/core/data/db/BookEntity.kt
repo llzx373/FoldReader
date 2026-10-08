@@ -78,12 +78,12 @@ private val EXTRACT_REQUIRED_CONTAINERS =
 
 /**
  * 内容是否还需要后台准备：
- * - TXT 没有压平步骤（偏移索引在打开时边建边读），恒为 false；
+ * - TXT / Markdown 没有压平步骤（TXT 的偏移索引边读边建，Markdown 直接渲染源文件），恒为 false；
  * - 漫画 = 页数未知，或需要解压的容器还没解压过；
  * - EPUB/FB2 = 整本压平尚未完成。
  */
 fun BookEntity.needsContentPreparation(): Boolean = when (format) {
-    BookFormat.TXT -> false
+    BookFormat.TXT, BookFormat.MARKDOWN -> false
     BookFormat.COMIC ->
         comicPageCount == null ||
             (comicLocalPath == null && comicContainer in EXTRACT_REQUIRED_CONTAINERS)

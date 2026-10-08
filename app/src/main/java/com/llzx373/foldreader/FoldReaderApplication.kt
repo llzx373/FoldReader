@@ -30,6 +30,7 @@ import com.llzx373.foldreader.core.format.docx.DocxBookParser
 import com.llzx373.foldreader.core.format.epub.EpubBookParser
 import com.llzx373.foldreader.core.format.fb2.Fb2BookParser
 import com.llzx373.foldreader.core.format.html.HtmlBookParser
+import com.llzx373.foldreader.core.format.markdown.MarkdownBookParser
 import com.llzx373.foldreader.core.format.txt.TxtBookParser
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
@@ -606,6 +607,14 @@ class AppContainer(context: Context) {
         onChaptersIndexed = onChaptersIndexed,
     )
     /**
+     * Markdown 只读支持：不压平（渲染层直接吃 commonmark AST），
+     * 这个解析器只负责标题元数据、目录（h1-h6）与全文内容。
+     */
+    val markdownBookParser = MarkdownBookParser(
+        openChannel = { uri -> UriChannels.open(context, uri) },
+        displayNameOf = { uri -> UriChannels.displayName(context, uri) },
+    )
+    /**
      * 文本型 PDF 的「当电子书读」入口：抽正文压平后进 TXT 管线。
      * 扫描件不会产出压平产物，所以这个解析器对扫描件是"存在但用不上"。
      */
@@ -625,6 +634,7 @@ class AppContainer(context: Context) {
             BookFormat.FB2 to fb2BookParser,
             BookFormat.DOCX to docxBookParser,
             BookFormat.HTML to htmlBookParser,
+            BookFormat.MARKDOWN to markdownBookParser,
             // PDF 只在文本模式下走这里（扫描件没有压平产物，会走页式阅读器）
             BookFormat.PDF to pdfBookParser,
         ),
@@ -922,6 +932,7 @@ class AppContainer(context: Context) {
             BookFormat.FB2 to fb2BookParser,
             BookFormat.DOCX to docxBookParser,
             BookFormat.HTML to htmlBookParser,
+            BookFormat.MARKDOWN to markdownBookParser,
         ),
         coversDir = coversDir,
         enqueuePrewarm = bookPrewarmQueue::enqueue,

@@ -50,5 +50,6 @@ private fun sourceExtensionOf(format: BookFormat): String = when (format) {
     BookFormat.TXT -> "txt"
     BookFormat.EPUB -> "epub"
     BookFormat.FB2 -> "fb2"
+    BookFormat.MARKDOWN -> "md"
     else -> format.name.lowercase()
 }

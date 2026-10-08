@@ -185,7 +185,7 @@ fun BookmarkRibbonIcon(filled: Boolean, tint: Color, contentDescription: String)
 
 /** 书签列表图标：缎带 + 两条列表线。 */
 @Composable
-private fun BookmarkListIcon(tint: Color, contentDescription: String) {
+fun BookmarkListIcon(tint: Color, contentDescription: String) {
     Canvas(
         modifier = Modifier
             .size(22.dp)

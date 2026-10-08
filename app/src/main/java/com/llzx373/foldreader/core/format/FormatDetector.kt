@@ -5,7 +5,7 @@ import com.llzx373.foldreader.core.data.db.BookFormat
 
 /**
  * 电子书格式识别：magic bytes 优先，扩展名/MIME 兜底。
- * 支持 TXT / EPUB / FB2（裸 XML 与 .fb2.zip）/ HTML / DOCX / PDF / 漫画容器；
+ * 支持 TXT / EPUB / FB2（裸 XML 与 .fb2.zip）/ HTML / DOCX / PDF / Markdown / 漫画容器；
  * 识别不出返回 null（上层按 TXT 处理，保持既有行为）。
  */
 object FormatDetector {
@@ -16,6 +16,12 @@ object FormatDetector {
 
     /** HTML 的两种常见 MIME（xhtml+xml 走同一条 HTML 管线）。 */
     val HTML_MIME_TYPES = setOf("text/html", "application/xhtml+xml")
+
+    /**
+     * Markdown 的两种常见 MIME。没有魔数可判（纯文本开头可以是任何字符），
+     * 只能靠扩展名/MIME 兜底——所以判定放在所有魔数检查之后、TXT 之前。
+     */
+    val MARKDOWN_MIME_TYPES = setOf("text/markdown", "text/x-markdown")
 
     /**
      * FB2 没有注册的正式 MIME，两种写法都遇到过。
@@ -45,6 +51,9 @@ object FormatDetector {
             ext == "html" || ext == "htm" || mimeType in HTML_MIME_TYPES -> BookFormat.HTML
             ext == "docx" || mimeType == DOCX_MIME_TYPE -> BookFormat.DOCX
             ext == "pdf" || mimeType == PDF_MIME_TYPE -> BookFormat.PDF
+            // Markdown 没有魔数：只认扩展名/MIME，且须在 TXT 兜底之前
+            // （text/plain MIME 的 .md 文件不该落到 TXT 管线）
+            ext == "md" || ext == "markdown" || mimeType in MARKDOWN_MIME_TYPES -> BookFormat.MARKDOWN
             // 漫画判定放在 EPUB/FB2 之后（它们也是 zip）、TXT 之前
             // （把 zip/rar 当纯文本解只会得到乱码）
             ComicContainers.detect(displayName, mimeType, head) != null -> BookFormat.COMIC

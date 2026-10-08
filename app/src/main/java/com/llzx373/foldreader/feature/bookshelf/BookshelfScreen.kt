@@ -237,6 +237,8 @@ fun BookshelfScreen(
                 // 与 AndroidManifest 的「打开方式」过滤器保持同一份清单：少一条就意味着
                 // 那种格式在这里根本选不到（此前 cbz 与 pdf 就是这样漏掉的）
                 "text/plain",
+                "text/markdown",
+                "text/x-markdown",
                 "application/epub+zip",
                 // FB2 无标准注册 MIME，靠扩展名 + octet-stream 兜底
                 "application/x-fictionbook+xml",

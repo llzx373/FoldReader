@@ -274,4 +274,16 @@ class FormatDetectorTest {
         assertEquals(BookFormat.TXT, FormatDetector.detect("readme.txt", null, text))
         assertEquals(BookFormat.COMIC, FormatDetector.detect("book.tar", null, text))
     }
+
+    @Test
+    fun `Markdown 按扩展名与 MIME 判定（无魔数）`() {
+        assertEquals(BookFormat.MARKDOWN, FormatDetector.detect("notes.md", null, ByteArray(0)))
+        assertEquals(BookFormat.MARKDOWN, FormatDetector.detect("notes.MARKDOWN", null, ByteArray(0)))
+        assertEquals(BookFormat.MARKDOWN, FormatDetector.detect(null, "text/markdown", ByteArray(0)))
+        assertEquals(BookFormat.MARKDOWN, FormatDetector.detect(null, "text/x-markdown", ByteArray(0)))
+        // text/plain MIME 的 .md 走 Markdown 管线而不是 TXT
+        assertEquals(BookFormat.MARKDOWN, FormatDetector.detect("notes.md", "text/plain", ByteArray(0)))
+        // 无扩展名无 MIME 的纯文本不受影响
+        assertNull(FormatDetector.detect("readme", null, "# 标题\n".toByteArray()))
+    }
 }

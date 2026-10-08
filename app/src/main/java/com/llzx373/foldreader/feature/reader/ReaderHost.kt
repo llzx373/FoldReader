@@ -22,6 +22,7 @@ import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.foldable.FoldableUiState
 import com.llzx373.foldreader.feature.bookshelf.isPagedFormat
 import com.llzx373.foldreader.feature.comic.ComicReaderScreen
+import com.llzx373.foldreader.feature.reader.markdown.MarkdownReaderScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -104,6 +105,15 @@ fun ReaderHost(
             animatedVisibilityScope = animatedVisibilityScope,
             coverTitle = coverTitle,
             onOpenBook = onOpenBook,
+        )
+
+        // Markdown 不压平不分页：直接按 commonmark AST 逐块渲染，与文本阅读器共用
+        // 字符偏移锚点（进度/书签/目录同一张表），但排版链路完全独立
+        current.format == BookFormat.MARKDOWN -> MarkdownReaderScreen(
+            bookId = bookId,
+            initialAnchor = initialAnchor,
+            onBack = onBack,
+            onOpenSettings = onOpenSettings,
         )
 
         else -> ReaderScreen(

@@ -57,10 +57,10 @@ class BookPrewarmQueue(
 
     /**
      * 入队。非阻塞，可在导入路径上直接调用。
-     * TXT 没有压平步骤，不入队。
+     * TXT / Markdown 没有压平步骤，不入队。
      */
     fun enqueue(bookId: Long, uriKey: String, format: BookFormat) {
-        if (format == BookFormat.TXT) return
+        if (format == BookFormat.TXT || format == BookFormat.MARKDOWN) return
         pending.trySend(Job(bookId, Uri.parse(uriKey), format))
     }
 

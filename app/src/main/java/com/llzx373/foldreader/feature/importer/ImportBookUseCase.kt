@@ -393,7 +393,9 @@ class ImportBookUseCase(
         contentHash = contentHash,
         format = format,
         totalChars = 0,
-        encoding = Charsets.UTF_8.name(),
+        // 压平类格式（EPUB/FB2/DOCX/HTML）的产物恒为 UTF-8，它们的 parseMeta 也如实上报 UTF-8；
+        // Markdown 没有压平产物（正文 = 源文件），encoding 须沿用探测结果，否则 GBK 的 .md 会被当 UTF-8 解码
+        encoding = meta?.encoding?.takeIf { it.isNotBlank() } ?: Charsets.UTF_8.name(),
         importedAt = System.currentTimeMillis(),
         lastReadAt = null,
         cleanedFilePath = null,

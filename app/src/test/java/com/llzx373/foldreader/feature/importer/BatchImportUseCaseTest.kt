@@ -49,7 +49,8 @@ class BatchImportUseCaseTest {
 
         assertFalse(truncated)
         assertEquals(
-            listOf("a.epub", "b.txt", "c.pdf", "x.fb2.zip", "y.fb2"),
+            // note.md 自 Markdown 只读支持起算支持格式；z.png 仍被过滤
+            listOf("a.epub", "b.txt", "c.pdf", "note.md", "x.fb2.zip", "y.fb2"),
             found.map { it.name },
         )
     }
