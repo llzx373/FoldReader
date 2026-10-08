@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.kotlin.plugin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
+    // M35：Baseline Profile 消费端——把 :baselineprofile 生成的 baseline-prof.txt
+    // 合并进 release/benchmark 变体（生成器模块不存在时此插件是空转）
+    alias(libs.plugins.baselineprofile)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +114,14 @@ android {
                 "proguard-rules.pro",
             )
         }
+        // M35：Macrobenchmark 专用变体——与 release 同一份 R8 产物（initWith），
+        // 但用 debug 签名（本地/CI 无正式密钥也能装）且带 profileable 清单
+        // （src/benchmark/AndroidManifest.xml），可被抓帧/启动耗时。
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
     // APK 输出文件名与项目目录名一致：FoldReader-debug.apk / FoldReader-release.apk
     base {
@@ -212,6 +223,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     // OCR 引擎（M21）：ONNX Runtime mobile，CPU 后端跑 det/rec/气泡检测
     implementation(libs.onnxruntime.mobile)
+    // M35：Baseline Profile 运行时安装（生成器产物打包进 APK 后由它在首启写入手册编译）
+    implementation(libs.androidx.profileinstaller)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
     // JVM 单测用的 XmlPullParser 实现（生产用 android.util.Xml）

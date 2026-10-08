@@ -32,3 +32,6 @@ key.properties
 # 构建产物
 *.apk
 *.aab
+
+# M35 :baselineprofile 模块构建产物
+/baselineprofile/build

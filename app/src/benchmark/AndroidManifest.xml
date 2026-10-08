@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  M35：benchmark 构建类型专用清单。
+  - profileable：release 同等的 R8 产物默认不可被性能分析，Macrobenchmark
+    抓启动耗时/帧耗时需要 shell 可读的 profileable 标记。
+  - BenchmarkSeedReceiver：基准测试的种子数据入口（见该类头注释）。
+  此源集只进 benchmark 变体，release 正式包不含这两样东西。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <profileable android:shell="true" />
+
+        <receiver
+            android:name=".benchmark.BenchmarkSeedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.llzx373.foldreader.benchmark.SEED_BOOK" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

@@ -58,6 +58,11 @@ composeMultiplatform = "1.12.0"
 # M34 隐私锁：BiometricPrompt 需要 FragmentActivity 承载
 biometric = "1.1.0"
 androidxFragment = "1.8.8"
+# M35 工程质量：Baseline Profile 生成器 + Macrobenchmark（benchmark 全家桶同版本对齐；
+# baselineprofile 插件 1.5.0 声明支持 AGP 8.0–10.0，覆盖当前 AGP 9.4.1）
+benchmark = "1.5.0"
+uiautomator = "2.4.0"
+profileinstaller = "1.4.1"
 # tools/cleaner 的 material3。CMP 1.12.0 弃用了 compose.material3 访问器，
 # 要求直接声明依赖；而 org.jetbrains.compose.material3:material3 自 1.9.0 之后
 # 只有 alpha 版（1.10/1.11/1.12 全是 alpha），访问器本身也冻结在 1.9.0。
@@ -114,6 +119,13 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # M34 隐私锁（生物识别/锁屏凭据应用锁）
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "androidxFragment" }
+# M35：Macrobenchmark / Baseline Profile（只进 :baselineprofile 测试模块，不进 APK）；
+# profileinstaller 进 app（Baseline Profile 运行时安装与编译状态查询）
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+# M35：@LargeTest 等测试过滤器注解（junit/ext-junit 不传递它）
+androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.7.0" }
 # 办公/网页文档只读支持
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 java-mammoth = { group = "org.zwobble.mammoth", name = "mammoth", version.ref = "javaMammoth" }
@@ -129,6 +141,10 @@ compose-material3 = { group = "org.jetbrains.compose.material3", name = "materia
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+# M35：Baseline Profile 生成器宿主（androidx.baselineprofile 对 app 模块是消费端、
+# 对 com.android.test 模块是生产端，同一个插件 id）
+android-test = { id = "com.android.test", version.ref = "agp" }
+baselineprofile = { id = "androidx.baselineprofile", version.ref = "benchmark" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
