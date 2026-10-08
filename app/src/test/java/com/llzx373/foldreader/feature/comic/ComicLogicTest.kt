@@ -116,6 +116,29 @@ class ComicLogicTest {
         assertEquals(2, index.spreadOf(5))
     }
 
+    // ---- PDF 双页口径（M32）：无封面单独、无宽图独占、无 RTL，朴素 (2k, 2k+1) 配对 ----
+
+    @Test
+    fun `PDF 双页朴素配对与翻页步进`() {
+        val index = buildComicSpreadIndex(pageCount = 6, dual = true, coverAlone = false)
+
+        assertEquals(listOf(0, 1), pages(index, 0))
+        assertEquals(listOf(2, 3), pages(index, 2))
+        assertEquals(listOf(4, 5), pages(index, 4))
+        // 翻页一步两页，位置永远落在跨页起点
+        assertEquals(2, index.next(0))
+        assertEquals(4, index.next(2))
+        assertEquals(2, index.previous(4))
+        assertEquals(0, index.previous(2))
+        assertTrue(index.isLastSpread(5))
+    }
+
+    @Test
+    fun `PDF 双页视觉左右固定不镜像（无 RTL）`() {
+        // features.rtl 对 PDF 恒 false：同一对页里低序号页恒在左边
+        assertEquals(4 to 5, comicPairedVisualPages(listOf(4, 5), rtl = false))
+    }
+
     @Test
     fun `宽高比判定`() {
         assertTrue(isWidePage(2000, 1400))

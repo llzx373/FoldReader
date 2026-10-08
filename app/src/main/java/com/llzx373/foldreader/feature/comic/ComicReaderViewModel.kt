@@ -62,6 +62,7 @@ import com.llzx373.foldreader.feature.reader.findPageBookmarkAt
 import com.llzx373.foldreader.feature.reader.nextAutoPageIntervalSec
 import com.llzx373.foldreader.feature.reader.nextAutoPageMode
 import com.llzx373.foldreader.feature.reader.nextAutoPageSpeedPx
+import com.llzx373.foldreader.feature.reader.nextDualPageMode
 import com.llzx373.foldreader.feature.reader.pageLabelOf
 import java.io.File
 import java.io.IOException
@@ -1269,6 +1270,17 @@ class ComicReaderViewModel(
     /** 滚动页间距是应用级偏好：写全局。 */
     fun setComicScrollGapDp(gapDp: Int) {
         viewModelScope.launch { settingsRepository.setComicScrollGapDp(gapDp.coerceIn(0, 64)) }
+    }
+
+    /**
+     * 双页模式（M32：页式阅读器菜单开关，与文本阅读器同一循环档位）。
+     * 应用级偏好（自动/强制/单栏），竖持在自动档退回单页的口径与漫画一致
+     * （resolvePageLayoutMode），PDF 同样适用。
+     */
+    fun cycleDualPageMode() {
+        viewModelScope.launch {
+            settingsRepository.setDualPageMode(nextDualPageMode(preferences.value.dualPageMode))
+        }
     }
 
     // ---- 页式裁边（M31 漫画自动裁白边；M32 扩展 PDF：裁框渲染 + 手动框选）----

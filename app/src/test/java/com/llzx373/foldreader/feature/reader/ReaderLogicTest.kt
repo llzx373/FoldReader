@@ -407,6 +407,20 @@ class ReaderLogicTest {
             flatVertical, WidthCategory.EXPANDED, windowPortrait = false, pref = DualPageMode.FORCE_SINGLE))
     }
 
+    @Test
+    fun `dual page mode portrait fallback and cycle order`() {
+        // M32 PDF 双页开关的口径钉版：自动档竖持退回单页（页式阅读器与漫画/文本同一判定）
+        assertEquals(PageLayoutMode.SINGLE, resolvePageLayoutMode(
+            flatVerticalHinge, WidthCategory.COMPACT, windowPortrait = true, pref = DualPageMode.AUTO))
+        // 强制双页在竖持也保持双页（用户显式选择优先）
+        assertEquals(PageLayoutMode.DUAL, resolvePageLayoutMode(
+            flatVerticalHinge, WidthCategory.COMPACT, windowPortrait = true, pref = DualPageMode.FORCE_DUAL))
+        // 菜单循环档：自动 → 强制 → 单栏 → 自动
+        assertEquals(DualPageMode.FORCE_DUAL, nextDualPageMode(DualPageMode.AUTO))
+        assertEquals(DualPageMode.FORCE_SINGLE, nextDualPageMode(DualPageMode.FORCE_DUAL))
+        assertEquals(DualPageMode.AUTO, nextDualPageMode(DualPageMode.FORCE_SINGLE))
+    }
+
     /**
      * 阔折叠展开后竖着拿：它上报水平铰链，且竖持宽度常常仍在 EXPANDED 断点之上，
      * 于是"FLAT + 铰链"与"EXPANDED + 宽屏双页"两条路都会判成双页——每页只剩半幅宽，

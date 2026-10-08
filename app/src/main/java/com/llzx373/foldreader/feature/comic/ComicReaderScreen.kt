@@ -1605,6 +1605,7 @@ fun ComicReaderScreen(
                     onSelectDirection = viewModel::setComicDirection,
                     onSelectFitMode = viewModel::setComicFitMode,
                     onSelectScrollGap = viewModel::setComicScrollGapDp,
+                    onCycleDualPageMode = viewModel::cycleDualPageMode,
                     onToggleCoverAlone = viewModel::setComicDualPageCoverAlone,
                     onToggleSpreadAutoDetect = viewModel::setComicSpreadAutoDetect,
                     onSetBrightness = viewModel::setReaderBrightness,

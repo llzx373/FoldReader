@@ -54,6 +54,7 @@ import com.llzx373.foldreader.feature.reader.ReaderColors
 import com.llzx373.foldreader.feature.reader.ThemePicker
 import com.llzx373.foldreader.feature.reader.autoPageModeLabel
 import com.llzx373.foldreader.feature.reader.autoPageSpeedLabel
+import com.llzx373.foldreader.feature.reader.dualPageModeLabel
 import com.llzx373.foldreader.feature.reader.formatPercent
 
 /**
@@ -231,6 +232,8 @@ fun ComicMenuPanel(
     onSelectDirection: (ComicDirection) -> Unit,
     onSelectFitMode: (ComicFitMode) -> Unit,
     onSelectScrollGap: (Int) -> Unit,
+    /** 双页模式循环档（M32）：自动/强制/单栏，应用级偏好。 */
+    onCycleDualPageMode: () -> Unit = {},
     onToggleCoverAlone: (Boolean) -> Unit,
     onToggleSpreadAutoDetect: (Boolean) -> Unit,
     onSetBrightness: (Float) -> Unit,
@@ -344,6 +347,19 @@ fun ComicMenuPanel(
                             ) { Text(comicFitLabel(mode), maxLines = 1) }
                         }
                     }
+                }
+
+                // 双页（M32：PDF 与漫画同口径——自动档竖持退回单页，展开/宽屏双页）：
+                // 应用级偏好，与文本阅读器菜单同一循环档位
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text("双页", style = MaterialTheme.typography.labelMedium)
+                    TextButton(
+                        onClick = onCycleDualPageMode,
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) { Text(dualPageModeLabel(prefs.dualPageMode)) }
                 }
 
                 if (features.spreadPairing) {
