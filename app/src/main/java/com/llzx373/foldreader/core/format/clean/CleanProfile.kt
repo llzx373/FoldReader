@@ -220,15 +220,21 @@ data class CleanToggles(
  *
  * [adPatterns] 由调用方从全局偏好编译后注入（与旧的 `CleanOptions.adPatterns` 一致），
  * 便于 JVM 单测不依赖 DataStore。
+ *
+ * [replacements]（M30）是逐条确认的「原文片段 → 替换内容」字面替换规则（正则按字面义
+ * 转义构造，替换文本也按字面义写入），来自 AI 校对的确认列表；只进内存配方，
+ * 不参与序列化/备份（与 AI 推荐的 adPatterns 同口径）。幂等由构造方保证
+ * （替换内容不得包含原文片段）。
  */
 data class CleanProfile(
     val level: CleanLevel = CleanLevel.STANDARD,
     val toggles: CleanToggles = CleanToggles.preset(level),
     val adPatterns: List<Regex> = emptyList(),
+    val replacements: List<Pair<Regex, String>> = emptyList(),
 ) {
     /** 什么都不做：导入链路据此跳过副本物化（与旧 `CleanOptions.isNoop` 同义）。 */
     val isNoop: Boolean
-        get() = toggles == CleanToggles.NONE && adPatterns.isEmpty()
+        get() = toggles == CleanToggles.NONE && adPatterns.isEmpty() && replacements.isEmpty()
 
     companion object {
         val NONE = CleanProfile(level = CleanLevel.CUSTOM, toggles = CleanToggles.NONE)

@@ -6,6 +6,8 @@ import com.llzx373.foldreader.core.ai.prompt.ProofreadIssue
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -263,6 +265,69 @@ class ProofreadAiViewModelTest {
         val first = confirmations.first { it.original == "的" }
         assertEquals(2, first.occurrences)
         assertTrue(first.checked)
+    }
+
+    @Test
+    fun `逐条勾选生成清洗配方,纯替换规则不加清洗开关`() = runTest(dispatcher) {
+        val harness = Harness(
+            initialPrefs = ReadingPreferences(
+                aiBaseUrl = "https://api.test/v1",
+                aiModelGeneral = "test-model",
+                aiProofreadConfirmed = true,
+            ),
+        )
+        harness.provider.replies = { user ->
+            val a = user.indexOf("的")
+            val b = user.indexOf("即")
+            """[
+                {"offset": $a, "length": 1, "original": "的", "suggestion": "得", "type": "typo"},
+                {"offset": $b, "length": 1, "original": "即", "suggestion": "既", "type": "typo"}
+            ]"""
+        }
+        harness.viewModel.start(1L)
+        advanceUntilIdle()
+
+        // 取消第一条（的→得），只留 即→既
+        harness.viewModel.toggleConfirmation(0)
+        val profile = harness.viewModel.buildRecipeProfile()!!
+
+        assertEquals(CleanLevel.CUSTOM, profile.level)
+        assertEquals(CleanToggles.NONE, profile.toggles)
+        assertTrue(profile.adPatterns.isEmpty())
+        assertEquals(1, profile.replacements.size)
+        assertEquals(Regex.escape("即"), profile.replacements[0].first.pattern)
+        assertEquals("既", profile.replacements[0].second)
+        assertFalse(profile.isNoop)
+
+        // 全部取消 → 没有配方
+        harness.viewModel.toggleConfirmation(1)
+        assertTrue(harness.viewModel.buildRecipeProfile() == null)
+    }
+
+    @Test
+    fun `配方过滤不幂等的规则,建议包含原文的规则丢弃`() = runTest(dispatcher) {
+        val harness = Harness(
+            initialPrefs = ReadingPreferences(
+                aiBaseUrl = "https://api.test/v1",
+                aiModelGeneral = "test-model",
+                aiProofreadConfirmed = true,
+            ),
+        )
+        // 第二条建议「的得」包含原文「的」——再跑一遍会变成「得得」，不幂等，应被过滤
+        harness.provider.replies = { user ->
+            val a = user.indexOf("的")
+            val b = user.indexOf("即")
+            """[
+                {"offset": $a, "length": 1, "original": "的", "suggestion": "的得", "type": "typo"},
+                {"offset": $b, "length": 1, "original": "即", "suggestion": "既", "type": "typo"}
+            ]"""
+        }
+        harness.viewModel.start(1L)
+        advanceUntilIdle()
+
+        val profile = harness.viewModel.buildRecipeProfile()!!
+        assertEquals(1, profile.replacements.size)
+        assertEquals(Regex.escape("即"), profile.replacements[0].first.pattern)
     }
 
     @Test

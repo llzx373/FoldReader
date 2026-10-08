@@ -18,6 +18,8 @@ data class CleanReport(
     val chapterTitlesDeduped: Int = 0,
     val punctuationFixed: Int = 0,
     val charFixes: Int = 0,
+    /** M30：AI 校对确认配方应用的替换规则命中行数。 */
+    val replacementsApplied: Int = 0,
     val tocLinesRemoved: Int = 0,
     val samples: List<Sample> = emptyList(),
 ) {
@@ -33,6 +35,7 @@ data class CleanReport(
             chapterTitlesDeduped > 0 ||
             punctuationFixed > 0 ||
             charFixes > 0 ||
+            replacementsApplied > 0 ||
             tocLinesRemoved > 0
 
     /** 一句话摘要，供 Snackbar / 对话框标题。 */
@@ -48,6 +51,7 @@ data class CleanReport(
             if (excisedInlineNoise > 0) add("切除行内噪音 $excisedInlineNoise 处")
             if (punctuationFixed > 0) add("规整标点 $punctuationFixed 处")
             if (charFixes > 0) add("归一字符 $charFixes 处")
+            if (replacementsApplied > 0) add("替换修正 $replacementsApplied 处")
         }
         return parts.joinToString("、")
     }
@@ -81,6 +85,7 @@ internal class CleanReportBuilder(private val maxSamples: Int = CleanReport.DEFA
     var chapterTitlesDeduped: Int = 0
     var punctuationFixed: Int = 0
     var charFixes: Int = 0
+    var replacementsApplied: Int = 0
     var tocLinesRemoved: Int = 0
 
     private val samples = ArrayList<CleanReport.Sample>()
@@ -106,6 +111,7 @@ internal class CleanReportBuilder(private val maxSamples: Int = CleanReport.DEFA
         chapterTitlesDeduped = chapterTitlesDeduped,
         punctuationFixed = punctuationFixed,
         charFixes = charFixes,
+        replacementsApplied = replacementsApplied,
         tocLinesRemoved = tocLinesRemoved,
         samples = samples.toList(),
     )

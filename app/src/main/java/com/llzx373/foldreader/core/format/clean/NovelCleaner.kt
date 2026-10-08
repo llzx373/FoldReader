@@ -89,6 +89,8 @@ object NovelCleaner {
     ): LineSink {
         val t = profile.toggles
         val stages: List<(LineSink) -> LineSink> = listOf(
+            // 逐条确认的替换规则最先：后面的规则（尤其章节标题）看到的就是改完的文本
+            { down -> ReplacementSink(profile.replacements, report, down) },
             // 繁简最先：后面的规则（尤其章节标题）看到的就是统一字形
             { down ->
                 CharSink(
@@ -175,6 +177,30 @@ private class WriterSink(
     }
 
     override fun flush() = Unit
+}
+
+/**
+ * 逐条确认的替换规则（M30 AI 校对配方）：按行应用「原文片段 → 替换内容」。
+ * 替换文本按字面义写入（transform 重载，`$` 不会被当组引用）。
+ */
+private class ReplacementSink(
+    private val replacements: List<Pair<Regex, String>>,
+    private val report: CleanReportBuilder,
+    private val next: LineSink,
+) : LineSink {
+    override fun accept(line: String) {
+        var out = line
+        for ((pattern, replacement) in replacements) {
+            if (pattern.containsMatchIn(out)) out = pattern.replace(out) { replacement }
+        }
+        if (out != line) {
+            report.replacementsApplied++
+            report.sample(CleanReport.Sample.Kind.CHAR, line, out)
+        }
+        next.accept(out)
+    }
+
+    override fun flush() = next.flush()
 }
 
 /** 字符归一 + 繁简转换。繁简**由开关决定**，调用方即使把字表传进来也不会擅自转换。 */

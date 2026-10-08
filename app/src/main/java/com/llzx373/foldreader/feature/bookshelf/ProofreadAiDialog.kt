@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.bookshelf
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,17 +30,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.FoldReaderApplication
+import com.llzx373.foldreader.core.format.clean.CleanProfile
 
 /**
- * M30「AI 校对」对话框：确认（首次）→ 按单位送校（进度）→ 结果列表。
+ * M30「AI 校对」对话框：确认（首次）→ 按单位送校（进度）→ 结果列表 → 逐条勾选 → 生成清洗配方。
  *
  * 结果同时落成阅读器批注（只标不改）：关掉对话框也能在书里逐条看到。
- * 逐条确认生成清洗配方见 M30 后半（ProofreadAiViewModel.UiState.Done.confirmations）。
+ * 「生成清洗配方」只把勾选的确认项转成替换规则交回（[onApply]），由「智能整理」
+ * 既有预览/确认链路执行——AI 不直接改正文。
  * ViewModel 按 bookId 键控，对话框中途关掉再开会回到当前状态。
  */
 @Composable
 fun ProofreadAiDialog(
     bookId: Long,
+    onApply: (CleanProfile) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -106,18 +111,33 @@ fun ProofreadAiDialog(
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        if (s.issues.isNotEmpty()) {
+                        if (s.confirmations.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "勾选确认的修改，生成清洗配方后在「智能整理」里预览并执行：",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                                items(s.issues.size) { index ->
-                                    val issue = s.issues[index]
-                                    Text(
-                                        text = "· [${issue.type.label}] ${issue.unitTitle}：" +
-                                            "「${issue.original}」→「${issue.suggestion}」",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                items(s.confirmations.size) { index ->
+                                    val c = s.confirmations[index]
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { viewModel.toggleConfirmation(index) },
+                                    ) {
+                                        Checkbox(
+                                            checked = c.checked,
+                                            onCheckedChange = { viewModel.toggleConfirmation(index) },
+                                        )
+                                        Text(
+                                            text = "[${c.type.label}]「${c.original}」→「${c.suggestion}」" +
+                                                if (c.occurrences > 1) "（${c.occurrences} 处）" else "",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -132,8 +152,19 @@ fun ProofreadAiDialog(
             }
         },
         confirmButton = {
-            if (state is ProofreadAiViewModel.UiState.AwaitConfirmation) {
-                TextButton(onClick = { viewModel.confirmAndRun() }) { Text("同意外发并开始") }
+            when (val s = state) {
+                is ProofreadAiViewModel.UiState.AwaitConfirmation ->
+                    TextButton(onClick = { viewModel.confirmAndRun() }) { Text("同意外发并开始") }
+
+                is ProofreadAiViewModel.UiState.Done -> {
+                    if (s.confirmations.any { it.checked }) {
+                        TextButton(
+                            onClick = { viewModel.buildRecipeProfile()?.let(onApply) },
+                        ) { Text("生成清洗配方") }
+                    }
+                }
+
+                else -> {}
             }
         },
         dismissButton = {
@@ -147,7 +178,7 @@ fun ProofreadAiDialog(
  * （组件内部自查，未配置不显示而非置灰——未配置 AI 零入口）。
  */
 @Composable
-fun ProofreadAiEntry(bookId: Long) {
+fun ProofreadAiEntry(bookId: Long, onApply: (CleanProfile) -> Unit) {
     val context = LocalContext.current
     val container = remember(context) {
         (context.applicationContext as? FoldReaderApplication)?.container
@@ -162,7 +193,14 @@ fun ProofreadAiEntry(bookId: Long) {
     var showDialog by remember { mutableStateOf(false) }
     TextButton(onClick = { showDialog = true }) { Text("AI 校对") }
     if (showDialog) {
-        ProofreadAiDialog(bookId = bookId, onDismiss = { showDialog = false })
+        ProofreadAiDialog(
+            bookId = bookId,
+            onApply = { profile ->
+                showDialog = false
+                onApply(profile)
+            },
+            onDismiss = { showDialog = false },
+        )
     }
 }
 

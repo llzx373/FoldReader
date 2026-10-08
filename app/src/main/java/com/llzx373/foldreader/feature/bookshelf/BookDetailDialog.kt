@@ -70,6 +70,9 @@ fun BookDetailDialog(
     var showEncodingPicker by remember { mutableStateOf(false) }
     // M17：「编辑信息」对话框开关
     var showEditMetadata by remember { mutableStateOf(false) }
+    // 「智能整理」对话框开关；M30：AI 校对确认后带着配方直接打开（初始配方）
+    var showReclean by remember { mutableStateOf(false) }
+    var recleanInitialProfile by remember { mutableStateOf<CleanProfile?>(null) }
     // 导出走系统的「另存为」：默认文件名按内容标记，方便两份并排比
     var exportCleanedCopy by remember { mutableStateOf(true) }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -254,13 +257,22 @@ fun BookDetailDialog(
                         com.llzx373.foldreader.feature.translate.BookTranslateEntry(bookId)
                         // M29：同上口径，摘要预生成确认页含外发范围与成本预估
                         com.llzx373.foldreader.feature.summary.BookSummaryEntry(bookId)
-                        // M30：仅 TXT + AI 已配置时渲染（组件内部自查）；结果落批注，只标不改
-                        ProofreadAiEntry(bookId)
+                        // M30：仅 TXT + AI 已配置时渲染（组件内部自查）；结果落批注，只标不改，
+                        // 逐条确认生成配方后带着它直接打开「智能整理」走既有预览/物化链路
+                        ProofreadAiEntry(
+                            bookId = bookId,
+                            onApply = { profile ->
+                                recleanInitialProfile = profile
+                                showReclean = true
+                            },
+                        )
                         if (book.format == BookFormat.TXT) {
                             val cleanDefaults by viewModel.cleanDefaults.collectAsState()
                             val cleanPreview by viewModel.cleanPreview.collectAsState()
-                            var showReclean by remember { mutableStateOf(false) }
-                            TextButton(onClick = { showReclean = true }) {
+                            TextButton(onClick = {
+                                recleanInitialProfile = null
+                                showReclean = true
+                            }) {
                                 Text("智能整理")
                             }
                             if (showReclean) {
@@ -269,6 +281,7 @@ fun BookDetailDialog(
                                     alreadyCleaned = book.cleanedFilePath != null,
                                     defaultLevel = cleanDefaults.level,
                                     defaultConvertTraditional = cleanDefaults.convertTraditional,
+                                    initialProfile = recleanInitialProfile,
                                     preview = cleanPreview,
                                     onPreview = { level, convert ->
                                         viewModel.previewReclean(bookId, level, convert)
@@ -362,7 +375,8 @@ fun BookDetailDialog(
  *
  * M16：「AI 推荐配方」入口仅 AI 服务已配置时渲染（未配置零 UI 变化）。AI 给出的
  * [CleanProfile] 载入后走**同一条**预览/确认链路——预览报告照常展示，确认按钮照常物化；
- * 手动改选档位或繁简即放弃该配方。
+ * 手动改选档位或繁简即放弃该配方。M30：AI 校对逐条确认生成的替换配方经 [initialProfile]
+ * 走同一入口。
  */
 @Composable
 private fun RecleanConfirmDialog(
@@ -370,6 +384,7 @@ private fun RecleanConfirmDialog(
     alreadyCleaned: Boolean,
     defaultLevel: CleanLevel,
     defaultConvertTraditional: Boolean,
+    initialProfile: CleanProfile? = null,
     preview: BookshelfViewModel.CleanPreview?,
     onPreview: (CleanLevel?, Boolean) -> Unit,
     onPreviewProfile: (CleanProfile) -> Unit,
@@ -379,8 +394,8 @@ private fun RecleanConfirmDialog(
 ) {
     var level by remember { mutableStateOf<CleanLevel?>(defaultLevel) }
     var convertTraditional by remember { mutableStateOf(defaultConvertTraditional) }
-    // AI 推荐配方：非空时预览/确认都以它为准，手动改选档位或繁简即放弃
-    var aiProfile by remember { mutableStateOf<CleanProfile?>(null) }
+    // AI 推荐/校对配方：非空时预览/确认都以它为准，手动改选档位或繁简即放弃
+    var aiProfile by remember { mutableStateOf(initialProfile) }
     var showAiRecipe by remember { mutableStateOf(false) }
     LaunchedEffect(level, convertTraditional, aiProfile) {
         val profile = aiProfile
@@ -425,7 +440,7 @@ private fun RecleanConfirmDialog(
                 }
                 if (aiProfile != null) {
                     Text(
-                        text = "已载入 AI 推荐配方，预览如下；手动改选档位或繁简即放弃该配方。",
+                        text = "已载入 AI 配方（推荐/校对确认），预览如下；手动改选档位或繁简即放弃该配方。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )

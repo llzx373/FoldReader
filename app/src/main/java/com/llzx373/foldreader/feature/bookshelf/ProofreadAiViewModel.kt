@@ -13,6 +13,9 @@ import com.llzx373.foldreader.core.ai.prompt.ProofreadPrompt
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.format.Chapter
+import com.llzx373.foldreader.core.format.clean.CleanLevel
+import com.llzx373.foldreader.core.format.clean.CleanProfile
+import com.llzx373.foldreader.core.format.clean.CleanToggles
 import com.llzx373.foldreader.core.translate.computeUnits
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -229,6 +232,40 @@ class ProofreadAiViewModel(
         return null
     }
 
+    /** 逐条勾选/取消确认列表的一行（生成配方的原料）。 */
+    fun toggleConfirmation(index: Int) {
+        val s = _state.value as? UiState.Done ?: return
+        _state.value = s.copy(
+            confirmations = s.confirmations.mapIndexed { i, c ->
+                if (i == index) c.copy(checked = !c.checked) else c
+            },
+        )
+    }
+
+    /**
+     * 把勾选的确认项生成清洗配方（M30 后半）：纯替换规则——toggles 全关、不加广告正则，
+     * 配方里只有用户逐条确认的修改，交 M16 既有预览/物化链路执行（不新增执行路径）。
+     *
+     * 幂等过滤：建议文本包含原文片段的规则会让自己再次命中（再跑一遍结果会变），丢弃；
+     * 重复（原文,建议）去重。没有可用勾选返回 null。
+     */
+    fun buildRecipeProfile(): CleanProfile? {
+        val s = _state.value as? UiState.Done ?: return null
+        val rules = s.confirmations
+            .filter { it.checked }
+            .filter { it.original.isNotBlank() && it.suggestion.isNotEmpty() && it.original != it.suggestion }
+            .filter { !it.suggestion.contains(it.original) }
+            .distinctBy { it.original to it.suggestion }
+            .take(MAX_RECIPE_RULES)
+            .map { Regex(Regex.escape(it.original)) to it.suggestion }
+        if (rules.isEmpty()) return null
+        return CleanProfile(
+            level = CleanLevel.CUSTOM,
+            toggles = CleanToggles.NONE,
+            replacements = rules,
+        )
+    }
+
     companion object {
         /** 外发台账的 feature 名（与内置提示词登记表一致）。 */
         const val FEATURE_PROOFREAD = "AI 校对"
@@ -240,6 +277,9 @@ class ProofreadAiViewModel(
         const val ANNOTATION_COLOR = 0xFFFFB74DL
 
         private const val UNIT_TIMEOUT_MS = 90_000L
+
+        /** 一份校对配方最多带入的替换规则数（防极端确认列表拖慢清洗）。 */
+        private const val MAX_RECIPE_RULES = 100
 
         /** 确认列表：同一「原文→建议」出现多次合并成一行，计数展示。 */
         internal fun confirmationsOf(issues: List<IssueEntry>): List<Confirmation> =

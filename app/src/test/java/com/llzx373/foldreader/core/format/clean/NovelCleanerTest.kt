@@ -135,4 +135,49 @@ class NovelCleanerTest {
             NovelCleaner.clean(text, standard),
         )
     }
+
+    // ---- M30：AI 校对确认配方的替换规则 ----
+
+    private fun replacementProfile(vararg rules: Pair<String, String>) = CleanProfile(
+        level = CleanLevel.CUSTOM,
+        toggles = CleanToggles.NONE,
+        replacements = rules.map { (from, to) -> Regex(Regex.escape(from)) to to },
+    )
+
+    @Test
+    fun `替换规则按行应用且一行多处全换`() {
+        val profile = replacementProfile("的很快" to "得很快")
+
+        assertEquals(
+            "他走得很快，走得很快。\n",
+            NovelCleaner.clean("他走的很快，走的很快。\n", profile),
+        )
+    }
+
+    @Test
+    fun `替换文本里的美元符号按字面义写入不当组引用`() {
+        val profile = replacementProfile("价" to "$1")
+
+        assertEquals("原$1\n", NovelCleaner.clean("原价\n", profile))
+    }
+
+    @Test
+    fun `替换规则幂等且计入报告与预览`() {
+        val profile = replacementProfile("的" to "得")
+        val once = NovelCleaner.clean("他走的很快。\n她说的对。\n", profile)
+
+        assertEquals("他走得很快。\n她说得对。\n", once)
+        assertEquals(once, NovelCleaner.clean(once, profile))
+
+        val report = NovelCleaner.preview("他走的很快。\n她说的对。\n", profile)
+        assertEquals(2, report.replacementsApplied)
+        assertTrue(report.changed)
+        assertTrue(report.summary().contains("替换修正"))
+    }
+
+    @Test
+    fun `仅替换规则的配方不是无操作`() {
+        assertFalse(replacementProfile("的" to "得").isNoop)
+        assertTrue(CleanProfile.NONE.isNoop)
+    }
 }
