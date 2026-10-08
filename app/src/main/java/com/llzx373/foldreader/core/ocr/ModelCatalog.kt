@@ -24,8 +24,8 @@ data class OcrModelSpec(
     val id: String,
     /** 导入时匹配的文件名（用户下载到的原始文件名）。 */
     val fileName: String,
-    /** 全量 SHA-256（小写 hex，64 字符）。 */
-    val sha256: String,
+    /** 全量 SHA-256（小写 hex，64 字符）；null = 官方钉版未落定（见 [ModelCatalog.INPAINT]），该槽位只接受「导入自定义」。 */
+    val sha256: String?,
     /** 文件字节数（设置页展示 + 导入排障）。 */
     val sizeBytes: Long,
     /** 用途说明（设置页展示）。 */
@@ -99,7 +99,28 @@ object ModelCatalog {
     /** 全部语言识别模型。 */
     val RECS: List<OcrModelSpec> = listOf(REC_CH, REC_EN, REC_JA)
 
-    val ALL: List<OcrModelSpec> = listOf(DET, REC_CH, REC_EN, REC_JA, BUBBLE)
+    /**
+     * 气泡抹除（inpainting，M31）：重建被抹掉的气泡区域像素，译文直接落在干净页面上
+     * （不再铺采样底色块）；模型未导入或推理失败时回落采样底色覆盖。
+     *
+     * 选型评审结论（2026-10-09）：LaMa 系是事实标准，但 big-lama 官方权重 ~196MB（fp32）
+     * 且含 FFT 算子（ffc 块），onnxruntime-mobile 精简算子包能否跑通需真机验证；
+     * 社区 ONNX 导出（量化/蒸馏版）质量与来源稳定性都够不上钉版标准。
+     * 所以本槽位**暂不钉官方版**（[OcrModelSpec.sha256] = null）：只接受「导入自定义」
+     * （LaMa 系 ONNX，契约：输入 image(1,3,H,W)+mask(1,1,H,W)、输出 (1,3,H,W)，
+     * 值域 0..1，H/W 需为 8 的倍数），官方清单条目待真机验证通过后再补钉哈希。
+     */
+    val INPAINT = OcrModelSpec(
+        id = "inpaint",
+        fileName = "lama.onnx",
+        sha256 = null,
+        sizeBytes = 0L,
+        purpose = "气泡抹除（可选）：抹掉气泡里的原文，译文直接落在干净页面上" +
+            "（官方模型评审中，当前可导入自定义 LaMa 系 .onnx；未导入时回落气泡铺底色）",
+        officialUrl = "https://github.com/advimman/lama",
+    )
+
+    val ALL: List<OcrModelSpec> = listOf(DET, REC_CH, REC_EN, REC_JA, BUBBLE, INPAINT)
 
     fun byFileName(name: String): OcrModelSpec? = ALL.firstOrNull { it.fileName == name }
 

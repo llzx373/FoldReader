@@ -64,6 +64,9 @@ class ModelManager(private val context: Context) {
         val fileName = displayName?.substringAfterLast('/')?.substringAfterLast('\\')
             ?: return@withContext ImportResult.UnknownFile
         val spec = ModelCatalog.byFileName(fileName) ?: return@withContext ImportResult.UnknownFile
+        // 未钉官方版的槽位（sha256 = null，如 inpaint）无法校验完整性，官方导入路径拒绝；
+        // 这类槽位走「导入自定义」（明确不校验的口径）
+        val expectedHash = spec.sha256 ?: return@withContext ImportResult.UnknownFile
         val tmp = File(modelsDir, "$fileName.importing")
         val target = File(modelsDir, spec.fileName)
         try {
@@ -71,7 +74,7 @@ class ModelManager(private val context: Context) {
                 tmp.outputStream().use { output -> input.copyTo(output) }
             } ?: return@withContext ImportResult.IoError
             val actual = sha256(tmp)
-            if (!actual.equals(spec.sha256, ignoreCase = true)) {
+            if (!actual.equals(expectedHash, ignoreCase = true)) {
                 tmp.delete()
                 return@withContext ImportResult.HashMismatch(spec)
             }
@@ -150,6 +153,9 @@ class ModelManager(private val context: Context) {
     /** 漫画翻译（气泡检测）就绪 = OCR 就绪 + 气泡模型。 */
     fun bubbleReady(): Boolean = ocrReady() && isReady(ModelCatalog.BUBBLE)
 
+    /** 气泡抹除（M31）就绪 = inpaint 槽位有模型（官方钉版未落定，当前只可能来自自定义导入）。 */
+    fun inpaintReady(): Boolean = isReady(ModelCatalog.INPAINT)
+
     /** 已导入的 rec 语言列表（OCR 时按内容选词典/模型）。 */
     fun importedRecs(): List<OcrModelSpec> = ModelCatalog.RECS.filter { isReady(it) }
 
@@ -166,6 +172,8 @@ class ModelManager(private val context: Context) {
         if (marker.exists()) return@withContext 0
         var seeded = 0
         ModelCatalog.ALL.forEach { spec ->
+            // 未钉官方版的槽位（sha256 = null）没有 assets 铺底来源，跳过
+            if (spec.sha256 == null) return@forEach
             if (fileOf(spec).isFile) return@forEach
             runCatching {
                 context.assets.open(spec.fileName).use { input ->

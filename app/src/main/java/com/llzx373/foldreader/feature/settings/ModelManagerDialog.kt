@@ -59,14 +59,18 @@ fun ModelManagerDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 slots.forEach { slot ->
                     val spec = slot.spec
+                    // 未钉官方版的槽位（M31 inpaint）：没有可校验的官方分发，只走「导入自定义」
+                    val unpinned = spec.sha256 == null
                     HorizontalDivider()
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         Text(spec.purpose, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "${spec.fileName}（${"%.1f".format(spec.sizeBytes / 1024f / 1024f)} MB）",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                        if (!unpinned) {
+                            Text(
+                                "${spec.fileName}（${"%.1f".format(spec.sizeBytes / 1024f / 1024f)} MB）",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
                         Text(
                             when {
                                 slot.custom && slot.official -> "已导入 + 自定义（自定义优先生效）"
@@ -81,12 +85,20 @@ fun ModelManagerDialog(
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
-                        Text(
-                            "下载：${spec.officialUrl}" + (spec.mirrorUrl?.let { "\n镜像：$it" } ?: ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { onCopyUrl(spec.officialUrl) },
-                        )
+                        if (unpinned) {
+                            Text(
+                                "官方模型选型评审中，暂无可校验的官方分发；可自行导出 LaMa 系 .onnx 经「导入自定义」装入。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                "下载：${spec.officialUrl}" + (spec.mirrorUrl?.let { "\n镜像：$it" } ?: ""),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable { onCopyUrl(spec.officialUrl) },
+                            )
+                        }
                         Row(modifier = Modifier.align(Alignment.End)) {
                             if (slot.custom) {
                                 TextButton(onClick = { onDeleteCustom(spec) }) { Text("删自定义") }
@@ -95,8 +107,10 @@ fun ModelManagerDialog(
                                 TextButton(onClick = { onDelete(spec) }) { Text("删除") }
                             }
                             TextButton(onClick = { onImportCustom(spec) }) { Text("导入自定义") }
-                            TextButton(onClick = { onImport(spec) }) {
-                                Text(if (slot.official) "重新导入" else "导入")
+                            if (!unpinned) {
+                                TextButton(onClick = { onImport(spec) }) {
+                                    Text(if (slot.official) "重新导入" else "导入")
+                                }
                             }
                         }
                     }

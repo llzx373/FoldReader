@@ -30,9 +30,20 @@ class ModelCatalogTest {
     fun `清单哈希已钉版`() {
         val hex = Regex("[0-9a-f]{64}")
         for (spec in ModelCatalog.ALL) {
-            assertTrue("${spec.id} 的 sha256 还是占位符", hex.matches(spec.sha256))
+            // sha256 = null 的槽位是「暂不钉官方版」的显式决定（如 inpaint），其余一律钉死
+            val hash = spec.sha256 ?: continue
+            assertTrue("${spec.id} 的 sha256 还是占位符", hex.matches(hash))
             assertTrue("${spec.id} 的 sizeBytes 未填", spec.sizeBytes > 0L)
         }
+    }
+
+    @Test
+    fun `inpaint 槽位暂不钉官方版`() {
+        // 选型评审（M31）落定前，inpaint 只接受「导入自定义」；
+        // 这个用例是防呆闸门：官方版钉版后要改回非空哈希 + 真实字节数
+        assertNull(ModelCatalog.INPAINT.sha256)
+        assertEquals("inpaint", ModelCatalog.INPAINT.id)
+        assertTrue(ModelCatalog.ALL.contains(ModelCatalog.INPAINT))
     }
 
     @Test

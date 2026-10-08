@@ -183,4 +183,25 @@ class ModelManagerTest {
         assertEquals(0, manager.seedBundledModels())
         assertFalse(File(File(context.filesDir, "models"), ModelManager.BUNDLED_SEED_MARKER).exists())
     }
+
+    // ---- M31：inpaint 槽位（暂不钉官方版）----
+
+    @Test
+    fun `未钉版槽位的官方导入被拒绝`() = runTest {
+        // sha256 = null 的槽位无法校验完整性，官方导入路径直接拒绝（与未知文件同口径）
+        val result = manager.import(ModelCatalog.INPAINT.fileName) { ByteArrayInputStream(byteArrayOf(1)) }
+        assertEquals(ModelManager.ImportResult.UnknownFile, result)
+        assertFalse(manager.fileOf(ModelCatalog.INPAINT).exists())
+        assertFalse(manager.inpaintReady())
+    }
+
+    @Test
+    fun `inpaint 槽位自定义导入后就绪`() = runTest {
+        val result = manager.importCustom(ModelCatalog.INPAINT) { ByteArrayInputStream(byteArrayOf(7, 7)) }
+        assertEquals(ModelManager.ImportResult.CustomSuccess(ModelCatalog.INPAINT), result)
+        assertTrue(manager.inpaintReady())
+        // 删掉自定义后回落未就绪（阅读器回落气泡铺底色）
+        assertTrue(manager.deleteCustom("inpaint"))
+        assertFalse(manager.inpaintReady())
+    }
 }

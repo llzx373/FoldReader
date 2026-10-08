@@ -721,12 +721,14 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             ListItem(
                 headlineContent = { Text("模型管理") },
                 supportingContent = {
-                    val ready = modelStatus.count { it.ready }
+                    // 未钉官方版的槽位（inpaint）不计入就绪计数——它不是必需模型
+                    val pinned = modelStatus.filter { it.spec.sha256 != null }
+                    val ready = pinned.count { it.ready }
                     Text(
                         if (com.llzx373.foldreader.BuildConfig.BUNDLED_MODELS) {
-                            "扫描 PDF 文本层与漫画翻译共用的离线模型（本版本已自带，可导入自定义模型覆盖）；已就绪 $ready/${modelStatus.size}"
+                            "扫描 PDF 文本层与漫画翻译共用的离线模型（本版本已自带，可导入自定义模型覆盖）；已就绪 $ready/${pinned.size}"
                         } else {
-                            "扫描 PDF 文本层与漫画翻译共用的离线模型（自行下载导入、校验 SHA-256，也可导入自定义模型）；已导入 $ready/${modelStatus.size}"
+                            "扫描 PDF 文本层与漫画翻译共用的离线模型（自行下载导入、校验 SHA-256，也可导入自定义模型）；已导入 $ready/${pinned.size}"
                         },
                     )
                 },

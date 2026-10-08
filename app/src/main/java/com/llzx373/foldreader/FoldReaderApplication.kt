@@ -106,6 +106,11 @@ class AppContainer(context: Context) {
         com.llzx373.foldreader.core.ocr.android.OcrEngine(appContext, modelManager)
     }
 
+    /** 气泡抹除会话层（M31）：与 OcrEngine 同一惰性纪律——inpaint 模型未导入不创建会话。 */
+    val inpaintEngine: com.llzx373.foldreader.core.ocr.android.InpaintEngine by lazy {
+        com.llzx373.foldreader.core.ocr.android.InpaintEngine(modelManager)
+    }
+
     /**
      * 当前 OCR 识别语言（M21）：设置值是 ModelCatalog 的 rec 条目 id；空串自动 =
      * 优先中文（中日英混排覆盖最好），未导入则取第一个已导入的。模型未就绪返回 null。
