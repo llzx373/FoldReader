@@ -1893,6 +1893,10 @@ fun ReaderScreen(
                 ttsPaused = ttsPaused,
                 ttsSleepText = ttsState.sleepText.takeIf { ttsPlaying },
                 onSleepTimer = { sleepTimerVisible = true },
+                ttsSpeechRate = ttsState.speechRate,
+                ttsPitch = ttsState.pitch,
+                onTtsSpeechRate = viewModel::setTtsSpeechRate,
+                onTtsPitch = viewModel::setTtsPitch,
                 onSpeakFromHere = {
                     ensureNotificationPermission()
                     scope.launch { viewModel.speakFromHere() }

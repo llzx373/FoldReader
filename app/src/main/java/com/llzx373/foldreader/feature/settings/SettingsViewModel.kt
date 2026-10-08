@@ -145,6 +145,8 @@ class SettingsViewModel(
         launch { settingsRepository.setShowPageNumber(enabled) }
     fun updateShowBattery(enabled: Boolean) = launch { settingsRepository.setShowBattery(enabled) }
     fun updateShowTime(enabled: Boolean) = launch { settingsRepository.setShowTime(enabled) }
+    fun updateTtsSpeechRate(rate: Float) = launch { settingsRepository.setTtsSpeechRate(rate) }
+    fun updateTtsPitch(pitch: Float) = launch { settingsRepository.setTtsPitch(pitch) }
     fun updateBookshelfGridView(gridView: Boolean) =
         launch { settingsRepository.setBookshelfGridView(gridView) }
     fun updateBookshelfGridColumns(columns: Int) =

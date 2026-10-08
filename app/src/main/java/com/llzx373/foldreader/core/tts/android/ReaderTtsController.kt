@@ -9,6 +9,7 @@ import android.speech.tts.UtteranceProgressListener
 import com.llzx373.foldreader.core.tts.TtsSegment
 import com.llzx373.foldreader.core.tts.TtsSleepOption
 import com.llzx373.foldreader.core.tts.TtsSleepTimer
+import com.llzx373.foldreader.core.tts.TtsSpeech
 import com.llzx373.foldreader.core.tts.TtsState
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,30 @@ class ReaderTtsController(context: Context) {
     private var sleepDeadlineMs = 0L
     private var sleepStopToken: Runnable? = null
     private var sleepTickToken: Runnable? = null
+
+    /** 当前会话生效的语速 / 音调（M26）：speak 时取全局默认，setSpeechRate/setPitch 当次临时改。 */
+    private var currentRate = TtsSpeech.DEFAULT_RATE
+    private var currentPitch = TtsSpeech.DEFAULT_PITCH
+
+    /**
+     * 语速 / 音调的当次临时调整（朗读中面板）：立即作用于引擎（Android TTS 在
+     * 合成每条 utterance 时读当前参数，排队中的句子同样生效），不写回全局设置。
+     */
+    fun setSpeechRate(rate: Float) {
+        main.post {
+            currentRate = TtsSpeech.clampRate(rate)
+            if (engineReady) engine?.setSpeechRate(currentRate)
+            _state.update { it.copy(speechRate = currentRate) }
+        }
+    }
+
+    fun setPitch(pitch: Float) {
+        main.post {
+            currentPitch = TtsSpeech.clampPitch(pitch)
+            if (engineReady) engine?.setPitch(currentPitch)
+            _state.update { it.copy(pitch = currentPitch) }
+        }
+    }
 
     /** 设置/取消睡眠定时；只在朗读会话（含暂停）中生效，非播放时调用是 no-op。 */
     fun setSleepTimer(option: TtsSleepOption) {
@@ -136,18 +161,24 @@ class ReaderTtsController(context: Context) {
         segments: List<TtsSegment>,
         bookTitle: String = "",
         chapterTitle: String = "",
+        speechRate: Float = TtsSpeech.DEFAULT_RATE,
+        pitch: Float = TtsSpeech.DEFAULT_PITCH,
     ) {
         main.post {
             if (segments.isEmpty()) return@post
             this.segments = segments
             currentIndex = 0
             generation++
+            currentRate = TtsSpeech.clampRate(speechRate)
+            currentPitch = TtsSpeech.clampPitch(pitch)
             _state.value = TtsState(
                 bookId = bookId,
                 charOffset = segments.first().charOffset,
                 playing = true,
                 bookTitle = bookTitle,
                 chapterTitle = chapterTitle,
+                speechRate = currentRate,
+                pitch = currentPitch,
             )
             // 前台壳：朗读期间进程持有前台 service；播完/停止由服务观察 state 后退出前台并 stopSelf
             runCatching { appContext.startService(Intent(appContext, TtsPlaybackService::class.java)) }
@@ -248,6 +279,8 @@ class ReaderTtsController(context: Context) {
     private fun startQueueFrom(index: Int) {
         val tts = engine ?: return
         tts.stop()
+        tts.setSpeechRate(currentRate)
+        tts.setPitch(currentPitch)
         currentIndex = index
         val gen = generation
         for (i in index until segments.size) {

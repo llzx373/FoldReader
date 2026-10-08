@@ -1412,11 +1412,14 @@ class ReaderViewModel(
         if (end <= start) return
         val text = runCatching { source.read(start until end) }.getOrNull() ?: return
         val segments = TtsSentenceSplitter.split(text, start)
+        val prefs = settingsRepository.preferences.first()
         ttsController.speak(
             bookId = bookId,
             segments = segments,
             bookTitle = _uiState.value.bookTitle,
             chapterTitle = chapters.getOrNull(chapterIndexAt(chapters, start))?.title.orEmpty(),
+            speechRate = prefs.ttsSpeechRate,
+            pitch = prefs.ttsPitch,
         )
     }
 
@@ -1427,6 +1430,11 @@ class ReaderViewModel(
     /** M26 睡眠定时：档位直达控制器；非播放中调用是 no-op。 */
     fun setSleepTimer(option: com.llzx373.foldreader.core.tts.TtsSleepOption) =
         ttsController.setSleepTimer(option)
+
+    /** M26 语速/音调的当次临时调整（朗读中面板）：不写回全局设置。 */
+    fun setTtsSpeechRate(rate: Float) = ttsController.setSpeechRate(rate)
+
+    fun setTtsPitch(pitch: Float) = ttsController.setPitch(pitch)
 
     /**
      * 重开正文：编码变了（换解码方式）或清洗副本换了（智能整理/撤销清理）时调用。

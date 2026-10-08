@@ -745,6 +745,12 @@ class BackupCodecTest {
         override suspend fun setTranslationViewHintShown(shown: Boolean) =
             update { copy(translationViewHintShown = shown) }
 
+        override suspend fun setTtsSpeechRate(rate: Float) =
+            update { copy(ttsSpeechRate = rate) }
+
+        override suspend fun setTtsPitch(pitch: Float) =
+            update { copy(ttsPitch = pitch) }
+
         override suspend fun setAiPricePerMillion(price: Double) =
             update { copy(aiPricePerMillion = price) }
 

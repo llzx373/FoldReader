@@ -73,6 +73,7 @@ import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.core.reader.FontManager
+import com.llzx373.foldreader.core.tts.TtsSpeech
 import com.llzx373.foldreader.feature.reader.ThemePicker
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -503,6 +504,25 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             SwitchSetting("页码", prefs.showPageNumber, viewModel::updateShowPageNumber)
             SwitchSetting("电量", prefs.showBattery, viewModel::updateShowBattery)
             SwitchSetting("时间", prefs.showTime, viewModel::updateShowTime)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("听书朗读")
+            SliderSetting(
+                label = "语速",
+                value = prefs.ttsSpeechRate,
+                valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
+                steps = 14,
+                format = { TtsSpeech.formatRate(it) },
+                onChange = viewModel::updateTtsSpeechRate,
+            )
+            SliderSetting(
+                label = "音调",
+                value = prefs.ttsPitch,
+                valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
+                steps = 14,
+                format = { TtsSpeech.formatPitch(it) },
+                onChange = viewModel::updateTtsPitch,
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("章节识别")

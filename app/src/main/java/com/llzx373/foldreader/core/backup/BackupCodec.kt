@@ -443,6 +443,9 @@ class BackupCodec(
         .put("comicScrollGapDp", p.comicScrollGapDp)
         // M21：OCR 识别语言（无隐私含量的界面偏好；AI 服务配置与凭据依旧不进备份）
         .put("ocrRecLang", p.ocrRecLang)
+        // M26：TTS 语速 / 音调全局默认
+        .put("ttsSpeechRate", p.ttsSpeechRate.toDouble())
+        .put("ttsPitch", p.ttsPitch.toDouble())
 
     private suspend fun applyPreferences(json: JSONObject) {
         val current = settingsRepository.preferences.first()
@@ -600,6 +603,12 @@ class BackupCodec(
         }
         if (json.has("ocrRecLang")) {
             settingsRepository.setOcrRecLang(json.optString("ocrRecLang"))
+        }
+        if (json.has("ttsSpeechRate")) {
+            settingsRepository.setTtsSpeechRate(json.optDouble("ttsSpeechRate").toFloat())
+        }
+        if (json.has("ttsPitch")) {
+            settingsRepository.setTtsPitch(json.optDouble("ttsPitch").toFloat())
         }
     }
 

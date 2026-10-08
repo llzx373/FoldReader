@@ -88,6 +88,8 @@ class SettingsRepositoryImpl(
         val AI_CLEAN_RECIPE_CONFIRMED = booleanPreferencesKey("ai_clean_recipe_confirmed")
         val AI_METADATA_CONFIRMED = booleanPreferencesKey("ai_metadata_confirmed")
         val TRANSLATION_VIEW_HINT_SHOWN = booleanPreferencesKey("translation_view_hint_shown")
+        val TTS_SPEECH_RATE = floatPreferencesKey("tts_speech_rate")
+        val TTS_PITCH = floatPreferencesKey("tts_pitch")
         val AI_PRICE_PER_MILLION = doublePreferencesKey("ai_price_per_million")
         val OCR_REC_LANG = stringPreferencesKey("ocr_rec_lang")
         val WEBDAV_BASE_URL = stringPreferencesKey("webdav_base_url")
@@ -188,6 +190,8 @@ class SettingsRepositoryImpl(
                     ?: defaults.aiMetadataConfirmed,
                 translationViewHintShown = prefs[Keys.TRANSLATION_VIEW_HINT_SHOWN]
                     ?: defaults.translationViewHintShown,
+                ttsSpeechRate = prefs[Keys.TTS_SPEECH_RATE] ?: defaults.ttsSpeechRate,
+                ttsPitch = prefs[Keys.TTS_PITCH] ?: defaults.ttsPitch,
                 aiPricePerMillion = prefs[Keys.AI_PRICE_PER_MILLION] ?: defaults.aiPricePerMillion,
                 ocrRecLang = prefs[Keys.OCR_REC_LANG] ?: defaults.ocrRecLang,
                 webdavBaseUrl = prefs[Keys.WEBDAV_BASE_URL] ?: defaults.webdavBaseUrl,
@@ -493,6 +497,18 @@ class SettingsRepositoryImpl(
 
     override suspend fun setTranslationViewHintShown(shown: Boolean) {
         context.readingPreferencesStore.edit { it[Keys.TRANSLATION_VIEW_HINT_SHOWN] = shown }
+    }
+
+    override suspend fun setTtsSpeechRate(rate: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.TTS_SPEECH_RATE] = com.llzx373.foldreader.core.tts.TtsSpeech.clampRate(rate)
+        }
+    }
+
+    override suspend fun setTtsPitch(pitch: Float) {
+        context.readingPreferencesStore.edit {
+            it[Keys.TTS_PITCH] = com.llzx373.foldreader.core.tts.TtsSpeech.clampPitch(pitch)
+        }
     }
 
     override suspend fun setAiPricePerMillion(price: Double) {

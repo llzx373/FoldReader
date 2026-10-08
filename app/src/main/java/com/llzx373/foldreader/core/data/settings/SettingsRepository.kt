@@ -83,6 +83,9 @@ interface SettingsRepository {
     suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean)
     suspend fun setAiMetadataConfirmed(confirmed: Boolean)
     suspend fun setTranslationViewHintShown(shown: Boolean)
+    /** M26：TTS 听书全局默认语速 / 音调（0.5~2.0）。 */
+    suspend fun setTtsSpeechRate(rate: Float)
+    suspend fun setTtsPitch(pitch: Float)
     suspend fun setAiPricePerMillion(price: Double)
     /** M21：OCR 识别语言（rec 模型 id；空串 = 自动）。 */
     suspend fun setOcrRecLang(modelId: String)

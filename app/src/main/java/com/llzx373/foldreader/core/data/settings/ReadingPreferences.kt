@@ -155,6 +155,9 @@ data class ReadingPreferences(
     val aiMetadataConfirmed: Boolean = false,
     /** M19：首次切到译文视角的提示（坐标系/功能限制）只弹一次。 */
     val translationViewHintShown: Boolean = false,
+    /** M26：TTS 听书的全局默认语速 / 音调（朗读中面板的临时调整不写回这里）。 */
+    val ttsSpeechRate: Float = 1.0f,
+    val ttsPitch: Float = 1.0f,
     /** M20：「翻译全书」成本预估单价（元 / 百万 token），用户在确认页可改并持久化。 */
     val aiPricePerMillion: Double = 2.0,
     /**

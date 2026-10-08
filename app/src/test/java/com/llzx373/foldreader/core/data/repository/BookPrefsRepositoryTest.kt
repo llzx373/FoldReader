@@ -338,6 +338,8 @@ class BookPrefsRepositoryTest {
         override suspend fun setAiCleanRecipeConfirmed(confirmed: Boolean) = Unit
         override suspend fun setAiMetadataConfirmed(confirmed: Boolean) = Unit
         override suspend fun setTranslationViewHintShown(shown: Boolean) = Unit
+        override suspend fun setTtsSpeechRate(rate: Float) = Unit
+        override suspend fun setTtsPitch(pitch: Float) = Unit
         override suspend fun setAiPricePerMillion(price: Double) = Unit
         override suspend fun setOcrRecLang(modelId: String) = Unit
         override suspend fun setWebDavBaseUrl(baseUrl: String) = Unit

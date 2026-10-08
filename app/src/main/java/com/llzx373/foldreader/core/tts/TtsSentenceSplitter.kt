@@ -24,6 +24,9 @@ data class TtsState(
     val sleepOption: TtsSleepOption? = null,
     /** 通知/菜单共用的定时文案（如「12 分钟后停止」「读完本章停止」），分钟档每分钟刷新。 */
     val sleepText: String? = null,
+    /** 本次会话生效的语速 / 音调（M26）：全局默认起，朗读中面板可临时调整。 */
+    val speechRate: Float = 1.0f,
+    val pitch: Float = 1.0f,
 )
 
 /**

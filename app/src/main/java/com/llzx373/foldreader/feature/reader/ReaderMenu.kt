@@ -69,6 +69,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.tts.TtsSleepOption
+import com.llzx373.foldreader.core.tts.TtsSpeech
 import com.llzx373.foldreader.feature.bookshelf.ReaderChapterRuleAiEntry
 import com.llzx373.foldreader.ui.EncodingPickerDialog
 import kotlinx.coroutines.launch
@@ -251,6 +252,11 @@ fun ReaderMenuPanel(
     /** M26 睡眠定时：当前定时文案（null = 未开）；朗读中菜单显示「定时」入口。 */
     ttsSleepText: String? = null,
     onSleepTimer: () -> Unit = {},
+    /** M26 语速 / 音调（朗读中当次临时调整，值来自 TtsState）。 */
+    ttsSpeechRate: Float = 1f,
+    ttsPitch: Float = 1f,
+    onTtsSpeechRate: (Float) -> Unit = {},
+    onTtsPitch: (Float) -> Unit = {},
     onSpeakFromHere: () -> Unit,
     onSpeakChapter: () -> Unit,
     onToggleSpeakPause: () -> Unit = {},
@@ -286,6 +292,8 @@ fun ReaderMenuPanel(
     var maxLineCharsDraft by remember { mutableStateOf<Float?>(null) }
     var paragraphSpacingDraft by remember { mutableStateOf<Float?>(null) }
     var letterSpacingDraft by remember { mutableStateOf<Float?>(null) }
+    var ttsRateDraft by remember { mutableStateOf<Float?>(null) }
+    var ttsPitchDraft by remember { mutableStateOf<Float?>(null) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = colors.background,
@@ -528,6 +536,49 @@ fun ReaderMenuPanel(
                     } else {
                         clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
                         clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+                    }
+                }
+                // 朗读中的语速/音调：当次临时调整，不写回全局设置
+                if (ttsPlaying) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("语速", style = MaterialTheme.typography.labelMedium)
+                        Slider(
+                            value = ttsRateDraft ?: ttsSpeechRate,
+                            onValueChange = { ttsRateDraft = it },
+                            onValueChangeFinished = {
+                                ttsRateDraft?.let(onTtsSpeechRate)
+                                ttsRateDraft = null
+                            },
+                            valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
+                            steps = 14,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                        )
+                        Text(
+                            text = TtsSpeech.formatRate(ttsRateDraft ?: ttsSpeechRate),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("音调", style = MaterialTheme.typography.labelMedium)
+                        Slider(
+                            value = ttsPitchDraft ?: ttsPitch,
+                            onValueChange = { ttsPitchDraft = it },
+                            onValueChangeFinished = {
+                                ttsPitchDraft?.let(onTtsPitch)
+                                ttsPitchDraft = null
+                            },
+                            valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
+                            steps = 14,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                        )
+                        Text(
+                            text = TtsSpeech.formatPitch(ttsPitchDraft ?: ttsPitch),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
                 }
             }
