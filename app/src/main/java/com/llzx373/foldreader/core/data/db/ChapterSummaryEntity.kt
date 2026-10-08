@@ -72,6 +72,10 @@ interface ChapterSummaryDao {
     )
     suspend fun getDoneForBook(bookId: Long, lang: String): List<ChapterSummaryEntity>
 
+    /** 全部书的已完成摘要（备份导出用；pending/failed 是过程态，不备份）。 */
+    @Query("SELECT * FROM chapter_summaries WHERE status = 'done'")
+    suspend fun getAllDone(): List<ChapterSummaryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(unit: ChapterSummaryEntity)
 
@@ -132,6 +136,10 @@ interface BookOutlineDao {
 
     @Query("SELECT * FROM book_outlines WHERE bookId = :bookId AND lang = :lang")
     suspend fun get(bookId: Long, lang: String): BookOutlineEntity?
+
+    /** 全部书的大纲（备份导出用）。 */
+    @Query("SELECT * FROM book_outlines")
+    suspend fun getAll(): List<BookOutlineEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(outline: BookOutlineEntity)

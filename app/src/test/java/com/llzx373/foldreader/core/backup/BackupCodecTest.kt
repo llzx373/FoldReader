@@ -506,6 +506,134 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `v9 摘要与大纲随备份往返且按 contentHash 重映射`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceSummaries = FakeChapterSummaryDao()
+        sourceSummaries.upsert(
+            com.llzx373.foldreader.core.data.db.ChapterSummaryEntity(
+                bookId = 1, lang = "ZH_HANS", unitIndex = 0, unitKind = "chapter",
+                unitTitle = "第一章", status = com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE,
+                summary = "摘要一", model = "m", updatedAt = 42,
+            ),
+        )
+        // 过程态（failed）不备份
+        sourceSummaries.upsert(
+            com.llzx373.foldreader.core.data.db.ChapterSummaryEntity(
+                bookId = 1, lang = "ZH_HANS", unitIndex = 1, unitKind = "chapter",
+                unitTitle = "第二章", status = com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_FAILED,
+                summary = "", model = "m", updatedAt = 43,
+            ),
+        )
+        val sourceOutlines = FakeBookOutlineDao()
+        sourceOutlines.upsert(
+            com.llzx373.foldreader.core.data.db.BookOutlineEntity(
+                bookId = 1, lang = "ZH_HANS", outline = "大纲", summaryCount = 1, model = "m", updatedAt = 44,
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = sourceSummaries,
+            bookOutlineDao = sourceOutlines,
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(mutableListOf(book(id = 7, hash = "hashA")))
+        val targetSummaries = FakeChapterSummaryDao()
+        val targetOutlines = FakeBookOutlineDao()
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = targetSummaries,
+            bookOutlineDao = targetOutlines,
+        ).importJson(json)
+
+        assertEquals(1, result.restoredSummaries) // failed 行不备份不恢复
+        assertEquals(1, result.restoredOutlines)
+        val summary = targetSummaries.rows.getValue(Triple(7L, "ZH_HANS", 0))
+        assertEquals(7L, summary.bookId) // bookId 已重映射为本机 id
+        assertEquals("摘要一", summary.summary)
+        assertEquals("第一章", summary.unitTitle)
+        assertEquals(com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE, summary.status)
+        assertEquals("大纲", targetOutlines.rows.getValue(7L to "ZH_HANS").outline)
+    }
+
+    @Test
+    fun `v9 摘要恢复时书未导入则跳过且重复恢复不堆重复行`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceSummaries = FakeChapterSummaryDao()
+        sourceSummaries.upsert(
+            com.llzx373.foldreader.core.data.db.ChapterSummaryEntity(
+                bookId = 1, lang = "ZH_HANS", unitIndex = 0, unitKind = "chapter",
+                unitTitle = "第一章", status = com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE,
+                summary = "摘要一", model = "m", updatedAt = 42,
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = sourceSummaries,
+        ).exportJson().toString()
+
+        // 目标机没有这本书：跳过
+        val orphanTarget = FakeChapterSummaryDao()
+        val skipped = BackupCodec(
+            FakeBookshelfRepository(),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = orphanTarget,
+        ).importJson(json)
+        assertEquals(0, skipped.restoredSummaries)
+        assertTrue(orphanTarget.rows.isEmpty())
+
+        // 目标机有书：重复导入同一备份不堆重复行
+        val targetSummaries = FakeChapterSummaryDao()
+        val target = BackupCodec(
+            FakeBookshelfRepository(mutableListOf(book(id = 7, hash = "hashA"))),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = targetSummaries,
+        )
+        target.importJson(json)
+        val second = target.importJson(json)
+        assertEquals(1, targetSummaries.rows.size)
+        assertEquals(0, second.restoredSummaries)
+    }
+
+    @Test
+    fun `v8 旧备份缺 summaries 与 outlines 段时不产生任何摘要`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 8,
+              "books": []
+            }
+        """.trimIndent()
+        val targetSummaries = FakeChapterSummaryDao()
+        val targetOutlines = FakeBookOutlineDao()
+        val result = BackupCodec(
+            FakeBookshelfRepository(),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            chapterSummaryDao = targetSummaries,
+            bookOutlineDao = targetOutlines,
+        ).importJson(legacy)
+
+        assertEquals(0, result.restoredSummaries)
+        assertEquals(0, result.restoredOutlines)
+        assertTrue(targetSummaries.rows.isEmpty())
+        assertTrue(targetOutlines.rows.isEmpty())
+    }
+
+    @Test
     fun `v7 旧备份缺 vocabulary 段时不产生任何词条`() = runBlocking {
         val legacy = """
             {
@@ -1137,5 +1265,75 @@ class BackupCodecTest {
         override suspend fun deleteAll() {
             rows.clear()
         }
+    }
+
+    /** 内存章节摘要表：upsert 按 (bookId, lang, unitIndex) 覆盖，与主键同口径。 */
+    private class FakeChapterSummaryDao : com.llzx373.foldreader.core.data.db.ChapterSummaryDao {
+        val rows = LinkedHashMap<Triple<Long, String, Int>, com.llzx373.foldreader.core.data.db.ChapterSummaryEntity>()
+
+        override fun observeForBook(
+            bookId: Long,
+            lang: String,
+        ): Flow<List<com.llzx373.foldreader.core.data.db.ChapterSummaryEntity>> =
+            flowOf(rows.values.filter { it.bookId == bookId && it.lang == lang })
+
+        override suspend fun getForBook(
+            bookId: Long,
+            lang: String,
+        ): List<com.llzx373.foldreader.core.data.db.ChapterSummaryEntity> =
+            rows.values.filter { it.bookId == bookId && it.lang == lang }
+
+        override suspend fun getDoneForBook(
+            bookId: Long,
+            lang: String,
+        ): List<com.llzx373.foldreader.core.data.db.ChapterSummaryEntity> =
+            getForBook(bookId, lang).filter {
+                it.status == com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE
+            }
+
+        override suspend fun getAllDone(): List<com.llzx373.foldreader.core.data.db.ChapterSummaryEntity> =
+            rows.values.filter {
+                it.status == com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE
+            }
+
+        override suspend fun upsert(unit: com.llzx373.foldreader.core.data.db.ChapterSummaryEntity) {
+            rows[Triple(unit.bookId, unit.lang, unit.unitIndex)] = unit
+        }
+
+        override suspend fun updateStatus(
+            bookId: Long,
+            lang: String,
+            unitIndex: Int,
+            status: String,
+            summary: String,
+            model: String,
+            updatedAt: Long,
+        ) = Unit
+
+        override suspend fun deleteAll() = rows.clear()
+    }
+
+    /** 内存全书大纲表：upsert 按 (bookId, lang) 覆盖。 */
+    private class FakeBookOutlineDao : com.llzx373.foldreader.core.data.db.BookOutlineDao {
+        val rows = LinkedHashMap<Pair<Long, String>, com.llzx373.foldreader.core.data.db.BookOutlineEntity>()
+
+        override fun observe(
+            bookId: Long,
+            lang: String,
+        ): Flow<com.llzx373.foldreader.core.data.db.BookOutlineEntity?> = flowOf(rows[bookId to lang])
+
+        override suspend fun get(
+            bookId: Long,
+            lang: String,
+        ): com.llzx373.foldreader.core.data.db.BookOutlineEntity? = rows[bookId to lang]
+
+        override suspend fun getAll(): List<com.llzx373.foldreader.core.data.db.BookOutlineEntity> =
+            rows.values.toList()
+
+        override suspend fun upsert(outline: com.llzx373.foldreader.core.data.db.BookOutlineEntity) {
+            rows[outline.bookId to outline.lang] = outline
+        }
+
+        override suspend fun deleteAll() = rows.clear()
     }
 }

@@ -35,6 +35,10 @@ class BackupCodec(
     private val glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
     /** M28 生词本（vocabulary 段）；null = 不导出。 */
     private val wordEntryDao: com.llzx373.foldreader.core.data.db.WordEntryDao? = null,
+    /** M29 章节摘要（summaries 段，只导出 done）；null = 不导出。 */
+    private val chapterSummaryDao: com.llzx373.foldreader.core.data.db.ChapterSummaryDao? = null,
+    /** M29 全书大纲（outlines 段）；null = 不导出。 */
+    private val bookOutlineDao: com.llzx373.foldreader.core.data.db.BookOutlineDao? = null,
 ) {
 
     suspend fun exportJson(): JSONObject {
@@ -199,6 +203,45 @@ class BackupCodec(
                 )
             }
             root.put("vocabulary", vocabularyJson)
+        }
+        // M29 章节摘要（v9 起）：只导出 done 摘要（过程态不备份）；bookId 按 contentHash 附带，
+        // 换机恢复时重映射（书未导入则跳过该行，与术语表同口径）
+        chapterSummaryDao?.let { dao ->
+            val booksById = books.associateBy { it.id }
+            val summariesJson = JSONArray()
+            dao.getAllDone().forEach { row ->
+                val book = booksById[row.bookId] ?: return@forEach
+                summariesJson.put(
+                    JSONObject()
+                        .put("lang", row.lang)
+                        .put("unitIndex", row.unitIndex)
+                        .put("unitKind", row.unitKind)
+                        .put("unitTitle", row.unitTitle)
+                        .put("summary", row.summary)
+                        .put("model", row.model)
+                        .put("updatedAt", row.updatedAt)
+                        .put("contentHash", book.contentHash),
+                )
+            }
+            root.put("summaries", summariesJson)
+        }
+        // M29 全书大纲（v9 起）：同上按 contentHash 附带重映射
+        bookOutlineDao?.let { dao ->
+            val booksById = books.associateBy { it.id }
+            val outlinesJson = JSONArray()
+            dao.getAll().forEach { row ->
+                val book = booksById[row.bookId] ?: return@forEach
+                outlinesJson.put(
+                    JSONObject()
+                        .put("lang", row.lang)
+                        .put("outline", row.outline)
+                        .put("summaryCount", row.summaryCount)
+                        .put("model", row.model)
+                        .put("updatedAt", row.updatedAt)
+                        .put("contentHash", book.contentHash),
+                )
+            }
+            root.put("outlines", outlinesJson)
         }
         return root
     }
@@ -435,6 +478,68 @@ class BackupCodec(
             }
         }
 
+        // M29 章节摘要（v9 起）：按 contentHash 重映射 bookId（书未导入则跳过），
+        // 同 (bookId, lang, unitIndex) 已存在时不覆盖（本机已生成的优先）
+        var restoredSummaries = 0
+        root.optJSONArray("summaries")?.let { arr ->
+            val dao = chapterSummaryDao
+            if (dao != null) {
+                for (i in 0 until arr.length()) {
+                    val s = arr.getJSONObject(i)
+                    val hash = if (s.isNull("contentHash")) null else s.optString("contentHash")
+                    val book = hash?.let { bookshelfRepository.findByContentHash(it) } ?: continue
+                    val summary = s.optString("summary")
+                    if (summary.isBlank()) continue
+                    val lang = s.optString("lang")
+                    val unitIndex = s.optInt("unitIndex")
+                    val existing = dao.getForBook(book.id, lang).any { it.unitIndex == unitIndex }
+                    if (existing) continue
+                    dao.upsert(
+                        com.llzx373.foldreader.core.data.db.ChapterSummaryEntity(
+                            bookId = book.id,
+                            lang = lang,
+                            unitIndex = unitIndex,
+                            unitKind = s.optString("unitKind", "chapter"),
+                            unitTitle = s.optString("unitTitle"),
+                            status = com.llzx373.foldreader.core.data.db.ChapterSummaryEntity.STATUS_DONE,
+                            summary = summary,
+                            model = s.optString("model"),
+                            updatedAt = s.optLong("updatedAt"),
+                        ),
+                    )
+                    restoredSummaries++
+                }
+            }
+        }
+
+        // M29 全书大纲（v9 起）：同上重映射；已有同语言大纲不覆盖
+        var restoredOutlines = 0
+        root.optJSONArray("outlines")?.let { arr ->
+            val dao = bookOutlineDao
+            if (dao != null) {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val hash = if (o.isNull("contentHash")) null else o.optString("contentHash")
+                    val book = hash?.let { bookshelfRepository.findByContentHash(it) } ?: continue
+                    val outline = o.optString("outline")
+                    if (outline.isBlank()) continue
+                    val lang = o.optString("lang")
+                    if (dao.get(book.id, lang) != null) continue
+                    dao.upsert(
+                        com.llzx373.foldreader.core.data.db.BookOutlineEntity(
+                            bookId = book.id,
+                            lang = lang,
+                            outline = outline,
+                            summaryCount = o.optInt("summaryCount"),
+                            model = o.optString("model"),
+                            updatedAt = o.optLong("updatedAt"),
+                        ),
+                    )
+                    restoredOutlines++
+                }
+            }
+        }
+
         return ImportResult(
             restoredBooks = restoredBooks,
             missingBookTitles = missing,
@@ -444,6 +549,8 @@ class BackupCodec(
             restoredBookPrefs = restoredBookPrefs,
             restoredGlossary = restoredGlossary,
             restoredVocabulary = restoredVocabulary,
+            restoredSummaries = restoredSummaries,
+            restoredOutlines = restoredOutlines,
         )
     }
 

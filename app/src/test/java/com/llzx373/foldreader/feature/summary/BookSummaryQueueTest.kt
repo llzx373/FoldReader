@@ -43,6 +43,9 @@ class BookSummaryQueueTest {
                 it.bookId == bookId && it.lang == lang && it.status == ChapterSummaryEntity.STATUS_DONE
             }
 
+        override suspend fun getAllDone(): List<ChapterSummaryEntity> =
+            rows.values.filter { it.status == ChapterSummaryEntity.STATUS_DONE }
+
         override suspend fun upsert(unit: ChapterSummaryEntity) {
             rows[Triple(unit.bookId, unit.lang, unit.unitIndex)] = unit
         }

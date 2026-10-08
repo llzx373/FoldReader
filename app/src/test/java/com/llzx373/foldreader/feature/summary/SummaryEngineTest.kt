@@ -60,6 +60,9 @@ class SummaryEngineTest {
                 .filter { it.bookId == bookId && it.lang == lang && it.status == ChapterSummaryEntity.STATUS_DONE }
                 .sortedBy { it.unitIndex }
 
+        override suspend fun getAllDone(): List<ChapterSummaryEntity> =
+            rows.values.filter { it.status == ChapterSummaryEntity.STATUS_DONE }
+
         override suspend fun upsert(unit: ChapterSummaryEntity) {
             rows[Triple(unit.bookId, unit.lang, unit.unitIndex)] = unit
         }
@@ -89,6 +92,8 @@ class SummaryEngineTest {
             flowOf(rows[bookId to lang])
 
         override suspend fun get(bookId: Long, lang: String): BookOutlineEntity? = rows[bookId to lang]
+
+        override suspend fun getAll(): List<BookOutlineEntity> = rows.values.toList()
 
         override suspend fun upsert(outline: BookOutlineEntity) {
             rows[outline.bookId to outline.lang] = outline
