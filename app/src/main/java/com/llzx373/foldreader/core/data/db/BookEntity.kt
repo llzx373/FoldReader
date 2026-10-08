@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.llzx373.foldreader.core.comic.ComicContainer
 
-enum class BookFormat { TXT, EPUB, FB2, COMIC, PDF }
+enum class BookFormat { TXT, EPUB, FB2, COMIC, PDF, MARKDOWN, DOCX, HTML }
 
 enum class BookSource { IMPORT, EXTERNAL }
 

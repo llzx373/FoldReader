@@ -196,6 +196,14 @@ dependencies {
     implementation(libs.androidx.pdf.core)
     implementation(libs.androidx.pdf.document.service)
     implementation(libs.pdfbox.android)
+    // 办公/网页文档只读支持：DOCX→HTML（mammoth）+ HTML 消毒（jsoup）+ Markdown AST（commonmark）
+    implementation(libs.jsoup)
+    implementation(libs.java.mammoth)
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.gfm.tables)
+    implementation(libs.commonmark.gfm.strikethrough)
+    implementation(libs.commonmark.autolink)
+    implementation(libs.commonmark.task.list.items)
     // AI 底座（M14）：OkHttp 传输与 SSE 流式 + 请求/响应 JSON
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

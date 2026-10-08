@@ -45,6 +45,14 @@ okhttp = "4.12.0"
 # det/rec/YOLO-seg 推理不需要新特性；若将来需要再换线并重新过评审。
 onnxruntime = "1.18.0"
 kotlinxSerializationJson = "1.8.1"
+# 办公/网页文档只读支持（DOCX/HTML/Markdown）：
+# jsoup 负责松散 HTML 的容错解析与消毒（DOCX 转换产物与 HTML 书共用）；
+# java-mammoth 负责 DOCX→HTML（Fossify 的 fork 未发布到 Maven Central，
+# 用上游 org.zwobble.mammoth 同基线 1.12.x 补丁版，包名一致、API 兼容）；
+# commonmark 负责 Markdown 解析，渲染层遍历 AST 直出 Compose（不经 HTML/WebView）。
+jsoup = "1.23.2"
+javaMammoth = "1.12.2"
+commonmark = "0.30.0"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
 # tools/cleaner 的 material3。CMP 1.12.0 弃用了 compose.material3 访问器，
@@ -100,6 +108,14 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+# 办公/网页文档只读支持
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+java-mammoth = { group = "org.zwobble.mammoth", name = "mammoth", version.ref = "javaMammoth" }
+commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
+commonmark-gfm-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-gfm-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
+commonmark-autolink = { group = "org.commonmark", name = "commonmark-ext-autolink", version.ref = "commonmark" }
+commonmark-task-list-items = { group = "org.commonmark", name = "commonmark-ext-task-list-items", version.ref = "commonmark" }
 # OCR 引擎（M21）
 onnxruntime-mobile = { group = "com.microsoft.onnxruntime", name = "onnxruntime-mobile", version.ref = "onnxruntime" }
 # 桌面清理工具（tools/cleaner）
