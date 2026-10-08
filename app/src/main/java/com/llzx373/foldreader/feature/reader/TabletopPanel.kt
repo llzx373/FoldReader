@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -82,6 +83,14 @@ fun TabletopPanel(
     onCycleAutoPageMode: () -> Unit,
     onCycleAutoPageSpeed: () -> Unit,
     onTogglePanelOff: (Boolean) -> Unit,
+    tab: TabletopTab,
+    onSelectTab: (TabletopTab) -> Unit,
+    /**
+     * 非控制页签的内容插槽（M33：目录 / 批注 / 术语表），由阅读器宿主提供——
+     * 那些数据（章节、人物、标注、术语）都在 ReaderViewModel / 容器侧。
+     * ColumnScope 接收者让插槽内容可以用 weight 吃满剩余高度。
+     */
+    panelContent: @Composable ColumnScope.(TabletopTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val consumeTap = remember { MutableInteractionSource() }
@@ -115,102 +124,156 @@ fun TabletopPanel(
         contentColor = colors.text,
     ) {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-            var sliderFraction by remember { mutableStateOf(progressFraction) }
-            var sliderDragging by remember { mutableStateOf(false) }
-            LaunchedEffect(progressFraction) {
-                if (!sliderDragging) sliderFraction = progressFraction
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Slider(
-                    value = sliderFraction,
-                    onValueChange = {
-                        sliderDragging = true
-                        sliderFraction = it
-                    },
-                    onValueChangeFinished = {
-                        sliderDragging = false
-                        onSeekFraction(sliderFraction)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = formatPercent(sliderFraction),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(start = 10.dp),
-                )
-            }
             ButtonGroup(
                 overflowIndicator = {},
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                clickableItem(onClick = onPrevChapter, label = "上一章")
-                clickableItem(onClick = onPrevPage, label = "上一页", weight = 1f)
-                clickableItem(onClick = onNextPage, label = "下一页", weight = 1f)
-                clickableItem(onClick = onNextChapter, label = "下一章")
+                TabletopTab.entries.forEach { entry ->
+                    toggleableItem(
+                        checked = tab == entry,
+                        label = entry.label,
+                        onCheckedChange = { on -> if (on) onSelectTab(entry) },
+                        weight = 1f)
+                }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("字号", style = MaterialTheme.typography.labelMedium)
-                TextButton(onClick = { onFontSizeDelta(-1f) }) { Text("A−") }
-                TextButton(onClick = { onFontSizeDelta(1f) }) { Text("A＋") }
+            when (tab) {
+                TabletopTab.CONTROLS -> TabletopControls(
+                    prefs = prefs,
+                    progressFraction = progressFraction,
+                    colors = colors,
+                    autoPageStatus = autoPageStatus,
+                    onPrevPage = onPrevPage,
+                    onNextPage = onNextPage,
+                    onSeekFraction = onSeekFraction,
+                    onPrevChapter = onPrevChapter,
+                    onNextChapter = onNextChapter,
+                    onSetBrightness = onSetBrightness,
+                    onFontSizeDelta = onFontSizeDelta,
+                    onToggleAutoPage = onToggleAutoPage,
+                    onCycleAutoPageMode = onCycleAutoPageMode,
+                    onCycleAutoPageSpeed = onCycleAutoPageSpeed,
+                    onTogglePanelOff = onTogglePanelOff,
+                )
+                else -> panelContent(tab)
+            }
+        }
+    }
+}
+
+/** 控制页签：M32 桌面面板的原有内容（进度 / 翻页 / 字号亮度 / 自动翻页 / 熄屏）。 */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun TabletopControls(
+    prefs: ReadingPreferences,
+    progressFraction: Float,
+    colors: ReaderColors,
+    autoPageStatus: AutoPageStatus,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onSeekFraction: (Float) -> Unit,
+    onPrevChapter: () -> Unit,
+    onNextChapter: () -> Unit,
+    onSetBrightness: (Float) -> Unit,
+    onFontSizeDelta: (Float) -> Unit,
+    onToggleAutoPage: (Boolean) -> Unit,
+    onCycleAutoPageMode: () -> Unit,
+    onCycleAutoPageSpeed: () -> Unit,
+    onTogglePanelOff: (Boolean) -> Unit,
+) {
+    var sliderFraction by remember { mutableStateOf(progressFraction) }
+    var sliderDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(progressFraction) {
+        if (!sliderDragging) sliderFraction = progressFraction
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Slider(
+            value = sliderFraction,
+            onValueChange = {
+                sliderDragging = true
+                sliderFraction = it
+            },
+            onValueChangeFinished = {
+                sliderDragging = false
+                onSeekFraction(sliderFraction)
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = formatPercent(sliderFraction),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(start = 10.dp),
+        )
+    }
+    ButtonGroup(
+        overflowIndicator = {},
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        clickableItem(onClick = onPrevChapter, label = "上一章")
+        clickableItem(onClick = onPrevPage, label = "上一页", weight = 1f)
+        clickableItem(onClick = onNextPage, label = "下一页", weight = 1f)
+        clickableItem(onClick = onNextChapter, label = "下一章")
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("字号", style = MaterialTheme.typography.labelMedium)
+        TextButton(onClick = { onFontSizeDelta(-1f) }) { Text("A−") }
+        TextButton(onClick = { onFontSizeDelta(1f) }) { Text("A＋") }
+        Text(
+            "亮度",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+        Slider(
+            value = if (prefs.readerBrightness < 0f) 0.5f else prefs.readerBrightness,
+            onValueChange = onSetBrightness,
+            valueRange = 0.05f..1f,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("自动翻页", style = MaterialTheme.typography.labelMedium)
+            Switch(
+                checked = prefs.autoPageEnabled,
+                onCheckedChange = onToggleAutoPage,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+            if (autoPageStatus.enabled) {
                 Text(
-                    "亮度",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = if (autoPageStatus.paused) "已暂停" else "运行中",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.accent,
                     modifier = Modifier.padding(start = 8.dp),
                 )
-                Slider(
-                    value = if (prefs.readerBrightness < 0f) 0.5f else prefs.readerBrightness,
-                    onValueChange = onSetBrightness,
-                    valueRange = 0.05f..1f,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp),
-                )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("自动翻页", style = MaterialTheme.typography.labelMedium)
-                    Switch(
-                        checked = prefs.autoPageEnabled,
-                        onCheckedChange = onToggleAutoPage,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                    if (autoPageStatus.enabled) {
-                        Text(
-                            text = if (autoPageStatus.paused) "已暂停" else "运行中",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.accent,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("面板熄屏", style = MaterialTheme.typography.labelMedium)
-                    Switch(
-                        checked = prefs.panelScreenOff,
-                        onCheckedChange = onTogglePanelOff,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("面板熄屏", style = MaterialTheme.typography.labelMedium)
+            Switch(
+                checked = prefs.panelScreenOff,
+                onCheckedChange = onTogglePanelOff,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+    }
+    if (prefs.autoPageEnabled) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            TextButton(onClick = onCycleAutoPageMode) {
+                Text("模式：${autoPageModeLabel(prefs.autoPageMode)}")
             }
-            if (prefs.autoPageEnabled) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    TextButton(onClick = onCycleAutoPageMode) {
-                        Text("模式：${autoPageModeLabel(prefs.autoPageMode)}")
-                    }
-                    TextButton(onClick = onCycleAutoPageSpeed) {
-                        Text("速度：${autoPageSpeedLabel(prefs)}")
-                    }
-                }
+            TextButton(onClick = onCycleAutoPageSpeed) {
+                Text("速度：${autoPageSpeedLabel(prefs)}")
             }
         }
     }

@@ -53,6 +53,33 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun GlossaryDialog(onDismiss: () -> Unit, seriesKey: String? = null) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("术语表") },
+        text = {
+            GlossaryContent(
+                seriesKey = seriesKey,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
+}
+
+/**
+ * 术语表内容（M33 从 [GlossaryDialog] 抽出）：设置页对话框与桌面模式下半屏面板共用。
+ *
+ * [pinnedBookId] 非空时（桌面模式面板，当前书上下文现成）：单书表锁定该书——
+ * 选书清单强制含它、隐藏切换行、默认页签落在单书表，并照常触发人物候选生成。
+ */
+@Composable
+fun GlossaryContent(
+    modifier: Modifier = Modifier,
+    seriesKey: String? = null,
+    pinnedBookId: Long? = null,
+) {
     val context = LocalContext.current
     val container = remember(context) {
         (context.applicationContext as? FoldReaderApplication)?.container
@@ -60,7 +87,9 @@ fun GlossaryDialog(onDismiss: () -> Unit, seriesKey: String? = null) {
     val dao = container.database.glossaryTermDao()
     val scope = rememberCoroutineScope()
 
-    var tab by remember { mutableStateOf(GlossaryTab.CANDIDATES) }
+    var tab by remember {
+        mutableStateOf(if (pinnedBookId != null) GlossaryTab.BOOK else GlossaryTab.CANDIDATES)
+    }
     val unconfirmed by dao.observeUnconfirmed().collectAsState(initial = emptyList())
     val globalTerms by dao.observeFor(GlossaryTermEntity.SCOPE_GLOBAL, "")
         .collectAsState(initial = emptyList())
@@ -68,13 +97,14 @@ fun GlossaryDialog(onDismiss: () -> Unit, seriesKey: String? = null) {
     val shelfBooks by container.bookshelfRepository.observeBookshelf()
         .collectAsState(initial = emptyList())
 
-    // 单书表：从全表取 book 行的 ownerKey 去重作为选书清单
-    val bookOwnerKeys = remember(allTerms) {
-        allTerms.filter { it.scope == GlossaryTermEntity.SCOPE_BOOK }
+    // 单书表：从全表取 book 行的 ownerKey 去重作为选书清单；锁定书强制在列
+    val bookOwnerKeys = remember(allTerms, pinnedBookId) {
+        val fromRows = allTerms.filter { it.scope == GlossaryTermEntity.SCOPE_BOOK }
             .map { it.ownerKey }.distinct()
+        (listOfNotNull(pinnedBookId?.toString()) + fromRows).distinct()
     }
     var selectedBookKey by remember { mutableStateOf<String?>(null) }
-    val effectiveBookKey = selectedBookKey ?: bookOwnerKeys.firstOrNull()
+    val effectiveBookKey = pinnedBookId?.toString() ?: selectedBookKey ?: bookOwnerKeys.firstOrNull()
     val bookTerms = remember(allTerms, effectiveBookKey) {
         allTerms.filter {
             it.scope == GlossaryTermEntity.SCOPE_BOOK && it.ownerKey == effectiveBookKey
@@ -123,112 +153,104 @@ fun GlossaryDialog(onDismiss: () -> Unit, seriesKey: String? = null) {
     var editingTarget by remember { mutableStateOf<GlossaryTermEntity?>(null) }
     var targetInput by remember { mutableStateOf("") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("术语表") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    visibleTabs.forEachIndexed { index, entry ->
-                        SegmentedButton(
-                            selected = effectiveTab == entry,
-                            onClick = { tab = entry },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = visibleTabs.size,
-                            ),
-                        ) { Text(entry.label) }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                when (effectiveTab) {
-                    GlossaryTab.CANDIDATES -> CandidatesPane(
-                        unconfirmed = unconfirmed,
-                        bookTitles = bookTitles,
-                        onConfirm = { term ->
-                            if (term.target.isBlank()) {
-                                targetInput = ""
-                                editingTarget = term
-                            } else {
-                                scope.launch { dao.setConfirmed(term.id, confirmed = true) }
-                            }
-                        },
-                        onReject = { term -> scope.launch { dao.delete(term.id) } },
-                    )
-
-                    GlossaryTab.GLOBAL -> TermListPane(
-                        terms = globalTerms,
-                        onDelete = { term -> scope.launch { dao.delete(term.id) } },
-                        onAdd = { source, target ->
-                            scope.launch {
-                                dao.upsert(
-                                    GlossaryTermEntity(
-                                        scope = GlossaryTermEntity.SCOPE_GLOBAL,
-                                        ownerKey = "",
-                                        source = source.trim(),
-                                        target = target.trim(),
-                                        origin = GlossaryTermEntity.ORIGIN_USER,
-                                        confirmed = true,
-                                    ),
-                                )
-                            }
-                        },
-                    )
-
-                    GlossaryTab.SERIES -> SeriesPane(
-                        seriesKeys = seriesKeys,
-                        pinned = seriesKey != null,
-                        selectedKey = effectiveSeriesKey,
-                        onSelect = { selectedSeriesKey = it },
-                        terms = seriesTerms,
-                        onDelete = { term -> scope.launch { dao.delete(term.id) } },
-                        onAdd = add@{ source, target ->
-                            val key = effectiveSeriesKey ?: return@add
-                            scope.launch {
-                                dao.upsert(
-                                    GlossaryTermEntity(
-                                        scope = GlossaryTermEntity.SCOPE_SERIES,
-                                        ownerKey = key,
-                                        source = source.trim(),
-                                        target = target.trim(),
-                                        origin = GlossaryTermEntity.ORIGIN_USER,
-                                        confirmed = true,
-                                    ),
-                                )
-                            }
-                        },
-                    )
-
-                    GlossaryTab.BOOK -> BookPane(
-                        bookOwnerKeys = bookOwnerKeys,
-                        bookTitles = bookTitles,
-                        selectedKey = effectiveBookKey,
-                        onSelect = { selectedBookKey = it },
-                        terms = bookTerms,
-                        onDelete = { term -> scope.launch { dao.delete(term.id) } },
-                        onAdd = add@{ source, target ->
-                            val key = effectiveBookKey ?: return@add
-                            scope.launch {
-                                dao.upsert(
-                                    GlossaryTermEntity(
-                                        scope = GlossaryTermEntity.SCOPE_BOOK,
-                                        ownerKey = key,
-                                        source = source.trim(),
-                                        target = target.trim(),
-                                        origin = GlossaryTermEntity.ORIGIN_USER,
-                                        confirmed = true,
-                                    ),
-                                )
-                            }
-                        },
-                    )
-                }
+    Column(modifier = modifier) {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            visibleTabs.forEachIndexed { index, entry ->
+                SegmentedButton(
+                    selected = effectiveTab == entry,
+                    onClick = { tab = entry },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = visibleTabs.size,
+                    ),
+                ) { Text(entry.label) }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        when (effectiveTab) {
+            GlossaryTab.CANDIDATES -> CandidatesPane(
+                unconfirmed = unconfirmed,
+                bookTitles = bookTitles,
+                onConfirm = { term ->
+                    if (term.target.isBlank()) {
+                        targetInput = ""
+                        editingTarget = term
+                    } else {
+                        scope.launch { dao.setConfirmed(term.id, confirmed = true) }
+                    }
+                },
+                onReject = { term -> scope.launch { dao.delete(term.id) } },
+            )
+
+            GlossaryTab.GLOBAL -> TermListPane(
+                terms = globalTerms,
+                onDelete = { term -> scope.launch { dao.delete(term.id) } },
+                onAdd = { source, target ->
+                    scope.launch {
+                        dao.upsert(
+                            GlossaryTermEntity(
+                                scope = GlossaryTermEntity.SCOPE_GLOBAL,
+                                ownerKey = "",
+                                source = source.trim(),
+                                target = target.trim(),
+                                origin = GlossaryTermEntity.ORIGIN_USER,
+                                confirmed = true,
+                            ),
+                        )
+                    }
+                },
+            )
+
+            GlossaryTab.SERIES -> SeriesPane(
+                seriesKeys = seriesKeys,
+                pinned = seriesKey != null,
+                selectedKey = effectiveSeriesKey,
+                onSelect = { selectedSeriesKey = it },
+                terms = seriesTerms,
+                onDelete = { term -> scope.launch { dao.delete(term.id) } },
+                onAdd = add@{ source, target ->
+                    val key = effectiveSeriesKey ?: return@add
+                    scope.launch {
+                        dao.upsert(
+                            GlossaryTermEntity(
+                                scope = GlossaryTermEntity.SCOPE_SERIES,
+                                ownerKey = key,
+                                source = source.trim(),
+                                target = target.trim(),
+                                origin = GlossaryTermEntity.ORIGIN_USER,
+                                confirmed = true,
+                            ),
+                        )
+                    }
+                },
+            )
+
+            GlossaryTab.BOOK -> BookPane(
+                bookOwnerKeys = bookOwnerKeys,
+                bookTitles = bookTitles,
+                pinned = pinnedBookId != null,
+                selectedKey = effectiveBookKey,
+                onSelect = { selectedBookKey = it },
+                terms = bookTerms,
+                onDelete = { term -> scope.launch { dao.delete(term.id) } },
+                onAdd = add@{ source, target ->
+                    val key = effectiveBookKey ?: return@add
+                    scope.launch {
+                        dao.upsert(
+                            GlossaryTermEntity(
+                                scope = GlossaryTermEntity.SCOPE_BOOK,
+                                ownerKey = key,
+                                source = source.trim(),
+                                target = target.trim(),
+                                origin = GlossaryTermEntity.ORIGIN_USER,
+                                confirmed = true,
+                            ),
+                        )
+                    }
+                },
+            )
+        }
+    }
 
     // 空译法候选确认前补填译法
     editingTarget?.let { term ->
@@ -402,11 +424,12 @@ private fun TermListPane(
     }
 }
 
-/** 单书分区：选书 + 词条维护；选书清单来自已有 book 行（含候选）。 */
+/** 单书分区：选书 + 词条维护；选书清单来自已有 book 行（含候选）。[pinned] = true 时锁定当前书，不显示切换行。 */
 @Composable
 private fun BookPane(
     bookOwnerKeys: List<String>,
     bookTitles: Map<String, String>,
+    pinned: Boolean,
     selectedKey: String?,
     onSelect: (String) -> Unit,
     terms: List<GlossaryTermEntity>,
@@ -422,18 +445,20 @@ private fun BookPane(
         return
     }
     Column {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        ) {
-            bookOwnerKeys.forEach { key ->
-                val label = bookTitles[key] ?: "书 #$key"
-                TextButton(onClick = { onSelect(key) }) {
-                    Text(
-                        text = if (key == selectedKey) "【$label】" else label,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
+        if (!pinned) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                bookOwnerKeys.forEach { key ->
+                    val label = bookTitles[key] ?: "书 #$key"
+                    TextButton(onClick = { onSelect(key) }) {
+                        Text(
+                            text = if (key == selectedKey) "【$label】" else label,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }

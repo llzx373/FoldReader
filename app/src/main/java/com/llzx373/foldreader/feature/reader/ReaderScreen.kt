@@ -1771,6 +1771,8 @@ fun ReaderScreen(
         if (tabletop != null && !uiState.loading && uiState.error == null) {
             // 在可见性判断内订阅：不可见时不读，也就不会被阅读位置变化牵连
             val position by viewModel.readingPosition.collectAsState()
+            // M33：面板页签由 ViewModel 持有（面板随姿态拆装，remember 存不住）
+            val tabletopTab by viewModel.tabletopTab.collectAsState()
             TabletopDivider(
                 colors = colors,
                 modifier = Modifier
@@ -1804,6 +1806,52 @@ fun ReaderScreen(
                     }
                 },
                 onTogglePanelOff = viewModel::setPanelScreenOff,
+                tab = tabletopTab,
+                onSelectTab = viewModel::setTabletopTab,
+                panelContent = { panelTab ->
+                    // 「上边读下边查」（M33）：目录 / 批注 / 术语表复用对话框同一套内容组件
+                    when (panelTab) {
+                        TabletopTab.CATALOG -> {
+                            // 只在该页签可见时收集人物索引（ViewModel 侧 WhileSubscribed 随之启停）
+                            val persons by viewModel.personAppearances.collectAsState()
+                            ChapterListContent(
+                                chapters = viewModel.chapterList(),
+                                persons = persons,
+                                currentIndex = position.chapterIndex,
+                                remainingText = viewModel.remainingTimeText(),
+                                colors = colors,
+                                onSelect = { index ->
+                                    scope.launch {
+                                        viewModel.chapterAt(index)?.let { viewModel.seekToOffset(it.charStart) }
+                                        if (scrollMode) viewModel.enterScrollMode()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                listHeight = null,
+                            )
+                        }
+                        TabletopTab.ANNOTATIONS -> AnnotationListContent(
+                            annotations = annotations,
+                            chapters = viewModel.chapterList(),
+                            shiftedIds = shiftedAnnotationIds,
+                            colors = colors,
+                            onJump = { ann ->
+                                scope.launch {
+                                    viewModel.seekToOffset(ann.startCharOffset)
+                                    if (scrollMode) viewModel.enterScrollMode()
+                                }
+                            },
+                            onEdit = { ann -> editingAnnotation = ann },
+                            modifier = Modifier.weight(1f),
+                            listHeight = null,
+                        )
+                        TabletopTab.GLOSSARY -> com.llzx373.foldreader.feature.settings.GlossaryContent(
+                            pinnedBookId = bookId,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TabletopTab.CONTROLS -> Unit
+                    }
+                },
                 modifier = Modifier
                     .offset { IntOffset(0, tabletop.panel.top.roundToInt()) }
                     .fillMaxWidth()

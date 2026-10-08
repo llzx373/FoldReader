@@ -2751,6 +2751,17 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * 桌面模式下半屏面板的当前页签（M33）。面板随姿态变化整个拆装，remember 存不住，
+     * 故放 ViewModel（会话级记忆：竖起再放下回到上次页签；换书因 ViewModel 按键而不同）。
+     */
+    private val _tabletopTab = MutableStateFlow(TabletopTab.CONTROLS)
+    val tabletopTab: StateFlow<TabletopTab> = _tabletopTab.asStateFlow()
+
+    fun setTabletopTab(tab: TabletopTab) {
+        _tabletopTab.value = tab
+    }
+
     fun setFontSize(sizeSp: Float) {
         viewModelScope.launch {
             bookPrefsRepository.update(bookId) { it.copy(fontSizeSp = sizeSp) }

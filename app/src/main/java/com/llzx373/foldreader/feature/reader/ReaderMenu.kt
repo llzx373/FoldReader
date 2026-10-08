@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.FoldReaderApplication
 import com.llzx373.foldreader.core.data.db.BookEntity
@@ -674,7 +675,205 @@ fun ReaderMenuPanel(
     }
 }
 
+/**
+ * 目录/人物列表内容（M33 从 [ChapterListDialog] 抽出）：对话框与桌面模式下半屏
+ * 面板共用。[listHeight] 传 null 时列表吃满父级剩余高度（面板用法），否则固定高度
+ * （对话框用法）。[onTabChange] 在目录/人物页签切换时回调，供宿主同步标题。
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ChapterListContent(
+    chapters: List<Chapter>,
+    persons: List<PersonAppearanceEntity>,
+    currentIndex: Int,
+    remainingText: String?,
+    colors: ReaderColors,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    listHeight: Dp? = 360.dp,
+    onTabChange: ((Boolean) -> Unit)? = null,
+    /** M19：每章的翻译状态标签（null = 不显示），下标与 [chapters] 对齐。 */
+    chapterStatus: List<String?> = emptyList(),
+    /** M19：该章是否可点「重译」（存在已译/失败单位），下标与 [chapters] 对齐。 */
+    chapterRetranslatable: List<Boolean> = emptyList(),
+    onRetranslateChapter: ((Int) -> Unit)? = null,
+    /** M29：每章的摘要状态（下标与 [chapters] 对齐）。 */
+    chapterSummary: List<com.llzx373.foldreader.feature.summary.ChapterSummaryRow> = emptyList(),
+    onViewSummary: ((Int) -> Unit)? = null,
+    onGenerateSummary: ((Int) -> Unit)? = null,
+    /** M29：全书大纲入口（null = 不给）。 */
+    onOpenOutline: (() -> Unit)? = null,
+) {
+    var showPersons by remember { mutableStateOf(false) }
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ButtonGroup(
+                overflowIndicator = {},
+                modifier = Modifier.weight(1f),
+            ) {
+                toggleableItem(
+                    checked = !showPersons,
+                    label = "目录",
+                    onCheckedChange = {
+                        showPersons = false
+                        onTabChange?.invoke(false)
+                    },
+                    weight = 1f)
+                toggleableItem(
+                    checked = showPersons,
+                    label = "人物",
+                    onCheckedChange = {
+                        showPersons = true
+                        onTabChange?.invoke(true)
+                    },
+                    weight = 1f)
+            }
+            if (onOpenOutline != null) {
+                TextButton(onClick = onOpenOutline) { Text("全书大纲") }
+            }
+        }
+        if (remainingText != null && !showPersons) {
+            Text(
+                text = remainingText,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.accent,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+        val listModifier = if (listHeight != null) Modifier.height(listHeight) else Modifier.weight(1f)
+        if (showPersons) {
+            if (persons.isEmpty()) {
+                Text(
+                    text = "未识别到人物",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            } else {
+                LazyColumn(modifier = listModifier) {
+                    itemsIndexed(persons) { _, person ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(person.firstChapterIndex) }
+                                .padding(vertical = 10.dp),
+                        ) {
+                            Text(
+                                text = "${person.name} · 出场 ${person.mentionCount} 次",
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                            )
+                            chapters.getOrNull(person.firstChapterIndex)?.let { chapter ->
+                                Text(
+                                    text = "首出场：${chapter.title}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.accent,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (chapters.size <= 1) {
+            Column {
+                Text(
+                    text = "未识别到章节，可用进度条跳转",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+                // M15：仅 TXT + AI 已配置时渲染（组件内部自查，produceState 缓存判据）
+                ReaderChapterRuleAiEntry()
+            }
+        } else {
+            val listState = rememberLazyListState()
+            LaunchedEffect(Unit) {
+                listState.scrollToItem(currentIndex.coerceIn(0, chapters.lastIndex))
+            }
+            LazyColumn(state = listState, modifier = listModifier) {
+                itemsIndexed(chapters) { index, chapter ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(index) }
+                            .padding(
+                                // 目录层级缩进：合并型 EPUB（一个 zip 塞多本书）靠它区分书名与章节。
+                                // 封顶 4 级，免得对话框宽度被吃光。
+                                start = (CHAPTER_INDENT_DP * chapter.depth.coerceAtMost(4)).dp,
+                                top = 10.dp,
+                                bottom = 10.dp,
+                            ),
+                    ) {
+                        Text(
+                            text = chapter.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (index == currentIndex) colors.accent else Color.Unspecified,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f),
+                        )
+                        chapterStatus.getOrNull(index)?.let { status ->
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.accent,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                        if (onRetranslateChapter != null &&
+                            chapterRetranslatable.getOrNull(index) == true
+                        ) {
+                            Text(
+                                text = "重译",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.accent,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .clickable { onRetranslateChapter(index) }
+                                    .padding(start = 8.dp),
+                            )
+                        }
+                        // M29：摘要状态与查看 / 生成入口（与翻译状态同排展示）
+                        chapterSummary.getOrNull(index)?.let { summaryRow ->
+                            summaryRow.label?.let { label ->
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.accent,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                            if (onViewSummary != null && summaryRow.viewable) {
+                                Text(
+                                    text = "摘要",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.accent,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .clickable { onViewSummary(index) }
+                                        .padding(start = 8.dp),
+                                )
+                            }
+                            if (onGenerateSummary != null && summaryRow.generatable) {
+                                Text(
+                                    text = "生成摘要",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.accent,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .clickable { onGenerateSummary(index) }
+                                        .padding(start = 8.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ChapterListDialog(
     chapters: List<Chapter>,
@@ -703,177 +902,24 @@ fun ChapterListDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("关闭") }
         },
-        title = {
-            Column {
-                Text(if (showPersons) "人物" else "目录")
-                ButtonGroup(
-                    overflowIndicator = {},
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                ) {
-                    toggleableItem(
-                        checked = !showPersons,
-                        label = "目录",
-                        onCheckedChange = { showPersons = false },
-                        weight = 1f)
-                    toggleableItem(
-                        checked = showPersons,
-                        label = "人物",
-                        onCheckedChange = { showPersons = true },
-                        weight = 1f)
-                }
-                if (onOpenOutline != null) {
-                    TextButton(
-                        onClick = onOpenOutline,
-                        modifier = Modifier
-                            .align(Alignment.End)
-                            .padding(top = 4.dp),
-                    ) { Text("全书大纲") }
-                }
-            }
-        },
+        title = { Text(if (showPersons) "人物" else "目录") },
         text = {
-            Column {
-                if (remainingText != null && !showPersons) {
-                    Text(
-                        text = remainingText,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.accent,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                }
-                if (showPersons) {
-                    if (persons.isEmpty()) {
-                        Text(
-                            text = "未识别到人物",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 16.dp),
-                        )
-                    } else {
-                        LazyColumn(modifier = Modifier.height(360.dp)) {
-                            itemsIndexed(persons) { _, person ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onSelect(person.firstChapterIndex) }
-                                        .padding(vertical = 10.dp),
-                                ) {
-                                    Text(
-                                        text = "${person.name} · 出场 ${person.mentionCount} 次",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                    )
-                                    chapters.getOrNull(person.firstChapterIndex)?.let { chapter ->
-                                        Text(
-                                            text = "首出场：${chapter.title}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = colors.accent,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if (chapters.size <= 1) {
-                    Column {
-                        Text(
-                            text = "未识别到章节，可用进度条跳转",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 16.dp),
-                        )
-                        // M15：仅 TXT + AI 已配置时渲染（组件内部自查，produceState 缓存判据）
-                        ReaderChapterRuleAiEntry()
-                    }
-                } else {
-                    val listState = rememberLazyListState()
-                    LaunchedEffect(Unit) {
-                        listState.scrollToItem(currentIndex.coerceIn(0, chapters.lastIndex))
-                    }
-                    LazyColumn(state = listState, modifier = Modifier.height(360.dp)) {
-                        itemsIndexed(chapters) { index, chapter ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSelect(index) }
-                                    .padding(
-                                        // 目录层级缩进：合并型 EPUB（一个 zip 塞多本书）靠它区分书名与章节。
-                                        // 封顶 4 级，免得对话框宽度被吃光。
-                                        start = (CHAPTER_INDENT_DP * chapter.depth.coerceAtMost(4)).dp,
-                                        top = 10.dp,
-                                        bottom = 10.dp,
-                                    ),
-                            ) {
-                                Text(
-                                    text = chapter.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (index == currentIndex) colors.accent else Color.Unspecified,
-                                    maxLines = 1,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                chapterStatus.getOrNull(index)?.let { status ->
-                                    Text(
-                                        text = status,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.accent,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(start = 8.dp),
-                                    )
-                                }
-                                if (onRetranslateChapter != null &&
-                                    chapterRetranslatable.getOrNull(index) == true
-                                ) {
-                                    Text(
-                                        text = "重译",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.accent,
-                                        maxLines = 1,
-                                        modifier = Modifier
-                                            .clickable { onRetranslateChapter(index) }
-                                            .padding(start = 8.dp),
-                                    )
-                                }
-                                // M29：摘要状态与查看 / 生成入口（与翻译状态同排展示）
-                                chapterSummary.getOrNull(index)?.let { summaryRow ->
-                                    summaryRow.label?.let { label ->
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.accent,
-                                            maxLines = 1,
-                                            modifier = Modifier.padding(start = 8.dp),
-                                        )
-                                    }
-                                    if (onViewSummary != null && summaryRow.viewable) {
-                                        Text(
-                                            text = "摘要",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.accent,
-                                            maxLines = 1,
-                                            modifier = Modifier
-                                                .clickable { onViewSummary(index) }
-                                                .padding(start = 8.dp),
-                                        )
-                                    }
-                                    if (onGenerateSummary != null && summaryRow.generatable) {
-                                        Text(
-                                            text = "生成摘要",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.accent,
-                                            maxLines = 1,
-                                            modifier = Modifier
-                                                .clickable { onGenerateSummary(index) }
-                                                .padding(start = 8.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            ChapterListContent(
+                chapters = chapters,
+                persons = persons,
+                currentIndex = currentIndex,
+                remainingText = remainingText,
+                colors = colors,
+                onSelect = onSelect,
+                onTabChange = { showPersons = it },
+                chapterStatus = chapterStatus,
+                chapterRetranslatable = chapterRetranslatable,
+                onRetranslateChapter = onRetranslateChapter,
+                chapterSummary = chapterSummary,
+                onViewSummary = onViewSummary,
+                onGenerateSummary = onGenerateSummary,
+                onOpenOutline = onOpenOutline,
+            )
         },
     )
 }

@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
 import com.llzx373.foldreader.core.format.Chapter
@@ -231,12 +232,6 @@ fun AnnotationListDialog(
     /** M27：非 null 时底部多一个「导出」入口（Markdown 另存为，选项由宿主对话框给）。 */
     onExport: (() -> Unit)? = null,
 ) {
-    // 排序对两种锚点都给对顺序：文本按字符偏移（pageIndex 恒 null），页式按页序号 + 页内纵向位置
-    val sorted = remember(annotations) {
-        annotations.sortedWith(
-            compareBy({ it.pageIndex ?: -1L }, { it.startCharOffset }, { it.regionY ?: 0f }),
-        )
-    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
@@ -250,43 +245,82 @@ fun AnnotationListDialog(
         },
         title = { Text("标注") },
         text = {
-            if (sorted.isEmpty()) {
-                Text(
-                    text = emptyText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 16.dp),
-                )
-            } else {
-                LazyColumn(modifier = Modifier.height(380.dp)) {
-                    var lastChapter = -1
-                    sorted.forEach { ann ->
-                        val chapterIndex = chapters.indexOfLast { ann.startCharOffset >= it.charStart }
-                            .coerceAtLeast(0)
-                        if (groupByChapter && chapterIndex != lastChapter) {
-                            lastChapter = chapterIndex
-                            item(key = "header-$chapterIndex-${ann.id}") {
-                                Text(
-                                    text = chapters.getOrNull(chapterIndex)?.title.orEmpty()
-                                        .ifEmpty { "正文" },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.accent,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                                )
-                            }
-                        }
-                        item(key = ann.id) {
-                            AnnotationRow(
-                                annotation = ann,
-                                shifted = ann.id in shiftedIds,
-                                onClick = { onJump(ann) },
-                                onLongClick = { onEdit(ann) },
+            AnnotationListContent(
+                annotations = annotations,
+                chapters = chapters,
+                shiftedIds = shiftedIds,
+                colors = colors,
+                onJump = onJump,
+                onEdit = onEdit,
+                groupByChapter = groupByChapter,
+                emptyText = emptyText,
+                listHeight = 380.dp,
+            )
+        },
+    )
+}
+
+/**
+ * 标注列表内容（M33 从 [AnnotationListDialog] 抽出）：对话框与桌面模式下半屏面板共用。
+ * [listHeight] 传 null 时列表吃满父级剩余高度（面板用法），否则固定高度（对话框用法）。
+ */
+@Composable
+fun AnnotationListContent(
+    annotations: List<AnnotationEntity>,
+    chapters: List<Chapter>,
+    shiftedIds: Set<Long>,
+    colors: ReaderColors,
+    onJump: (AnnotationEntity) -> Unit,
+    onEdit: (AnnotationEntity) -> Unit,
+    modifier: Modifier = Modifier,
+    groupByChapter: Boolean = true,
+    emptyText: String = "还没有划线，长按正文选中文字即可划线",
+    listHeight: Dp? = 380.dp,
+) {
+    // 排序对两种锚点都给对顺序：文本按字符偏移（pageIndex 恒 null），页式按页序号 + 页内纵向位置
+    val sorted = remember(annotations) {
+        annotations.sortedWith(
+            compareBy({ it.pageIndex ?: -1L }, { it.startCharOffset }, { it.regionY ?: 0f }),
+        )
+    }
+    Column(modifier = modifier) {
+        if (sorted.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+        } else {
+            val listModifier = if (listHeight != null) Modifier.height(listHeight) else Modifier.weight(1f)
+            LazyColumn(modifier = listModifier) {
+                var lastChapter = -1
+                sorted.forEach { ann ->
+                    val chapterIndex = chapters.indexOfLast { ann.startCharOffset >= it.charStart }
+                        .coerceAtLeast(0)
+                    if (groupByChapter && chapterIndex != lastChapter) {
+                        lastChapter = chapterIndex
+                        item(key = "header-$chapterIndex-${ann.id}") {
+                            Text(
+                                text = chapters.getOrNull(chapterIndex)?.title.orEmpty()
+                                    .ifEmpty { "正文" },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.accent,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
                             )
                         }
                     }
+                    item(key = ann.id) {
+                        AnnotationRow(
+                            annotation = ann,
+                            shifted = ann.id in shiftedIds,
+                            onClick = { onJump(ann) },
+                            onLongClick = { onEdit(ann) },
+                        )
+                    }
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

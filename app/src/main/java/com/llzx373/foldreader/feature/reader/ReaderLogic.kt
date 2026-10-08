@@ -123,6 +123,26 @@ data class TabletopLayout(
     val panel: ContentRect,
 )
 
+/**
+ * 桌面模式下半屏面板的标签页（M33）：[CONTROLS] 是原有的翻页/亮度/自动翻页控制，
+ * 其余三个是「上边读下边查」的查阅页。标签页选择由 ReaderViewModel 持有（面板随
+ * 姿态变化整个拆装，remember 存不住），顺序即面板上的展示顺序。
+ */
+enum class TabletopTab(val label: String) {
+    CONTROLS("控制"),
+    CATALOG("目录"),
+    ANNOTATIONS("批注"),
+    GLOSSARY("术语表"),
+}
+
+fun nextTabletopTab(tab: TabletopTab): TabletopTab {
+    val entries = TabletopTab.entries
+    return entries[(tab.ordinal + 1) % entries.size]
+}
+
+fun tabletopTabOrDefault(ordinal: Int): TabletopTab =
+    TabletopTab.entries.getOrElse(ordinal) { TabletopTab.CONTROLS }
+
 fun resolveTabletopLayout(
     posture: FoldingPosture,
     hingeLocal: Rect?,
