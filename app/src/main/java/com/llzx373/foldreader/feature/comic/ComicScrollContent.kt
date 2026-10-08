@@ -38,6 +38,8 @@ fun ComicScrollContent(
     /** 翻译覆盖层（M22 视角①）：按页序号取，无译文返回 null。 */
     translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation? = { null },
     translationTypeface: android.graphics.Typeface? = null,
+    /** 竖排默认（M31）：日漫 RTL 传 true，覆盖层译文默认竖排。 */
+    rtl: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -63,6 +65,7 @@ fun ComicScrollContent(
                     pageIndex = index,
                     translation = translationFor(index),
                     translationTypeface = translationTypeface,
+                    verticalText = rtl,
                     // 条漫里页是竖向连成一条的，「页内」坐标与屏幕坐标不是一套换算，暂不接受锚点手势；
                     // 但已有书签与高亮照常显示（它们用的是页内归一化坐标）
                     anchorsEnabled = false,

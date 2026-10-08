@@ -1189,6 +1189,7 @@ fun ComicReaderScreen(
                         host = anchorHost,
                         translationFor = translationFor,
                         translationTypeface = translationTypeface,
+                        rtl = rtl,
                         modifier = Modifier.fillMaxSize(),
                     )
                     return@Box
@@ -1214,6 +1215,7 @@ fun ComicReaderScreen(
                             host = anchorHost,
                             translationFor = translationFor,
                             translationTypeface = translationTypeface,
+                            verticalText = rtl,
                         )
                     } else {
                         ComicSpread(
@@ -1248,6 +1250,7 @@ fun ComicReaderScreen(
                                 host = anchorHost,
                                 translationFor = translationFor,
                                 translationTypeface = translationTypeface,
+                                verticalText = rtl,
                                 modifier = Modifier.graphicsLayer { translationX = animX.value },
                             )
                         } else {
@@ -1932,6 +1935,8 @@ private fun ComicCompareSpread(
     host: PageAnchorHost,
     translationFor: (Int) -> com.llzx373.foldreader.core.translate.ComicPageTranslation?,
     translationTypeface: android.graphics.Typeface?,
+    /** 竖排默认（M31）：日漫 RTL 传 true（只影响右侧译文那半页）。 */
+    verticalText: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1967,6 +1972,7 @@ private fun ComicCompareSpread(
                 host = host,
                 translation = translationFor(page),
                 translationTypeface = translationTypeface,
+                verticalText = verticalText,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -2017,6 +2023,7 @@ private fun BoxScope.ComicSpread(
             translation = pages.firstOrNull()?.let(translationFor),
             translationTypeface = translationTypeface,
             highlightBubble = highlightBubble,
+            verticalText = rtl,
             adjustMode = adjustMode,
             onBubbleAdjust = onBubbleAdjust,
             modifier = modifier.fillMaxSize(),
@@ -2036,6 +2043,7 @@ private fun BoxScope.ComicSpread(
                     translation = translationFor(pages[0]),
                     translationTypeface = translationTypeface,
                     highlightBubble = highlightBubble,
+                    verticalText = rtl,
                     adjustMode = adjustMode,
                     onBubbleAdjust = onBubbleAdjust,
                     modifier = modifier.fillMaxSize(),
@@ -2061,6 +2069,7 @@ private fun BoxScope.ComicSpread(
                                 translation = translationFor(pages[0]),
                                 translationTypeface = translationTypeface,
                                 highlightBubble = highlightBubble,
+                                verticalText = rtl,
                                 adjustMode = adjustMode,
                                 onBubbleAdjust = onBubbleAdjust,
                                 modifier = Modifier.fillMaxSize(),
@@ -2079,6 +2088,7 @@ private fun BoxScope.ComicSpread(
                                 translation = translationFor(pages[0]),
                                 translationTypeface = translationTypeface,
                                 highlightBubble = highlightBubble,
+                                verticalText = rtl,
                                 adjustMode = adjustMode,
                                 onBubbleAdjust = onBubbleAdjust,
                                 modifier = Modifier.fillMaxSize(),
@@ -2111,6 +2121,7 @@ private fun BoxScope.ComicSpread(
                         translation = translationFor(leftIndex),
                         translationTypeface = translationTypeface,
                         highlightBubble = highlightBubble,
+                        verticalText = rtl,
                         adjustMode = adjustMode,
                         onBubbleAdjust = onBubbleAdjust,
                         modifier = Modifier.fillMaxSize(),
@@ -2131,6 +2142,7 @@ private fun BoxScope.ComicSpread(
                         translation = translationFor(rightIndex),
                         translationTypeface = translationTypeface,
                         highlightBubble = highlightBubble,
+                        verticalText = rtl,
                         adjustMode = adjustMode,
                         onBubbleAdjust = onBubbleAdjust,
                         modifier = Modifier.fillMaxSize(),

@@ -109,6 +109,8 @@ fun ComicPageView(
     translationTypeface: Typeface? = null,
     /** 对照面板点中的气泡序号（画高亮边框）；-1 = 无。 */
     highlightBubble: Int = -1,
+    /** 竖排默认（M31）：日漫 RTL 传 true，覆盖层译文默认竖排（瘦长气泡无论方向都竖排）。 */
+    verticalText: Boolean = false,
     /**
      * 气泡位置微调模式（M23）：开 = 气泡画轮廓、可拖动移动 / 拖右下角手柄缩放，
      * 页内缩放与锚点手势停用（避免抢手势）。松手定型走 [onBubbleAdjust]。
@@ -394,6 +396,7 @@ fun ComicPageView(
                 translation = translation,
                 translationTypeface = translationTypeface,
                 highlightBubble = highlightBubble,
+                verticalText = verticalText,
                 adjustMode = adjustMode,
                 adjustIndex = adjustIndex,
                 adjustRect = adjustRect,
@@ -435,6 +438,8 @@ private fun PageContent(
     translation: ComicPageTranslation?,
     translationTypeface: Typeface?,
     highlightBubble: Int,
+    /** 竖排默认（M31）：日漫 RTL 传 true。 */
+    verticalText: Boolean,
     adjustMode: Boolean,
     adjustIndex: Int,
     adjustRect: OcrRect?,
@@ -475,6 +480,7 @@ private fun PageContent(
                             backgrounds = bubbleBackgrounds,
                             typeface = translationTypeface,
                             highlightBubble = highlightBubble,
+                            verticalText = verticalText,
                             // 拖动中：被拖气泡按预览矩形画底色与译文，松手才落盘
                             rectOverride = if (adjustIndex >= 0) adjustIndex to adjustRect else null,
                         )
@@ -766,6 +772,8 @@ private fun DrawScope.drawTranslationOverlay(
     backgrounds: IntArray,
     typeface: Typeface?,
     highlightBubble: Int,
+    /** 竖排默认（M31）：日漫 RTL 传入 true——气泡译文默认竖排；瘦长气泡（高>宽）无论方向都竖排。 */
+    verticalText: Boolean = false,
     /** 微调拖动预览：(气泡序号, 预览矩形)；该气泡按预览矩形绘制。 */
     rectOverride: Pair<Int, OcrRect?>? = null,
 ) {
@@ -809,23 +817,44 @@ private fun DrawScope.drawTranslationOverlay(
             borderPaint.strokeWidth = if (index == highlightBubble) 3f else 2f
             canvas.drawRoundRect(rectF, corner, corner, borderPaint)
         }
-        // 排版：纯逻辑折行与字号收缩，算出来的就是画出来的
-        val layout = BubbleRender.layout(
+        // 排版：纯逻辑折行/分列与字号收缩，算出来的就是画出来的。
+        // 竖排（M31）：日漫 RTL 默认竖排；高大于宽的瘦长气泡也竖排（横排塞不下几个字）。
+        val layout = BubbleRender.layoutAuto(
             text = text,
             rectWidth = w,
             rectHeight = h,
             maxFont = h * 0.5f,
+            rtl = verticalText,
         )
         textPaint.color = BubbleRender.textColorFor(bg)
         textPaint.textSize = layout.fontSize
-        val blockTop = top + (h - layout.textHeight) / 2f
-        layout.lines.forEachIndexed { lineIndex, line ->
-            canvas.drawText(
-                line,
-                (left + right) / 2f,
-                blockTop + lineIndex * layout.lineHeight + layout.fontSize * 0.85f,
-                textPaint,
-            )
+        if (layout.vertical) {
+            // 列从右往左排，列内自上而下逐字画；半角字符在竖排里仍直立画出
+            // （不做 90° 旋转——估算与绘制保持同一口径，偏差可预期）
+            layout.lines.forEachIndexed { columnIndex, column ->
+                val columnX = right - w * BubbleRender.INNER_PADDING -
+                    columnIndex * layout.lineHeight - layout.fontSize / 2f
+                var y = top + (h - layout.columnHeight(column)) / 2f
+                for (c in column) {
+                    canvas.drawText(
+                        c.toString(),
+                        columnX,
+                        y + layout.fontSize * 0.85f,
+                        textPaint,
+                    )
+                    y += BubbleRender.charEm(c) * layout.charAdvance
+                }
+            }
+        } else {
+            val blockTop = top + (h - layout.textHeight) / 2f
+            layout.lines.forEachIndexed { lineIndex, line ->
+                canvas.drawText(
+                    line,
+                    (left + right) / 2f,
+                    blockTop + lineIndex * layout.lineHeight + layout.fontSize * 0.85f,
+                    textPaint,
+                )
+            }
         }
     }
 }

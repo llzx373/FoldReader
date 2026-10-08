@@ -21,6 +21,12 @@ object BubbleRender {
     /** 行距倍数。 */
     const val LINE_SPACING = 1.15f
 
+    /** 竖排字距倍数（列内字符的纵向推进）。 */
+    const val VERTICAL_LETTER_SPACING = 1.06f
+
+    /** 竖排行距倍数（列与列的横向推进）。 */
+    const val VERTICAL_LINE_SPACING = 1.18f
+
     /** 字号下限（px，页图片坐标系）：再小就直接放弃收缩，用下限画出。 */
     const val MIN_FONT_PX = 8f
 
@@ -149,11 +155,125 @@ object BubbleRender {
         )
     }
 
+    /**
+     * 竖排判定（M31）：日漫 RTL 默认竖排（原文本就是竖排气泡）；
+     * 与方向无关地，**高大于宽**的瘦长气泡也竖排——那种气泡横排每行塞不下几个字。
+     */
+    fun preferVertical(rtl: Boolean, rectWidth: Float, rectHeight: Float): Boolean =
+        rtl || rectHeight > rectWidth
+
+    /**
+     * 竖排分列：每列按可用**高度**贪心装字，列满起新列；显式换行符强制换列。
+     * 单字超高也放行（由字号收缩兜底）。返回的每个元素是一列（自上而下）。
+     */
+    fun wrapColumns(text: String, fontSize: Float, maxHeight: Float): List<String> {
+        val advance = fontSize * VERTICAL_LETTER_SPACING
+        val columns = ArrayList<String>()
+        for (segment in text.split('\n')) {
+            val current = StringBuilder()
+            var height = 0f
+            for (c in segment) {
+                val h = charEm(c) * advance
+                if (current.isNotEmpty() && height + h > maxHeight) {
+                    columns += current.toString()
+                    current.clear()
+                    height = 0f
+                }
+                current.append(c)
+                height += h
+            }
+            if (current.isNotEmpty()) columns += current.toString()
+        }
+        if (columns.isEmpty()) columns += ""
+        return columns
+    }
+
+    /**
+     * 竖排字号自适应：找最大字号使「列数 × 列距 ≤ 可用宽度」
+     * （列内高度由分列时的可用高度保证）。找不到用 [minFont]。
+     */
+    fun fitFontSizeVertical(
+        text: String,
+        rectWidth: Float,
+        rectHeight: Float,
+        maxFont: Float,
+        minFont: Float = MIN_FONT_PX,
+    ): Float {
+        val usableW = rectWidth * (1f - INNER_PADDING * 2)
+        val usableH = rectHeight * (1f - INNER_PADDING * 2)
+        if (usableW <= 0f || usableH <= 0f) return minFont
+        val start = minOf(maxFont, usableW / VERTICAL_LINE_SPACING)
+        var size = start
+        while (size > minFont) {
+            val columns = wrapColumns(text, size, usableH)
+            if (columns.size * size * VERTICAL_LINE_SPACING <= usableW) return size
+            size -= 1f
+        }
+        return minFont
+    }
+
+    /**
+     * 竖排版式一次算好：[BubbleLayout.lines] 此时是**列**（自上而下、绘制从右往左排），
+     * [BubbleLayout.lineHeight] 是列的横向推进（含行距），字符纵向推进见
+     * [BubbleLayout.charAdvance]。
+     */
+    fun layoutVertical(
+        text: String,
+        rectWidth: Float,
+        rectHeight: Float,
+        maxFont: Float,
+        minFont: Float = MIN_FONT_PX,
+    ): BubbleLayout {
+        val font = fitFontSizeVertical(text, rectWidth, rectHeight, maxFont, minFont)
+        val usableH = rectHeight * (1f - INNER_PADDING * 2)
+        return BubbleLayout(
+            lines = wrapColumns(text, font, usableH),
+            fontSize = font,
+            lineHeight = font * VERTICAL_LINE_SPACING,
+            vertical = true,
+        )
+    }
+
+    /**
+     * 一次排版入口：按 [preferVertical] 选横排/竖排。
+     * [rtl] 即阅读方向（日漫 RTL → 默认竖排）。
+     */
+    fun layoutAuto(
+        text: String,
+        rectWidth: Float,
+        rectHeight: Float,
+        maxFont: Float,
+        minFont: Float = MIN_FONT_PX,
+        rtl: Boolean = false,
+    ): BubbleLayout =
+        if (preferVertical(rtl, rectWidth, rectHeight)) {
+            layoutVertical(text, rectWidth, rectHeight, maxFont, minFont)
+        } else {
+            layout(text, rectWidth, rectHeight, maxFont, minFont)
+        }
+
     data class BubbleLayout(
+        /** 横排 = 行（自上而下）；竖排 = 列（绘制从右往左排，每列自上而下）。 */
         val lines: List<String>,
         val fontSize: Float,
+        /** 横排 = 行高；竖排 = 列的横向推进（含行距）。 */
         val lineHeight: Float,
+        val vertical: Boolean = false,
     ) {
+        /** 横排总高。 */
         val textHeight: Float get() = ceil(lines.size * lineHeight)
+
+        /** 竖排总宽（列数 × 列距）。 */
+        val textWidth: Float get() = ceil(lines.size * lineHeight)
+
+        /** 竖排列内字符的纵向推进（含字距）。 */
+        val charAdvance: Float get() = fontSize * VERTICAL_LETTER_SPACING
+
+        /** 一列的纵向占用（按字符宽度估算逐字累加）。 */
+        fun columnHeight(column: String): Float =
+            column.sumOf { (charEm(it) * charAdvance).toDouble() }.toFloat()
+
+        /** 竖排最长列的高度（垂直居中用）。 */
+        val maxColumnHeight: Float get() = lines.maxOf { columnHeight(it) }
     }
 }
