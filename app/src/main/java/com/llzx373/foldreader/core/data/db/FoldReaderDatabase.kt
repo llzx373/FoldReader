@@ -26,8 +26,9 @@ import androidx.room.RoomDatabase
         TranslationEntity::class,
         GlossaryTermEntity::class,
         ComicPageTranslationEntity::class,
+        WordEntryEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {
@@ -44,4 +45,5 @@ abstract class FoldReaderDatabase : RoomDatabase() {
     abstract fun translationDao(): TranslationDao
     abstract fun glossaryTermDao(): GlossaryTermDao
     abstract fun comicPageTranslationDao(): ComicPageTranslationDao
+    abstract fun wordEntryDao(): WordEntryDao
 }

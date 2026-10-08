@@ -110,6 +110,29 @@ internal val MIGRATION_7_8 = object : Migration(7, 8) {
 }
 
 /**
+ * v9：新建生词本表 `vocabulary_entries`（M28）——词条 + 释义 + 上下文例句 + 来源书与位置，
+ * 随书级联删除；`source` 记释义来源（本地词典名或「AI」）。
+ */
+internal val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `vocabulary_entries` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`bookId` INTEGER NOT NULL, `word` TEXT NOT NULL, `definition` TEXT NOT NULL, " +
+                "`contextSentence` TEXT NOT NULL, `charOffset` INTEGER NOT NULL, " +
+                "`source` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vocabulary_entries_bookId` ON `vocabulary_entries` (`bookId`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vocabulary_entries_word` ON `vocabulary_entries` (`word`)",
+        )
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -119,4 +142,7 @@ internal val MIGRATION_7_8 = object : Migration(7, 8) {
  * 迁移只做结构变更；要动数据另起一条 Migration，并在上面补注释说明。
  */
 val DATABASE_MIGRATIONS: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+    arrayOf(
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+    )

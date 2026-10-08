@@ -533,4 +533,71 @@ class DatabaseMigrationTest {
             assertTrue(c.isNull(0))
         }
     }
+
+    /** 建一个 v8 形态的库（`books` 含一行老数据），之后手动跑 v8→v9 迁移。 */
+    private fun openV8(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(8) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v8 升到 v9 建生词本表且可写可查`() {
+        val migrated = openV8()
+
+        MIGRATION_8_9.migrate(migrated)
+
+        // 新表列结构与 Room 期望逐项一致
+        assertEquals(
+            listOf(
+                Column("id", "INTEGER", true, null),
+                Column("bookId", "INTEGER", true, null),
+                Column("word", "TEXT", true, null),
+                Column("definition", "TEXT", true, null),
+                Column("contextSentence", "TEXT", true, null),
+                Column("charOffset", "INTEGER", true, null),
+                Column("source", "TEXT", true, null),
+                Column("createdAt", "INTEGER", true, null),
+            ),
+            columns(migrated, "vocabulary_entries"),
+        )
+        // 外键级联的形状校验
+        migrated.query("PRAGMA foreign_key_list(`vocabulary_entries`)").use { c ->
+            assertTrue("缺外键", c.moveToFirst())
+            assertEquals("books", c.getString(2))
+            assertEquals("CASCADE", c.getString(6))
+        }
+        // bookId 与 word 两个索引
+        val indexNames = migrated.query("PRAGMA index_list(`vocabulary_entries`)").use { c ->
+            val names = ArrayList<String>()
+            while (c.moveToNext()) names += c.getString(1)
+            names
+        }
+        assertTrue(indexNames.contains("index_vocabulary_entries_bookId"))
+        assertTrue(indexNames.contains("index_vocabulary_entries_word"))
+        // 插入一条抽查可写
+        migrated.execSQL(
+            "INSERT INTO `vocabulary_entries` (`bookId`, `word`, `definition`, `contextSentence`, " +
+                "`charOffset`, `source`, `createdAt`) VALUES (7, 'apple', 'n. 苹果', 'an apple a day', 100, '牛津', 1)",
+        )
+        migrated.query(
+            "SELECT `word`, `source` FROM `vocabulary_entries` WHERE `bookId` = 7",
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("apple", c.getString(0))
+            assertEquals("牛津", c.getString(1))
+        }
+    }
 }
