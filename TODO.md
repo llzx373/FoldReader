@@ -225,11 +225,21 @@
 
 ---
 
-## M35 工程质量（P2，可随时插队，可并行）
+## M35 工程质量（P2，可随时插队，可并行）✅ 已完成（2026-10-09）
 
-- [ ] OCR GPU / NNAPI 后端：onnxruntime execution providers 评审（TODO 归档 v1 已列为后续优化；整卷漫画翻译 CPU 是瓶颈）
-- [ ] Baseline Profile + Macrobenchmark：开书 / 分页 / 翻页核心路径建基准防回归
-- [ ] TalkBack 无障碍审计：阅读器自定义绘制区域的语义树、选区播报、翻页播报
+- [x] OCR GPU / NNAPI 后端：onnxruntime execution providers 评审（TODO 归档 v1 已列为后续优化；整卷漫画翻译 CPU 是瓶颈）
+- [x] Baseline Profile + Macrobenchmark：开书 / 分页 / 翻页核心路径建基准防回归
+- [x] TalkBack 无障碍审计：阅读器自定义绘制区域的语义树、选区播报、翻页播报
+
+验收记录（2026-10-09）：
+
+- NNAPI 执行后端（提交 b32e91a）：onnxruntime-mobile 1.18.0 内置 NNAPI EP（javap 见 `SessionOptions.addNnapi()`，arm64 .so 含 NNAPI 符号）；`OcrEngine` / `InpaintEngine` 会话统一走 `createSession()`——开关开启优先 `addNnapi()`（不支持的算子由 ORT 自动拆回 CPU），注册失败记诊断日志回落纯 CPU。设置页新增「OCR 硬件加速（NNAPI）」开关**默认关**（驱动质量因设备而异，收益需真机实测），容器监听设置流变化经互斥锁作废现有会话重建。GPU EP 评审结论排除（需换 onnxruntime-android 全量包 53MB，与钉 mobile 线决策冲突）。评审文档 `docs/OCR推理后端评审.md`。偏好默认/读写 2 用例 + 3 处 SettingsRepository 测试桩补齐。
+- Baseline Profile（提交 1233306）：新增 `:baselineprofile` 模块（com.android.test + androidx.baselineprofile 1.5.0 生产端，jar 字节码核实声明支持 AGP 8.0–10.0）；app 应用消费端插件 + `benchmark` 构建类型（initWith release 同一份 R8 产物 + debug 签名 + profileable 清单）+ profileinstaller 依赖。生成器覆盖冷启动到书架 / 开书 / 翻页三条旅程；种子数据经 benchmark 变体特有的 `BenchmarkSeedReceiver` 广播造确定性 TXT（30 章 × 60 段，正式 release 包不含该 receiver）。生成与落库步骤写入 `docs/构建与打包.md` 第六节（需真机/模拟器，CI 门禁不涉及该模块）。
+- Macrobenchmark（提交 18837b5）：`ReadingBenchmarks`——冷启动到书架（StartupTimingMetric，COLD×8）、开书（FrameTimingMetric，种子书从书架点入）、翻页（FrameTimingMetric，连翻 10 页）；跑 app 的 liteBenchmark 变体，CompilationMode.Partial。数值随设备走、同机前后对比防回归，不设绝对阈值。
+- TalkBack 无障碍（提交 b52e919）：纯逻辑层 `feature/reader/ReaderA11y`（`Page.accessibilityText()` 整页正文拼装、`pagedPageDescription()` / `pagedSpreadDescription()` 页码与译文状态文案）。文本阅读器：跨页容器挂整页正文 contentDescription + liveRegion(Polite) 翻页自动播报 + 「上一页/下一页」自定义动作；滚动模式逐页挂正文语义；选区两个手柄补标签、选区落定经 `announceForAccessibility` 播报选中内容。漫画阅读器：页式容器挂页码/译文状态描述 + liveRegion + 翻页自定义动作；滚动条漫逐条目挂页码语义。书架网格项 mergeDescendants + 选中态 stateDescription。`ReaderA11yTest` 8 用例（纯 JVM）。
+- 顺带修复 lint 既有 error（均早于本里程碑存在，CI 门禁因此一直是红的）：SettingsScreen 两处 `SimpleDateFormat(…, Locale.getDefault())` 触发 NonObservableLocale → 改 `rememberLocale()`；FoldReaderApp 的 `preferences.map{}` 组合内调用触发 FlowOperatorInvokedInComposition → 提进 `remember`。
+- 测试：`testLiteDebugUnitTest` 全绿（本里程碑新增 10 用例：NNAPI 偏好 2 + ReaderA11y 8）；`assembleLiteDebug` 通过；`lintLiteDebug` 0 error（113 warnings 为既有存量，含 NewerVersionAvailable / UnusedResources 等）。
+- 真机待验：NNAPI 开/关整卷翻译耗时与结果一致性对比（`docs/OCR推理后端评审.md` 列了验收口径）；Baseline Profile 真机生成（`:app:generateLiteReleaseBaselineProfile`）与合并进 APK 后的启动收益；Macrobenchmark 三基准数值存档作为后续回归基线；TalkBack 实机播报效果（翻页播报与手势导航冲突、滚动模式逐页焦点顺序）。
 
 ---
 
