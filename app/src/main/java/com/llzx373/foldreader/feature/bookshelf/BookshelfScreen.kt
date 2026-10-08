@@ -104,6 +104,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -1461,7 +1462,13 @@ private fun BookGridItem(
     animatedVisibilityScope: AnimatedVisibilityScope?,
 ) {
     val book = item.book
-    Column {
+    // M35 TalkBack：封面（可点区）与下方标题/副标题合并成一个语义节点——
+    // 不合并的话封面是个无标签的裸可点区，标题又是另一个无动作的纯文本节点。
+    Column(
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            if (selectionMode) stateDescription = if (selected) "已选中" else "未选中"
+        },
+    ) {
         Box(
             modifier = Modifier.combinedClickable(
                 onClick = {

@@ -77,6 +77,12 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -106,6 +112,7 @@ import com.llzx373.foldreader.feature.reader.MiddleTapLayer
 import com.llzx373.foldreader.feature.reader.PageLayoutMode
 import com.llzx373.foldreader.feature.reader.SelectionActionBar
 import com.llzx373.foldreader.feature.reader.SpineOverlay
+import com.llzx373.foldreader.feature.reader.pagedSpreadDescription
 import com.llzx373.foldreader.feature.reader.SystemBarEffects
 import com.llzx373.foldreader.feature.reader.VolumeKeyDispatch
 import com.llzx373.foldreader.feature.reader.annotationColorPalette
@@ -1205,7 +1212,23 @@ fun ComicReaderScreen(
                         .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
                         .width(with(density) { contentRect.width.toDp() })
                         .height(with(density) { contentRect.height.toDp() })
-                        .clipToBounds(),
+                        .clipToBounds()
+                        // M35 TalkBack：漫画页是 Canvas 手绘，语义树里本无内容——
+                        // 容器挂页码 + 译文文本语义 + liveRegion（翻页即播报）+
+                        // 上一页/下一页自定义动作；翻页动画的覆盖层在内部，不进语义树
+                        // （ComicSpread/ComicCompareSpread 自身无语义，故不会重复）。
+                        .semantics {
+                            liveRegion = LiveRegionMode.Polite
+                            contentDescription = pagedSpreadDescription(
+                                viewModel.currentPages(),
+                                uiState.pageCount,
+                                translationFor,
+                            )
+                            customActions = listOf(
+                                CustomAccessibilityAction(label = "上一页") { turn(false); true },
+                                CustomAccessibilityAction(label = "下一页") { turn(true); true },
+                            )
+                        },
                 ) {
                     val currentPages = viewModel.currentPages()
                     if (compareActive) {

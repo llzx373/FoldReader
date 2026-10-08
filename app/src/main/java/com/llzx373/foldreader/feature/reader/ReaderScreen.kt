@@ -104,6 +104,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -247,6 +253,20 @@ fun ReaderScreen(
     }
     // 长按选择：分页模式支持拖边跨页；滚动模式在 ScrollContent 内按项实现
     var selection by remember { mutableStateOf<SelectionUi?>(null) }
+    // M35 选区播报：拖动手柄落定（dragging → false）后念出选中内容；拖动过程不播报（会刷爆 TalkBack）
+    val rootView = LocalView.current
+    var lastAnnouncedSelection by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    LaunchedEffect(selection?.dragging, selection?.start, selection?.end) {
+        val sel = selection ?: return@LaunchedEffect
+        if (sel.dragging) return@LaunchedEffect
+        val range = sel.start to sel.end
+        if (range == lastAnnouncedSelection) return@LaunchedEffect
+        lastAnnouncedSelection = range
+        val text = viewModel.selectedTextOf(sel.start, sel.end).trim()
+        if (text.isNotEmpty()) {
+            rootView.announceForAccessibility("已选中 ${sel.end - sel.start} 字：${text.take(80)}")
+        }
+    }
     var noteDraft by remember { mutableStateOf<SelectionUi?>(null) }
     // 「选中行生成章节规则」：非 null 时对话框以此字符偏移吸附原始行并合成候选
     var chapterRuleAnchor by remember { mutableStateOf<Long?>(null) }
@@ -1408,6 +1428,19 @@ fun ReaderScreen(
                 } else {
                     val spread = uiState.spread
                     if (spread != null && geomReady) {
+                        // M35 TalkBack：正文是 Canvas 手绘，语义树里本无内容——
+                        // 跨页容器挂 contentDescription（整页正文）+ liveRegion（翻页即播报）
+                        // + 上一页/下一页自定义动作（读屏模式点按热区不可靠）。
+                        // 翻页动画的覆盖层（animSpread）不挂语义，避免重复播报。
+                        val spreadA11yText = remember(spread) {
+                            buildString {
+                                append(spread.left.accessibilityText())
+                                spread.right?.takeIf { !it.isEmpty }?.let { right ->
+                                    if (isNotEmpty()) append('\n')
+                                    append(right.accessibilityText())
+                                }
+                            }
+                        }
                         SpreadContent(
                             spread = spread,
                             config = uiState.layoutConfig,
@@ -1422,6 +1455,18 @@ fun ReaderScreen(
                             imageProvider = viewModel.imageProvider,
                             modifier = Modifier
                                 .fillMaxSize()
+                                .semantics {
+                                    liveRegion = LiveRegionMode.Polite
+                                    contentDescription = spreadA11yText
+                                    customActions = listOf(
+                                        CustomAccessibilityAction(label = "上一页") {
+                                            latestTurn(false); true
+                                        },
+                                        CustomAccessibilityAction(label = "下一页") {
+                                            latestTurn(true); true
+                                        },
+                                    )
+                                }
                                 .graphicsLayer {
                                     translationY = -autoScrollY
                                     // M33 开书过渡：书脊在中缝，横向张开 + 淡入
@@ -1632,6 +1677,7 @@ fun ReaderScreen(
                             originYPx = contentRect.top,
                             scrollYPx = autoScrollY,
                             accent = colors.accent,
+                            label = if (isStart) "选区起点" else "选区终点",
                             onDrag = { pageLocal ->
                                 selectionDragTo(
                                     Offset(
@@ -2806,6 +2852,8 @@ private fun ScrollContent(
                             modifier = Modifier
                                 .width(pageWidthDp)
                                 .fillMaxHeight()
+                                // M35：滚动模式的页是 Canvas 手绘，逐页挂正文语义
+                                .semantics { contentDescription = row[0].accessibilityText() }
                                 .selectionGesture(row.first().charStart, leftInset),
                             highlights = spansFor(row[0]),
                             onGeometry = { lineBoxes[row[0].charStart] = it },
@@ -2825,6 +2873,7 @@ private fun ScrollContent(
                                 modifier = Modifier
                                     .width(pageWidthDp)
                                     .fillMaxHeight()
+                                    .semantics { contentDescription = right.accessibilityText() }
                                     .selectionGesture(
                                         row.first().charStart,
                                         leftDpPx + hingePx + rightInset,
@@ -2846,6 +2895,7 @@ private fun ScrollContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(itemHeight)
+                        .semantics { contentDescription = page.accessibilityText() }
                         .selectionGesture(page.charStart, 0f),
                     highlights = spansFor(page),
                     onGeometry = { lineBoxes[page.charStart] = it },
@@ -2930,6 +2980,7 @@ private fun ScrollSelectionHandles(
             originYPx = itemTop,
             scrollYPx = 0f,
             accent = accent,
+            label = if (isStart) "选区起点" else "选区终点",
             onDrag = drag@{ pageLocal ->
                 // 项偏移每次现取：边缘自动滚动期间项在动，组合期那一份是旧的
                 val topNow = listState.layoutInfo.visibleItemsInfo

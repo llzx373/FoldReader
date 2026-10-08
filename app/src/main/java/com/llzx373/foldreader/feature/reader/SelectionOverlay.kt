@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.reader.LineBox
@@ -62,6 +64,8 @@ fun SelectionHandle(
     originYPx: Float,
     scrollYPx: Float,
     accent: Color,
+    /** M35：TalkBack 语义标签（「选区起点」/「选区终点」）——手柄是纯绘制圆点，无语义不可达。 */
+    label: String,
     onDrag: (pageLocal: Offset) -> Unit,
     /** 松手/取消回调：滚动模式靠它停掉手柄拖动触发的边缘自动滚动。 */
     onDragEnd: () -> Unit = {},
@@ -86,6 +90,7 @@ fun SelectionHandle(
                 )
             }
             .size(44.dp)
+            .semantics { contentDescription = label }
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { dragCenter = currentPos },

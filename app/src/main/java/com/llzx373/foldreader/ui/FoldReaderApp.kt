@@ -67,9 +67,11 @@ fun FoldReaderApp() {
     val container = (LocalContext.current.applicationContext as FoldReaderApplication).container
     val posture by container.foldableStateProvider.posture.collectAsState()
     // M34 隐私锁：应用锁开启且进程内未解锁时，全屏锁定页盖住整个 App（含书架/阅读页/设置）
-    val appLockEnabled by container.settingsRepository.preferences
-        .map { it.appLockEnabled }
-        .collectAsState(initial = false)
+    // map 提进 remember：lint FlowOperatorInvokedInComposition——操作符不能在重组中反复重建
+    val appLockFlow = remember {
+        container.settingsRepository.preferences.map { it.appLockEnabled }
+    }
+    val appLockEnabled by appLockFlow.collectAsState(initial = false)
     val adaptiveInfo = currentWindowAdaptiveInfoV2()
     // 窗口方向取真实尺寸：WindowSizeClass 的 minWidthDp/minHeightDp 是断点下限（宽 600/840/…），
     // 拿它们比大小会把阔折叠竖持（608×860dp 落成 600×480）判成横向。

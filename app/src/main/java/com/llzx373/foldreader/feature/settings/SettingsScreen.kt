@@ -79,6 +79,7 @@ import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.core.tts.TtsSpeech
 import com.llzx373.foldreader.feature.lock.AppLock
 import com.llzx373.foldreader.feature.reader.ThemePicker
+import com.llzx373.foldreader.ui.rememberLocale
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -967,7 +968,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                             when {
                                 autoBackupRunning -> "备份中…"
                                 prefs.autoBackupLastRunAt > 0 ->
-                                    "上次成功：" + SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                    "上次成功：" + SimpleDateFormat("MM-dd HH:mm", rememberLocale())
                                         .format(Date(prefs.autoBackupLastRunAt))
                                 else -> "还未成功备份过"
                             },
@@ -2169,8 +2170,9 @@ private fun AiOutboundHistoryDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                val timeFormat = remember {
-                    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                val recordLocale = rememberLocale()
+                val timeFormat = remember(recordLocale) {
+                    SimpleDateFormat("MM-dd HH:mm", recordLocale)
                 }
                 records.forEach { record ->
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {

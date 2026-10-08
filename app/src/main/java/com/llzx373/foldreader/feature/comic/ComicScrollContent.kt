@@ -13,9 +13,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.llzx373.foldreader.core.data.settings.ComicFitMode
+import com.llzx373.foldreader.feature.reader.pagedPageDescription
 
 /** 宽高比未知时的占位比例：按常见漫画页（约 0.7）先占位，探测完成后换成真实高度。 */
 private const val PLACEHOLDER_ASPECT = 0.7f
@@ -59,7 +62,11 @@ fun ComicScrollContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(viewModel.aspectOf(index) ?: PLACEHOLDER_ASPECT),
+                    .aspectRatio(viewModel.aspectOf(index) ?: PLACEHOLDER_ASPECT)
+                    // M35 TalkBack：条目页是 Canvas 手绘，逐页挂页码 + 译文语义
+                    .semantics {
+                        contentDescription = pagedPageDescription(index, pageCount, translationFor(index))
+                    },
             ) {
                 ComicPageView(
                     image = viewModel.images[index],
