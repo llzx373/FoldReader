@@ -63,6 +63,10 @@ data class BookPrefsEntity(
     @ColumnInfo(defaultValue = "") val chapterRules: String = "",
     /** 按书 TTS 朗读语言（TtsLanguage 枚举名，M26）；null = 跟随默认（译文视角跟随译本语言）。 */
     val ttsLang: String? = null,
+    /** 漫画自动裁白边开关（M31）。裁框逐书记忆在 [comicCropBox]，渲染期应用，不改原图。 */
+    @ColumnInfo(defaultValue = "0") val comicCropEnabled: Boolean = false,
+    /** 裁框归一化坐标 "l,t,r,b"（MarginCrop.encodeNormalized）；空串 = 未检测过。 */
+    @ColumnInfo(defaultValue = "") val comicCropBox: String = "",
 )
 
 @Dao

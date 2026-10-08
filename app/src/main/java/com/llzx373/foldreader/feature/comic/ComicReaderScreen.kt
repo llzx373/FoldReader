@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.view.KeyEvent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -193,6 +194,7 @@ fun ComicReaderScreen(
     val highlightBubble by viewModel.highlightBubble.collectAsState()
     val bubbleAdjustMode by viewModel.bubbleAdjustMode.collectAsState()
     val hasPageAdjustments by viewModel.hasPageAdjustments.collectAsState()
+    val comicCrop by viewModel.comicCrop.collectAsState()
     val volumeProgress by app.container.comicTranslationQueue.progress.collectAsState()
     // 漫画翻译入口判据（M22）：漫画格式 + AI 已配置 + 气泡与识别模型均已导入
     var translationAvailable by remember { mutableStateOf(false) }
@@ -1555,6 +1557,18 @@ fun ComicReaderScreen(
                         }
                     } else {
                         null
+                    },
+                    // 自动裁白边（M31）：仅漫画（features.spreadPairing 对 PDF 恒 false）
+                    cropEnabled = if (features.spreadPairing) comicCrop.first else null,
+                    onToggleCrop = viewModel::setComicCropEnabled,
+                    onDetectCrop = {
+                        viewModel.detectComicCrop { detected ->
+                            Toast.makeText(
+                                context,
+                                if (detected) "已检测白边并应用（逐书记忆）" else "没检测到可裁的白边",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                     },
                     // 视觉翻译（M23）：视觉模型未配时回落通用模型，两者皆空不给入口；页图像外发在对话框里逐书确认
                     onTranslatePageVision = if (translationAvailable &&

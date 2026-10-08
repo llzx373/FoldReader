@@ -30,7 +30,7 @@ import androidx.room.RoomDatabase
         ChapterSummaryEntity::class,
         BookOutlineEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class FoldReaderDatabase : RoomDatabase() {

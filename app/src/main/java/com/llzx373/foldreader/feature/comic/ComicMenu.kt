@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -212,6 +213,13 @@ fun ComicMenuPanel(
     onOpenBubbleCompare: (() -> Unit)?,
     /** 气泡位置微调（M23）：进入微调模式。null = 不可用（滚动模式不支持微调手势）。 */
     onAdjustBubbles: (() -> Unit)? = null,
+    /**
+     * 自动裁白边（M31）：[cropEnabled] 为 null = 非漫画格式整组隐藏；
+     * 开关逐书记忆（关掉不清裁框），[onDetectCrop] 重新采样检测并记忆。
+     */
+    cropEnabled: Boolean? = null,
+    onToggleCrop: (Boolean) -> Unit = {},
+    onDetectCrop: () -> Unit = {},
     /** 视觉翻译本页（M23）：页图像外发给视觉模型。null = 未配置视觉模型。 */
     onTranslatePageVision: (() -> Unit)? = null,
     /** 视觉翻译整卷（M30）：整页图像逐页外发，确认页明示页数/成本/限速。null = 未配置视觉模型。 */
@@ -346,6 +354,23 @@ fun ComicMenuPanel(
                         checked = prefs.comicSpreadAutoDetect,
                         onCheckedChange = onToggleSpreadAutoDetect,
                     )
+                }
+            }
+
+            // 自动裁白边（M31）：逐书记忆的渲染期裁剪，扫描漫画的白边占屏从此可去掉。
+            // 滚动/翻页两种模式都有效，所以放在模式分支之外。
+            if (cropEnabled != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text("裁白边", style = MaterialTheme.typography.labelMedium)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = cropEnabled,
+                        onCheckedChange = onToggleCrop,
+                    )
+                    TextButton(onClick = onDetectCrop) { Text("重新检测") }
                 }
             }
 

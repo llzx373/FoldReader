@@ -23,6 +23,8 @@ import com.llzx373.foldreader.core.comic.ComicContainer
 import com.llzx373.foldreader.core.comic.ComicExtractionStore
 import com.llzx373.foldreader.core.comic.ComicImageDecoder
 import com.llzx373.foldreader.core.comic.ComicSeriesCandidate
+import com.llzx373.foldreader.core.comic.ContentBounds
+import com.llzx373.foldreader.core.comic.MarginCrop
 import com.llzx373.foldreader.core.format.Chapter
 import com.llzx373.foldreader.core.paged.PagedImageSource
 import com.llzx373.foldreader.core.paged.PagedPageImage
@@ -919,9 +921,10 @@ class ComicReaderViewModel(
     /**
      * 该页的宽高比（w/h）；探测未覆盖时返回 null。
      * 滚动模式用它定条目高度——高度稳定才不会在滚动中跳位。
+     * 裁边启用时按裁后比例修正（条目高度跟着裁后内容走）。
      */
     fun aspectOf(pageIndex: Int): Float? =
-        pageAspects.value.getOrNull(pageIndex)?.takeIf { it > 0f }
+        pageAspects.value.getOrNull(pageIndex)?.takeIf { it > 0f }?.let { croppedAspect(it) }
 
     /**
      * 单页按需解码（滚动模式由条目自己调用）。
@@ -1151,6 +1154,94 @@ class ComicReaderViewModel(
         viewModelScope.launch { settingsRepository.setComicScrollGapDp(gapDp.coerceIn(0, 64)) }
     }
 
+    // ---- 自动裁白边（M31）----
+
+    /**
+     * 裁边开关与裁框（逐书记忆，归一化 "l,t,r,b"；box 为 null = 未检测过）。
+     * 关掉开关不清裁框，重新打开即恢复。
+     */
+    val comicCrop: StateFlow<Pair<Boolean, FloatArray?>> = bookPrefsRepository.observeComicCrop(bookId)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false to null)
+
+    /** 开/关裁边：已解码页整表清掉按新裁框重解（裁边是渲染期行为，不动原图）。 */
+    fun setComicCropEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            bookPrefsRepository.setComicCrop(bookId, enabled)
+            decodeMutex.withLock { clearImages() }
+            decodeVisiblePages()
+        }
+    }
+
+    /**
+     * 检测白边并逐书记忆：均匀采样若干页（小图就够——白边是大尺度特征），
+     * 各页裁框归一化后取**并集**（只裁所有采样页都空白的边），存好并启用。
+     * 回调报告是否检出了可裁的边（界面据此举 toast）。
+     */
+    fun detectComicCrop(onDone: (Boolean) -> Unit) {
+        val opened = source ?: return onDone(false)
+        viewModelScope.launch(Dispatchers.IO) {
+            val pageCount = _uiState.value.pageCount
+            if (pageCount <= 0) {
+                launch(Dispatchers.Main) { onDone(false) }
+                return@launch
+            }
+            val sampleCount = minOf(CROP_SAMPLE_PAGES, pageCount)
+            val indices = if (sampleCount == 1) {
+                listOf(0)
+            } else {
+                (0 until sampleCount).map { it * (pageCount - 1) / (sampleCount - 1) }.distinct()
+            }
+            var union: FloatArray? = null
+            for (index in indices) {
+                val bmp = runCatching {
+                    opened.loadThumbnail(index, CROP_PROBE_PX, CROP_PROBE_PX)
+                }.getOrNull() ?: continue
+                val pixels = IntArray(bmp.width * bmp.height)
+                bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                val bounds = MarginCrop.detect(pixels, bmp.width, bmp.height) ?: continue
+                union = MarginCrop.unionNormalized(
+                    union,
+                    MarginCrop.toNormalized(bounds, bmp.width, bmp.height),
+                )
+            }
+            val box = union
+            if (box != null) {
+                bookPrefsRepository.setComicCrop(bookId, enabled = true, box = box)
+                decodeMutex.withLock { clearImages() }
+            }
+            launch(Dispatchers.Main) { onDone(box != null) }
+            if (box != null) decodeVisiblePages()
+        }
+    }
+
+    /** 渲染期应用裁框：静图页裁子图；动画页与非法框原样放行。 */
+    private fun applyCrop(image: PagedPageImage): PagedPageImage {
+        val (enabled, box) = comicCrop.value
+        if (!enabled || box == null) return image
+        val still = image as? PagedPageImage.Still ?: return image
+        val bounds = MarginCrop.fromNormalized(box, still.bitmap.width, still.bitmap.height)
+            ?: return image
+        if (bounds.left == 0 && bounds.top == 0 &&
+            bounds.right == still.bitmap.width && bounds.bottom == still.bitmap.height
+        ) {
+            return image
+        }
+        val cropped = runCatching {
+            Bitmap.createBitmap(still.bitmap, bounds.left, bounds.top, bounds.width, bounds.height)
+        }.getOrNull() ?: return image
+        return PagedPageImage.Still(cropped)
+    }
+
+    /** 裁边启用时的页宽高比修正（滚动模式条目高度用裁后比例，才不会留空白/跳位）。 */
+    private fun croppedAspect(raw: Float): Float {
+        val (enabled, box) = comicCrop.value
+        if (!enabled || box == null) return raw
+        val w = box[2] - box[0]
+        val h = box[3] - box[1]
+        if (w <= 0f || h <= 0f) return raw
+        return raw * w / h
+    }
+
     // ---- 解码与缓存 ----
 
     private fun visiblePages(): List<Int> {
@@ -1183,7 +1274,8 @@ class ComicReaderViewModel(
     private suspend fun decode(index: Int): PagedPageImage? {
         val opened = source ?: return null
         // 目标尺寸只在这里给：漫画据此降采样解码，PDF 据此渲染成对应大小的位图
-        return opened.loadPage(index, targetWidthPx, targetHeightPx)
+        val image = opened.loadPage(index, targetWidthPx, targetHeightPx) ?: return null
+        return applyCrop(image)
     }
 
     private suspend fun putImage(index: Int, image: PagedPageImage) {
@@ -1401,6 +1493,12 @@ class ComicReaderViewModel(
 
         /** 无论预算如何，至少保留当前可见跨页再前后各两页（最多 6 张）加一点余量。 */
         const val KEEP_NEAREST_PAGES = 8
+
+        /** 白边检测的采样页数上限（均匀分布全书；白边是大尺度特征，小图就够）。 */
+        private const val CROP_SAMPLE_PAGES = 8
+
+        /** 白边检测采样图的长边像素。 */
+        private const val CROP_PROBE_PX = 512
 
         /** 超过这个页数就不再整本探测宽高比（收益递减，几千页的合集扫一遍不值得）。 */
         const val MAX_SIZE_PROBE_PAGES = 2000

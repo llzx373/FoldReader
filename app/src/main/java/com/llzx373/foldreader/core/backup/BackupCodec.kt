@@ -828,6 +828,8 @@ class BackupCodec(
         .put("comicFitMode", p.comicFitMode)
         .put("pdfReadingMode", p.pdfReadingMode ?: JSONObject.NULL)
         .put("ttsLang", p.ttsLang ?: JSONObject.NULL)
+        .put("comicCropEnabled", p.comicCropEnabled)
+        .put("comicCropBox", p.comicCropBox)
 
     private fun bookPrefsFromJson(bookId: Long, json: JSONObject): BookPrefsEntity {
         val defaults = BookPrefsEntity(bookId = bookId)
@@ -890,6 +892,8 @@ class BackupCodec(
             } else {
                 json.optString("ttsLang")
             },
+            comicCropEnabled = json.optBoolean("comicCropEnabled", defaults.comicCropEnabled),
+            comicCropBox = json.optString("comicCropBox", defaults.comicCropBox),
         )
     }
 }

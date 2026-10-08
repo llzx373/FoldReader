@@ -700,4 +700,83 @@ class DatabaseMigrationTest {
             assertEquals(3, c.getInt(1))
         }
     }
+
+    /** 建一个 v10 形态的库（`book_prefs` 为 v10 结构 + 一行老数据），之后手动跑 v10→v11 迁移。 */
+    private fun openV10(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(10) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+                // v10 的 book_prefs = v1 结构 + normalizeWhitespaceEnabled + chapterRules + ttsLang
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `book_prefs` (`bookId` INTEGER NOT NULL, " +
+                        "`fontSizeSp` REAL NOT NULL, `lineSpacingMultiplier` REAL NOT NULL, " +
+                        "`marginLevel` INTEGER NOT NULL, `maxLineChars` INTEGER NOT NULL DEFAULT 40, " +
+                        "`paragraphSpacingEm` REAL NOT NULL DEFAULT 0.4, `letterSpacingEm` REAL NOT NULL DEFAULT 0.0, " +
+                        "`themeId` TEXT NOT NULL, `customBackgroundArgb` INTEGER, `customTextArgb` INTEGER, " +
+                        "`fontKey` TEXT NOT NULL, `pageTurnMode` TEXT NOT NULL, `readerBrightness` REAL NOT NULL, " +
+                        "`autoPageEnabled` INTEGER NOT NULL, `autoPageMode` TEXT NOT NULL, " +
+                        "`autoPageIntervalSec` INTEGER NOT NULL, `autoPageSpeedPx` REAL NOT NULL, " +
+                        "`panelScreenOff` INTEGER NOT NULL, `autoIndentEnabled` INTEGER NOT NULL DEFAULT 1, " +
+                        "`comicDirection` TEXT NOT NULL, `comicFitMode` TEXT NOT NULL, `pdfReadingMode` TEXT, " +
+                        "`normalizeWhitespaceEnabled` INTEGER NOT NULL DEFAULT 0, " +
+                        "`chapterRules` TEXT NOT NULL DEFAULT '', `ttsLang` TEXT, " +
+                        "PRIMARY KEY(`bookId`), FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "INSERT INTO `book_prefs` (`bookId`, `fontSizeSp`, `lineSpacingMultiplier`, `marginLevel`, " +
+                        "`themeId`, `fontKey`, `pageTurnMode`, `readerBrightness`, `autoPageEnabled`, " +
+                        "`autoPageMode`, `autoPageIntervalSec`, `autoPageSpeedPx`, `panelScreenOff`, " +
+                        "`comicDirection`, `comicFitMode`) VALUES " +
+                        "(7, 18.0, 1.5, 1, 'GREEN', 'default', 'COVER', -1.0, 0, 'INTERVAL', 10, 60.0, 0, " +
+                        "'LTR', 'FIT_PAGE')",
+                )
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v10 升到 v11 加漫画裁白边列且保住老数据`() {
+        val migrated = openV10()
+
+        MIGRATION_10_11.migrate(migrated)
+
+        // 老行原样还在，新列按 DEFAULT 落地（0 / 空串 = 未开启未检测）
+        migrated.query(
+            "SELECT `fontSizeSp`, `comicDirection`, `comicCropEnabled`, `comicCropBox` " +
+                "FROM `book_prefs` WHERE `bookId` = 7",
+        ).use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals(18.0f, c.getFloat(0), 0.001f)
+            assertEquals("LTR", c.getString(1))
+            assertEquals(0, c.getInt(2))
+            assertEquals("", c.getString(3))
+        }
+        // 新列结构与 Room 期望逐项一致（名字/类型/非空/默认值）
+        val cols = columns(migrated, "book_prefs")
+        assertTrue(
+            cols.contains(Column("comicCropEnabled", "INTEGER", true, "0")),
+        )
+        assertTrue(
+            cols.contains(Column("comicCropBox", "TEXT", true, "''")),
+        )
+        // 新列可写
+        migrated.execSQL(
+            "UPDATE `book_prefs` SET `comicCropEnabled` = 1, `comicCropBox` = '0.05,0.03,0.96,0.98' WHERE `bookId` = 7",
+        )
+        migrated.query("SELECT `comicCropBox` FROM `book_prefs` WHERE `bookId` = 7").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("0.05,0.03,0.96,0.98", c.getString(0))
+        }
+    }
 }

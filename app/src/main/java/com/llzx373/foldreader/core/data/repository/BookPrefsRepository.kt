@@ -60,6 +60,32 @@ class BookPrefsRepository(
     fun observeTtsLang(bookId: Long): Flow<String?> =
         bookPrefsDao.observe(bookId).map { it?.ttsLang }
 
+    /**
+     * 漫画自动裁白边（M31）：开关 + 归一化裁框（"l,t,r,b"，null = 未检测过）。
+     * 逐书记忆：关掉开关不清裁框，重新打开即恢复。
+     */
+    fun observeComicCrop(bookId: Long): Flow<Pair<Boolean, FloatArray?>> =
+        bookPrefsDao.observe(bookId).map { entity ->
+            if (entity == null) {
+                false to null
+            } else {
+                entity.comicCropEnabled to
+                    com.llzx373.foldreader.core.comic.MarginCrop.decodeNormalized(entity.comicCropBox)
+            }
+        }
+
+    /** 开/关裁边（不动已记忆的裁框）；[box] 非 null 时同时更新裁框（检测结果）。 */
+    suspend fun setComicCrop(bookId: Long, enabled: Boolean, box: FloatArray? = null) {
+        update(bookId) {
+            it.copy(
+                comicCropEnabled = enabled,
+                comicCropBox = box?.let { values ->
+                    com.llzx373.foldreader.core.comic.MarginCrop.encodeNormalized(values)
+                } ?: it.comicCropBox,
+            )
+        }
+    }
+
     suspend fun ttsLang(bookId: Long): String? = bookPrefsDao.get(bookId)?.ttsLang
 
     suspend fun setTtsLang(bookId: Long, lang: String?) {

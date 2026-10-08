@@ -160,6 +160,17 @@ internal val MIGRATION_9_10 = object : Migration(9, 10) {
 }
 
 /**
+ * v11：`book_prefs` 加漫画自动裁白边两列（M31）——开关 `comicCropEnabled`（老行取 DEFAULT 0）
+ * 与归一化裁框 `comicCropBox`（老行取 DEFAULT '' = 未检测）。
+ */
+internal val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `book_prefs` ADD COLUMN `comicCropEnabled` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `book_prefs` ADD COLUMN `comicCropBox` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
  * 数据库迁移登记表，供 `Room.databaseBuilder(...).addMigrations(*DATABASE_MIGRATIONS)` 使用。
  *
  * **规矩：schema 一变就必须升 [FoldReaderDatabase.version] 并在这里补一条迁移。**
@@ -171,5 +182,5 @@ internal val MIGRATION_9_10 = object : Migration(9, 10) {
 val DATABASE_MIGRATIONS: Array<Migration> =
     arrayOf(
         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
     )
