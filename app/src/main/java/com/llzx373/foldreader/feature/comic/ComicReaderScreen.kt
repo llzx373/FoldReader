@@ -229,6 +229,8 @@ fun ComicReaderScreen(
     var seriesVisible by remember { mutableStateOf(false) }
     var jumpVisible by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
+    // 手动框选裁边（M32）：在未裁剪的当前页上拖框
+    var cropEditorVisible by remember { mutableStateOf(false) }
     var editingAnnotation by remember { mutableStateOf<AnnotationEntity?>(null) }
     // 漫画翻译（M22）：确认页 / 对照面板 / 首次外发确认；pendingTranslateAction 存确认后要做的动作
     var pageTranslateVisible by remember { mutableStateOf(false) }
@@ -1560,8 +1562,8 @@ fun ComicReaderScreen(
                     } else {
                         null
                     },
-                    // 自动裁白边（M31）：仅漫画（features.spreadPairing 对 PDF 恒 false）
-                    cropEnabled = if (features.spreadPairing) comicCrop.first else null,
+                    // 页式裁边（M31 漫画 / M32 PDF）：两种格式都开放，PDF 走裁框渲染（不回缩水）
+                    cropEnabled = comicCrop.first,
                     onToggleCrop = viewModel::setComicCropEnabled,
                     onDetectCrop = {
                         viewModel.detectComicCrop { detected ->
@@ -1571,6 +1573,11 @@ fun ComicReaderScreen(
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
+                    },
+                    onManualCrop = {
+                        // 关掉菜单再进编辑器：两者同时出现会互相抢焦点
+                        menuVisible = false
+                        cropEditorVisible = true
                     },
                     // 视觉翻译（M23）：视觉模型未配时回落通用模型，两者皆空不给入口；页图像外发在对话框里逐书确认
                     onTranslatePageVision = if (translationAvailable &&
@@ -1781,6 +1788,28 @@ fun ComicReaderScreen(
             PasswordDialog(
                 onSubmit = viewModel::submitPassword,
                 onDismiss = viewModel::cancelPassword,
+            )
+        }
+
+        // 手动框选裁边（M32）：底图是当前跨页第一页的未裁剪渲染，框存原页归一化坐标
+        if (cropEditorVisible) {
+            val cropPage = viewModel.currentPages().firstOrNull() ?: uiState.pageIndex
+            var cropBitmap by remember { mutableStateOf<Bitmap?>(null) }
+            var cropBitmapLoaded by remember { mutableStateOf(false) }
+            LaunchedEffect(cropPage) {
+                cropBitmapLoaded = false
+                cropBitmap = viewModel.loadUncroppedPage(cropPage)
+                cropBitmapLoaded = true
+            }
+            CropBoxEditor(
+                bitmap = cropBitmap,
+                loading = !cropBitmapLoaded,
+                initialBox = comicCrop.second,
+                onApply = { box ->
+                    cropEditorVisible = false
+                    viewModel.applyCropBox(box)
+                },
+                onDismiss = { cropEditorVisible = false },
             )
         }
 

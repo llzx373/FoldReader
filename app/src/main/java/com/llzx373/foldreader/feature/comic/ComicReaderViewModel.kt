@@ -733,24 +733,43 @@ class ComicReaderViewModel(
      *
      * 只有有文字层的格式才有结果：拿不到或失败返回 null，调用方保留原始矩形框选。
      * 这是长按松手后的一次性调用（最多一次 IPC），不在拖动过程中回源。
+     *
+     * 裁边（M32）启用时屏幕坐标是**裁后**归一化，文档文字层（原生与 M21 OCR）都是
+     * **原页**归一化：送入前换算到原页，结果搬回裁后坐标系再存储/绘制。
+     * 完全落在裁掉区域的选区丢弃（那部分页面已经看不见）。
      */
     suspend fun snapSelectionToText(pageIndex: Int, region: PageRect): PageSelection? {
         // 已确认是扫描件就别白跑一次 IPC——除非 OCR 文本层可用（M21：模型就绪时来源已装饰）
         if (features.value.scanned && !ocrTextLayerReady()) return null
         val source = source ?: return null
-        val hit = runCatching {
-            source.selectText(
-                index = pageIndex,
-                startX = region.left,
-                startY = region.top,
-                stopX = region.right,
-                stopY = region.bottom,
+        val (cropEnabled, box) = comicCrop.value
+        val cropped = cropEnabled && box != null
+        val query = if (cropped) {
+            com.llzx373.foldreader.core.pdf.PdfCrop.rectToOriginal(
+                region.left, region.top, region.right, region.bottom, box!!,
             )
+        } else {
+            null
+        }
+        val hit = runCatching {
+            if (query != null) {
+                source.selectText(pageIndex, query[0], query[1], query[2], query[3])
+            } else {
+                source.selectText(pageIndex, region.left, region.top, region.right, region.bottom)
+            }
         }.getOrNull() ?: return null
         if (hit.text.isBlank()) return null
+        val rect = if (cropped) {
+            val mapped = com.llzx373.foldreader.core.pdf.PdfCrop.rectToCrop(
+                hit.left, hit.top, hit.right, hit.bottom, box!!,
+            ) ?: return null
+            PageRect(mapped[0], mapped[1], mapped[2], mapped[3])
+        } else {
+            PageRect.between(hit.left, hit.top, hit.right, hit.bottom)
+        }
         return PageSelection(
             pageIndex = pageIndex,
-            rect = PageRect.between(hit.left, hit.top, hit.right, hit.bottom),
+            rect = rect,
             text = hit.text,
         )
     }
@@ -1252,11 +1271,12 @@ class ComicReaderViewModel(
         viewModelScope.launch { settingsRepository.setComicScrollGapDp(gapDp.coerceIn(0, 64)) }
     }
 
-    // ---- 自动裁白边（M31）----
+    // ---- 页式裁边（M31 漫画自动裁白边；M32 扩展 PDF：裁框渲染 + 手动框选）----
 
     /**
-     * 裁边开关与裁框（逐书记忆，归一化 "l,t,r,b"；box 为 null = 未检测过）。
-     * 关掉开关不清裁框，重新打开即恢复。
+     * 裁边开关与裁框（逐书记忆，原页归一化 "l,t,r,b"；box 为 null = 未检测过）。
+     * 关掉开关不清裁框，重新打开即恢复。漫画与 PDF 共用同一对每书字段
+     * （一本书要么是漫画要么是 PDF，不存在双格式）。
      */
     val comicCrop: StateFlow<Pair<Boolean, FloatArray?>> = bookPrefsRepository.observeComicCrop(bookId)
         .stateIn(viewModelScope, SharingStarted.Eagerly, false to null)
@@ -1309,6 +1329,34 @@ class ComicReaderViewModel(
             }
             launch(Dispatchers.Main) { onDone(box != null) }
             if (box != null) decodeVisiblePages()
+        }
+    }
+
+    /**
+     * 手动框选裁边（M32）：取一页的**未裁剪**位图当编辑器底图。
+     * 不走 [decode]（那里会套裁框），也不进已解码页表（编辑器是一次性场景）。
+     */
+    suspend fun loadUncroppedPage(index: Int): Bitmap? {
+        val opened = source ?: return null
+        val w = if (targetWidthPx >= 64) targetWidthPx else 1080
+        val h = if (targetHeightPx >= 64) targetHeightPx else 1920
+        val image = runCatching { opened.loadPage(index, w, h) }.getOrNull()
+        return (image as? PagedPageImage.Still)?.bitmap
+    }
+
+    /**
+     * 手动框选定型（M32）：null = 整页（关闭裁边）；否则记忆裁框并启用。
+     * 与开关同口径：渲染期行为，已解码页清表按新裁框重来。
+     */
+    fun applyCropBox(box: FloatArray?) {
+        viewModelScope.launch {
+            if (box == null) {
+                bookPrefsRepository.setComicCrop(bookId, enabled = false)
+            } else {
+                bookPrefsRepository.setComicCrop(bookId, enabled = true, box = box)
+            }
+            decodeMutex.withLock { clearImages() }
+            decodeVisiblePages()
         }
     }
 
@@ -1371,6 +1419,15 @@ class ComicReaderViewModel(
 
     private suspend fun decode(index: Int): PagedPageImage? {
         val opened = source ?: return null
+        // PDF 裁边（M32）：裁框是渲染参数——支持裁框渲染的来源（PdfPagedSource 经
+        // OcrTextLayerSource 转发）直接出裁后内容，裁后区域按槽位分辨率光栅化；
+        // 不支持的来源（漫画容器）或裁剪路径失败时回退整页出图 + 位图裁剪（M31 行为）
+        val (cropEnabled, box) = comicCrop.value
+        if (cropEnabled && box != null) {
+            (opened as? com.llzx373.foldreader.core.paged.CroppedRenderSource)
+                ?.loadPageCropped(index, targetWidthPx, targetHeightPx, box)
+                ?.let { return it }
+        }
         // 目标尺寸只在这里给：漫画据此降采样解码，PDF 据此渲染成对应大小的位图
         val image = opened.loadPage(index, targetWidthPx, targetHeightPx) ?: return null
         return applyCrop(image)

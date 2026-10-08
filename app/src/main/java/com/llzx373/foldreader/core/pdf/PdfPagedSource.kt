@@ -3,12 +3,14 @@ package com.llzx373.foldreader.core.pdf
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.PointF
+import android.graphics.Rect
 import android.net.Uri
 import android.util.Size
 import androidx.pdf.PdfDocument
 import androidx.pdf.PdfPasswordException
 import androidx.pdf.SandboxedPdfLoader
 import androidx.pdf.content.PdfPageTextContent
+import com.llzx373.foldreader.core.paged.CroppedRenderSource
 import com.llzx373.foldreader.core.paged.PagedImageSource
 import com.llzx373.foldreader.core.paged.PagedPageImage
 import com.llzx373.foldreader.core.paged.PagedSearchHit
@@ -33,7 +35,7 @@ import kotlin.math.roundToInt
  */
 class PdfPagedSource private constructor(
     private val document: PdfDocument,
-) : PagedImageSource {
+) : PagedImageSource, CroppedRenderSource {
 
     override val pageCount: Int get() = document.pageCount
 
@@ -128,6 +130,35 @@ class PdfPagedSource private constructor(
         targetWidth: Int,
         targetHeight: Int,
     ): PagedPageImage? = render(index, targetWidth, targetHeight)?.let { PagedPageImage.Still(it) }
+
+    /**
+     * 裁框渲染（M32）：`BitmapSource.getBitmap` 的 clipRegion 让沙箱只光栅化裁框区域——
+     * 整页按 1/crop 放大（裁后区域恰好铺满槽位），出图就是裁后内容，有效分辨率不缩水。
+     * 页面尺寸未知 / 裁框非法 / 沙箱不支持裁剪路径时返回 null，阅读器回退整页渲染 + 位图裁剪。
+     */
+    override suspend fun loadPageCropped(
+        index: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+        box: FloatArray,
+    ): PagedPageImage? {
+        if (index !in 0 until pageCount) return null
+        val (pageW, pageH) = pageSizes()?.getOrNull(index) ?: return null
+        val full = PdfCrop.enlargedPageSize(pageW, pageH, targetWidth, targetHeight, box)
+            ?: return null
+        val clip = PdfCrop.clipRect(full[0], full[1], box) ?: return null
+        val bitmap = renderLock.withLock {
+            runCatching {
+                document.getPageBitmapSource(index).use { source ->
+                    source.getBitmap(
+                        Size(full[0], full[1]),
+                        Rect(clip[0], clip[1], clip[2], clip[3]),
+                    )
+                }
+            }.getOrNull()
+        } ?: return null
+        return PagedPageImage.Still(bitmap)
+    }
 
     override suspend fun loadThumbnail(index: Int, width: Int, height: Int): Bitmap? =
         render(index, width, height)

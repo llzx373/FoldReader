@@ -61,7 +61,7 @@ class BookPrefsRepository(
         bookPrefsDao.observe(bookId).map { it?.ttsLang }
 
     /**
-     * 漫画自动裁白边（M31）：开关 + 归一化裁框（"l,t,r,b"，null = 未检测过）。
+     * 页式裁边（M31 漫画 / M32 PDF）：开关 + 原页归一化裁框（"l,t,r,b"，null = 未检测过）。
      * 逐书记忆：关掉开关不清裁框，重新打开即恢复。
      */
     fun observeComicCrop(bookId: Long): Flow<Pair<Boolean, FloatArray?>> =

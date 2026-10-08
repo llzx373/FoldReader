@@ -85,6 +85,26 @@ data class PagedSearchHit(
     val snippet: String = "",
 )
 
+/**
+ * 支持「裁框渲染」的来源（M32，PDF）：裁框作为**渲染参数**交给文档服务，
+ * 出图即裁后内容，且裁后区域按槽位分辨率光栅化——不是先渲整页再位图裁剪
+ * （那样有效分辨率跟着裁掉的部分一起缩水）。漫画这类位图来源天然做不到，
+ * 由阅读器回退「整页出图 + 位图裁剪」。
+ */
+interface CroppedRenderSource {
+
+    /**
+     * 按归一化裁框 [box]（"l,t,r,b"，相对原页）渲染一页，裁后区域适配目标槽位。
+     * 不支持或渲染失败返回 null（调用方回退整页渲染 + 位图裁剪）。
+     */
+    suspend fun loadPageCropped(
+        index: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+        box: FloatArray,
+    ): PagedPageImage?
+}
+
 /** 页式阅读里各格式的能力差异：菜单据此隐藏对该格式无意义的开关。 */
 data class PagedReaderFeatures(
     /** 左右阅读方向（日漫 RTL）。PDF 没有这个概念。 */

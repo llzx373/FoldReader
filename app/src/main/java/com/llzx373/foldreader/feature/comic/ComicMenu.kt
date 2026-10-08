@@ -214,12 +214,15 @@ fun ComicMenuPanel(
     /** 气泡位置微调（M23）：进入微调模式。null = 不可用（滚动模式不支持微调手势）。 */
     onAdjustBubbles: (() -> Unit)? = null,
     /**
-     * 自动裁白边（M31）：[cropEnabled] 为 null = 非漫画格式整组隐藏；
-     * 开关逐书记忆（关掉不清裁框），[onDetectCrop] 重新采样检测并记忆。
+     * 页式裁边（M31 漫画 / M32 PDF）：[cropEnabled] 为 null = 整组隐藏；
+     * 开关逐书记忆（关掉不清裁框），[onDetectCrop] 重新采样检测并记忆，
+     * [onManualCrop] 打开手动框选编辑器（在未裁剪的页面上拖框）。
      */
     cropEnabled: Boolean? = null,
     onToggleCrop: (Boolean) -> Unit = {},
     onDetectCrop: () -> Unit = {},
+    /** 手动框选裁边（M32）：null = 隐藏入口。 */
+    onManualCrop: (() -> Unit)? = null,
     /** 视觉翻译本页（M23）：页图像外发给视觉模型。null = 未配置视觉模型。 */
     onTranslatePageVision: (() -> Unit)? = null,
     /** 视觉翻译整卷（M30）：整页图像逐页外发，确认页明示页数/成本/限速。null = 未配置视觉模型。 */
@@ -357,20 +360,23 @@ fun ComicMenuPanel(
                 }
             }
 
-            // 自动裁白边（M31）：逐书记忆的渲染期裁剪，扫描漫画的白边占屏从此可去掉。
+            // 页式裁边（M31 漫画 / M32 PDF）：逐书记忆的渲染期裁剪，扫描件的白边占屏从此可去掉。
             // 滚动/翻页两种模式都有效，所以放在模式分支之外。
             if (cropEnabled != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 4.dp),
                 ) {
-                    Text("裁白边", style = MaterialTheme.typography.labelMedium)
+                    Text("裁边", style = MaterialTheme.typography.labelMedium)
                     Spacer(modifier = Modifier.width(12.dp))
                     Switch(
                         checked = cropEnabled,
                         onCheckedChange = onToggleCrop,
                     )
                     TextButton(onClick = onDetectCrop) { Text("重新检测") }
+                    if (onManualCrop != null) {
+                        TextButton(onClick = onManualCrop) { Text("框选") }
+                    }
                 }
             }
 

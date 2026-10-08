@@ -63,9 +63,9 @@ data class BookPrefsEntity(
     @ColumnInfo(defaultValue = "") val chapterRules: String = "",
     /** 按书 TTS 朗读语言（TtsLanguage 枚举名，M26）；null = 跟随默认（译文视角跟随译本语言）。 */
     val ttsLang: String? = null,
-    /** 漫画自动裁白边开关（M31）。裁框逐书记忆在 [comicCropBox]，渲染期应用，不改原图。 */
+    /** 页式裁边开关（M31 漫画 / M32 PDF；列名沿用 comic 前缀）。裁框逐书记忆在 [comicCropBox]，渲染期应用，不改原图/原文档。 */
     @ColumnInfo(defaultValue = "0") val comicCropEnabled: Boolean = false,
-    /** 裁框归一化坐标 "l,t,r,b"（MarginCrop.encodeNormalized）；空串 = 未检测过。 */
+    /** 裁框原页归一化坐标 "l,t,r,b"（MarginCrop.encodeNormalized）；空串 = 未检测过。 */
     @ColumnInfo(defaultValue = "") val comicCropBox: String = "",
 )
 

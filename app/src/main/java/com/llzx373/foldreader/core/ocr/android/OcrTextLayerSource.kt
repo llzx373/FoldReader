@@ -28,7 +28,23 @@ class OcrTextLayerSource(
     private val store: PdfOcrStore,
     private val recSpecProvider: suspend () -> OcrModelSpec?,
     private val recognize: suspend (bitmap: android.graphics.Bitmap, recSpec: OcrModelSpec) -> OcrPage,
-) : PagedImageSource by delegate {
+) : PagedImageSource by delegate, com.llzx373.foldreader.core.paged.CroppedRenderSource {
+
+    /**
+     * 裁框渲染（M32）转发给被包装的来源。
+     *
+     * 注意只转发这一条：OCR 取图（[ocrPage]）走 `delegate.loadPage`，刻意保持**原页**渲染——
+     * 磁盘缓存的 OcrPage 坐标系是原页归一化，裁边开关来回切也不能让缓存坐标系跟着变。
+     */
+    override suspend fun loadPageCropped(
+        index: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+        box: FloatArray,
+    ): PagedPageImage? =
+        (delegate as? com.llzx373.foldreader.core.paged.CroppedRenderSource)
+            ?.loadPageCropped(index, targetWidth, targetHeight, box)
+
 
     /** 页级识别串行（OcrEngine 内部还有一把全局锁，这里防同页重复识别）。 */
     private val ocrMutex = Mutex()
