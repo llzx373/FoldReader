@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -86,6 +88,9 @@ private fun ColorDots(
  * 「章节规则」（选中行生成切割规则）只在 TXT 书原文模式下由调用方传入。
  * 译文视角（M19）下标注写入全部禁用：调用方把色点/笔记/下划线/书签/翻译都传 null，
  * 只留「复制 / 取消」。
+ *
+ * 一行放不下时（小屏 + 全量入口）横向滚动：Row 加 horizontalScroll 后自身宽度
+ * 被约束在可用宽度内，内容可滑，不再溢出被圆角裁掉。
  */
 @Composable
 fun SelectionActionBar(
@@ -110,7 +115,9 @@ fun SelectionActionBar(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             if (onPickColor != null) ColorDots(selectedArgb = -1L, onPick = onPickColor)
             if (onNote != null) TextButton(onClick = onNote) { Text("笔记") }

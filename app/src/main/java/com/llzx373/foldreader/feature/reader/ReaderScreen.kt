@@ -792,9 +792,12 @@ fun ReaderScreen(
     val hingeDp = with(density) { (splitRightPx - splitLeftPx).toDp() }
     val rightDp = with(density) { (size.width - splitRightPx).toDp() }
 
-    // 触摸点 → (行几何, 页内局部坐标)；dual 时按铰链分区，局部坐标扣页偏移
+    // 触摸点 → (行几何, 页内局部坐标)；dual 时按铰链分区，局部坐标扣页偏移。
+    // clampHinge 只给选区拖动用：划过中缝时钳到较近一页的内缘（x 越界由 caretAt 钳到
+    // 行首/行尾），几 dp 的铰链区不再是丢位移的死区；点按/链接保持「中缝不命中」。
     fun hitBoxes(
         offset: Offset,
+        clampHinge: Boolean = false,
     ): Triple<List<com.llzx373.foldreader.core.reader.LineBox>, Float, Float>? {
         if (size.width <= 0) return null
         val relX = offset.x - contentRect.left
@@ -813,6 +816,10 @@ fun ReaderScreen(
                 isLeft = false
                 localX = relX - rightPageX - rightInsetPx
             }
+            clampHinge -> {
+                isLeft = hingeClampToLeft(relX, leftPageRight, rightPageX)
+                localX = if (isLeft) relX - leftInsetPx else relX - rightPageX - rightInsetPx
+            }
             else -> return null // 铰链区
         }
         val boxes = (if (isLeft) leftLineBoxes.value else rightLineBoxes.value) ?: return null
@@ -820,9 +827,10 @@ fun ReaderScreen(
     }
 
     // 触摸点 → 字符光标位
-    fun hitCaret(offset: Offset): Long? = hitBoxes(offset)?.let { (boxes, x, y) ->
-        com.llzx373.foldreader.core.reader.caretAt(boxes, x, y)
-    }
+    fun hitCaret(offset: Offset, clampHinge: Boolean = false): Long? =
+        hitBoxes(offset, clampHinge)?.let { (boxes, x, y) ->
+            com.llzx373.foldreader.core.reader.caretAt(boxes, x, y)
+        }
 
     // 触摸点 → 链接命中（LINK/NOTEREF span）
     fun hitLink(offset: Offset): LinkHit? = hitBoxes(offset)?.let { (boxes, x, y) ->
@@ -908,7 +916,7 @@ fun ReaderScreen(
             selectionEdgeTurn(forward = edge == SelectionEdge.NEXT, isStartHandle = isStartHandle)
             return
         }
-        val caret = hitCaret(point) ?: return
+        val caret = hitCaret(point, clampHinge = true) ?: return
         selection = selection?.let { sel ->
             if (isStartHandle == true) sel.copy(anchor = caret) else sel.copy(caret = caret)
         }
@@ -1342,6 +1350,22 @@ fun ReaderScreen(
                             lineBoxes = scrollLineBoxes,
                             selectionColor = colors.accent.copy(alpha = 0.32f),
                         )
+                        selection?.let { sel ->
+                            ScrollSelectionHandles(
+                                selection = sel,
+                                viewModel = viewModel,
+                                listState = scrollListState,
+                                lineBoxes = scrollLineBoxes,
+                                dualColumns = scrollDual,
+                                leftDp = leftDp,
+                                hingeDp = hingeDp,
+                                rightDp = rightDp,
+                                pageWidthDp = pageWidthDp,
+                                accent = colors.accent,
+                                onSelectionChange = { selection = it },
+                                caretAtContent = ::scrollCaretAt,
+                            )
+                        }
                     }
                 } else {
                     val spread = uiState.spread
@@ -1530,7 +1554,8 @@ fun ReaderScreen(
             }
         }
 
-        // 选择手柄 + 选区操作条（菜单打开时隐藏；滚动模式略去手柄，仅操作条）
+        // 选择手柄 + 选区操作条（菜单打开时隐藏；滚动模式的手柄由内容区里的
+        // ScrollSelectionHandles 按 LazyColumn 项坐标渲染——这里的跨页坐标系对不上滚动列表）
         val activeSelection = selection
         if (activeSelection != null && !menuVisible && !uiState.loading && uiState.error == null) {
             val spread = uiState.spread
@@ -2561,6 +2586,111 @@ private fun ScrollContent(
                 )
             }
         }
+    }
+}
+
+/**
+ * 滚动模式的选区手柄。分页模式的手柄在 ReaderScreen 顶层按跨页坐标渲染；滚动模式的
+ * 端点落在 LazyColumn 的项里，坐标 = 项偏移 + 页内位置，项随滚动移动，所以单独立在这里。
+ * 拖到视口边缘时自动滚动并把端点推进到新露出的页（与长按拖动的边缘滚动同一节奏）。
+ *
+ * 端点所在项一定可见且有行几何：光标命中本就要求两者齐备，端点不可能落在不可见页上。
+ */
+@Composable
+private fun ScrollSelectionHandles(
+    selection: SelectionUi,
+    viewModel: ReaderViewModel,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    lineBoxes: Map<Long, List<com.llzx373.foldreader.core.reader.LineBox>>,
+    dualColumns: Boolean,
+    leftDp: Dp,
+    hingeDp: Dp,
+    rightDp: Dp,
+    pageWidthDp: Dp,
+    accent: Color,
+    onSelectionChange: (SelectionUi) -> Unit,
+    caretAtContent: (Float, Float) -> Long?,
+) {
+    val density = LocalDensity.current
+    val leftDpPx = with(density) { leftDp.toPx() }
+    val hingePx = with(density) { hingeDp.toPx() }
+    val rightDpPx = with(density) { rightDp.toPx() }
+    val pageWidthPx = with(density) { pageWidthDp.toPx() }
+    val edgeZonePx = with(density) { 40.dp.toPx() }
+    val currentSelection = rememberUpdatedState(selection)
+    val currentOnSelectionChange = rememberUpdatedState(onSelectionChange)
+    val currentCaretAt = rememberUpdatedState(caretAtContent)
+    var edgeScrollDir by remember { mutableStateOf(0) }
+    var dragViewportPoint by remember { mutableStateOf<Offset?>(null) }
+    var dragIsStartHandle by remember { mutableStateOf(false) }
+    LaunchedEffect(edgeScrollDir) {
+        if (edgeScrollDir == 0) return@LaunchedEffect
+        while (true) {
+            listState.scroll { scrollBy(edgeScrollDir * 16f) }
+            val point = dragViewportPoint
+            val sel = currentSelection.value
+            if (point != null) {
+                currentCaretAt.value(point.x, point.y)?.let { caret ->
+                    currentOnSelectionChange.value(
+                        if (dragIsStartHandle) sel.copy(anchor = caret) else sel.copy(caret = caret),
+                    )
+                }
+            }
+            delay(16L)
+        }
+    }
+    // 读 layoutInfo 订阅滚动：列表滚动时手柄跟着所在项移动
+    val visibleItems = listState.layoutInfo.visibleItemsInfo
+    val selEnd = if (selection.end > selection.start) selection.end else selection.start + 1
+    listOf(true to selection.start, false to selEnd).forEach { (isStart, offset) ->
+        val slot = scrollHandleSlot(
+            pages = viewModel.scrollPages,
+            dualColumns = dualColumns,
+            offset = offset,
+            leftColWidthPx = leftDpPx,
+            hingeWidthPx = hingePx,
+            rightColWidthPx = rightDpPx,
+            pageWidthPx = pageWidthPx,
+        ) ?: return@forEach
+        val itemKey = slot.itemKey
+        val itemTop = visibleItems.firstOrNull { it.key == itemKey }
+            ?.offset?.toFloat() ?: return@forEach
+        val boxes = lineBoxes[slot.pageCharStart] ?: return@forEach
+        SelectionHandle(
+            boxes = boxes,
+            offset = offset,
+            originXPx = slot.pageLeftPx,
+            originYPx = itemTop,
+            scrollYPx = 0f,
+            accent = accent,
+            onDrag = drag@{ pageLocal ->
+                // 项偏移每次现取：边缘自动滚动期间项在动，组合期那一份是旧的
+                val topNow = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key == itemKey }?.offset?.toFloat()
+                    ?: return@drag
+                val vx = slot.pageLeftPx + pageLocal.x
+                val vy = topNow + pageLocal.y
+                dragIsStartHandle = isStart
+                dragViewportPoint = Offset(vx, vy)
+                val info = listState.layoutInfo
+                val viewportH = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+                edgeScrollDir = when {
+                    vy < info.viewportStartOffset + edgeZonePx -> -1
+                    vy > info.viewportStartOffset + viewportH - edgeZonePx -> 1
+                    else -> 0
+                }
+                val sel = currentSelection.value
+                currentCaretAt.value(vx, vy)?.let { caret ->
+                    currentOnSelectionChange.value(
+                        if (isStart) sel.copy(anchor = caret) else sel.copy(caret = caret),
+                    )
+                }
+            },
+            onDragEnd = {
+                edgeScrollDir = 0
+                dragViewportPoint = null
+            },
+        )
     }
 }
 

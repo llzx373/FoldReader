@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -47,6 +48,11 @@ fun handlePosition(boxes: List<LineBox>, offset: Long): Offset? {
 /**
  * 单个选择手柄：圆点，可拖动调整选区端点。
  * 坐标换算：手柄中心画在行底下方，命中时把 y 抬回行内半行高处。
+ *
+ * pos 会随拖动实时重算（选区端点跟着手指走），所以它绝不能做 remember /
+ * pointerInput 的 key：手指每跨过一个字符 key 就变，手势协程重启后干等下一次
+ * 按下，本次拖动当场死掉（表现为"拖一两个字就卡住、不跟手"）。协程常驻，
+ * 最新值一律经 rememberUpdatedState 读取。
  */
 @Composable
 fun SelectionHandle(
@@ -57,39 +63,51 @@ fun SelectionHandle(
     scrollYPx: Float,
     accent: Color,
     onDrag: (pageLocal: Offset) -> Unit,
+    /** 松手/取消回调：滚动模式靠它停掉手柄拖动触发的边缘自动滚动。 */
+    onDragEnd: () -> Unit = {},
 ) {
     val density = LocalDensity.current
-    val touchPx = with(density) { 28.dp.toPx() }
-    val halfLine = boxes.firstOrNull()?.lineHeightPx?.div(2f) ?: 0f
+    val touchPx = with(density) { 44.dp.toPx() }
     val pos = handlePosition(boxes, offset) ?: return
-    // 手柄中心跟随选区重算；拖动期间以本地累计位置为准
-    var dragCenter by remember(pos) { mutableStateOf(Offset.Unspecified) }
-    val actual = dragCenter.takeIf { it != Offset.Unspecified } ?: pos
+    val currentPos by rememberUpdatedState(pos)
+    val halfLine by rememberUpdatedState(boxes.firstOrNull()?.lineHeightPx?.div(2f) ?: 0f)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    // 拖动期间以本地累计位置为准（跟随手指），松手后回贴选区端点
+    var dragCenter by remember { mutableStateOf(Offset.Unspecified) }
     Box(
         modifier = Modifier
             .offset {
+                // 在 placement 里读状态：拖动逐帧只重摆位，不触发整次重组
+                val actual = dragCenter.takeIf { it != Offset.Unspecified } ?: currentPos
                 IntOffset(
                     (originXPx + actual.x - touchPx / 2f).roundToInt(),
                     (originYPx + actual.y - scrollYPx + 4.dp.toPx() - touchPx / 2f).roundToInt(),
                 )
             }
-            .size(28.dp)
-            .pointerInput(pos) {
+            .size(44.dp)
+            .pointerInput(Unit) {
                 detectDragGestures(
-                    onDragStart = { dragCenter = pos },
+                    onDragStart = { dragCenter = currentPos },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         dragCenter =
-                            (dragCenter.takeIf { it != Offset.Unspecified } ?: pos) + dragAmount
-                        onDrag(Offset(dragCenter.x, dragCenter.y - halfLine))
+                            (dragCenter.takeIf { it != Offset.Unspecified } ?: currentPos) + dragAmount
+                        currentOnDrag(Offset(dragCenter.x, dragCenter.y - halfLine))
                     },
-                    onDragEnd = { dragCenter = Offset.Unspecified },
-                    onDragCancel = { dragCenter = Offset.Unspecified },
+                    onDragEnd = {
+                        dragCenter = Offset.Unspecified
+                        currentOnDragEnd()
+                    },
+                    onDragCancel = {
+                        dragCenter = Offset.Unspecified
+                        currentOnDragEnd()
+                    },
                 )
             },
     ) {
-        Canvas(modifier = Modifier.size(28.dp)) {
-            val r = 6.dp.toPx()
+        Canvas(modifier = Modifier.size(44.dp)) {
+            val r = 7.dp.toPx()
             drawCircle(color = accent, radius = r)
             drawCircle(
                 color = Color.White.copy(alpha = 0.9f),

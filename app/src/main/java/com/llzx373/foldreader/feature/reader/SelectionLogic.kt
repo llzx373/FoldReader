@@ -1,5 +1,7 @@
 package com.llzx373.foldreader.feature.reader
 
+import com.llzx373.foldreader.core.reader.Page
+
 /** 标注快照长度上限（字符），超出截断；校验时按快照长度做前缀比对。 */
 const val ANNOTATION_SNAPSHOT_MAX_CHARS = 8192
 
@@ -16,6 +18,53 @@ fun intersectRange(
 }
 
 enum class SelectionEdge { NONE, PREVIOUS, NEXT }
+
+/**
+ * 铰链区命中的归属：选区拖动划过双页中缝时，不让这几 dp 成为死区，
+ * 按较近一侧钳到该页内缘（true = 左页，x 越界部分由 caretAt 钳到行首/行尾）。
+ * 只有选区拖动走这里；点按与链接命中保持「中缝不命中」。
+ */
+fun hingeClampToLeft(relX: Float, leftPageRight: Float, rightPageLeft: Float): Boolean =
+    relX - leftPageRight <= rightPageLeft - relX
+
+/** 滚动模式手柄落位：端点所在页、所在 LazyColumn 项的 key、页左缘在内容区内的 x。 */
+data class ScrollHandleSlot(
+    val pageCharStart: Long,
+    val itemKey: Long,
+    val pageLeftPx: Float,
+)
+
+/**
+ * 端点 [offset] 在滚动页流里的落位；页流为空返回 null。
+ * 页边界（== 下一页 charStart）归下一页；越过末页 charEnd 钳到末页、越过首页
+ * charStart 钳到首页，与 handlePosition 对页内越界的钳制口径一致。
+ * 双栏时一行两页共一个项（key = 行首页 charStart），页左缘按列内居中 inset 计算；
+ * 单栏页铺满内容宽，页左缘恒为 0。
+ */
+fun scrollHandleSlot(
+    pages: List<Page>,
+    dualColumns: Boolean,
+    offset: Long,
+    leftColWidthPx: Float,
+    hingeWidthPx: Float,
+    rightColWidthPx: Float,
+    pageWidthPx: Float,
+): ScrollHandleSlot? {
+    if (pages.isEmpty()) return null
+    val index = pages.indexOfFirst { offset >= it.charStart && offset < it.charEnd }
+        .takeIf { it >= 0 }
+        ?: if (offset >= pages.last().charEnd) pages.lastIndex else 0
+    val itemIndex = if (dualColumns) (index / 2) * 2 else index
+    val pageLeftPx = when {
+        !dualColumns -> 0f
+        index % 2 == 0 -> (leftColWidthPx - pageWidthPx).coerceAtLeast(0f) / 2f
+        else -> {
+            leftColWidthPx + hingeWidthPx +
+                (rightColWidthPx - pageWidthPx).coerceAtLeast(0f) / 2f
+        }
+    }
+    return ScrollHandleSlot(pages[index].charStart, pages[itemIndex].charStart, pageLeftPx)
+}
 
 /** 拖动点超出内容区边缘 [marginPx] 时判定翻页方向（x 优先，其次 y）。 */
 fun selectionEdgeAt(

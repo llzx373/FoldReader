@@ -1,7 +1,10 @@
 package com.llzx373.foldreader.feature.reader
 
+import com.llzx373.foldreader.core.reader.Page
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CrossPageSelectionTest {
@@ -83,4 +86,59 @@ class CrossPageSelectionTest {
         )
         assertNull(snapshotVerifyRange(500, 400, 10, 1000L))
     }
+
+    @Test
+    fun `hinge clamp picks nearer page`() {
+        // 中缝 [500, 540]：靠左归左页，靠右归右页，正中归左页
+        assertTrue(hingeClampToLeft(505f, 500f, 540f))
+        assertFalse(hingeClampToLeft(535f, 500f, 540f))
+        assertTrue(hingeClampToLeft(520f, 500f, 540f))
+    }
+
+    @Test
+    fun `scroll handle slot single column`() {
+        val pages = pagesOf(0L, 300L, 600L, 900L)
+        // 单栏：项 key = 页 charStart，页左缘恒 0（页铺满内容宽，列宽参数不参与）
+        assertEquals(
+            ScrollHandleSlot(pageCharStart = 300L, itemKey = 300L, pageLeftPx = 0f),
+            scrollHandleSlot(pages, false, 450L, 500f, 40f, 500f, 460f),
+        )
+        // 页边界（== 下一页 charStart）归下一页
+        assertEquals(
+            300L,
+            scrollHandleSlot(pages, false, 300L, 0f, 0f, 0f, 0f)!!.pageCharStart,
+        )
+        // 越过末页 charEnd 钳到末页；越过首页 charStart 钳到首页
+        assertEquals(
+            600L,
+            scrollHandleSlot(pages, false, 900L, 0f, 0f, 0f, 0f)!!.pageCharStart,
+        )
+        assertEquals(
+            0L,
+            scrollHandleSlot(pages, false, -5L, 0f, 0f, 0f, 0f)!!.pageCharStart,
+        )
+        // 空页流不落位
+        assertNull(scrollHandleSlot(emptyList(), false, 0L, 0f, 0f, 0f, 0f))
+    }
+
+    @Test
+    fun `scroll handle slot dual columns`() {
+        // 4 页两行；列宽 500 + 中缝 40 + 列宽 500，页宽 460 → 列内 inset 20
+        val pages = pagesOf(0L, 100L, 200L, 300L, 400L)
+        // 左列（index 2）：项 key = 行首页 charStart，页左缘 = 列内居中 inset
+        assertEquals(
+            ScrollHandleSlot(pageCharStart = 200L, itemKey = 200L, pageLeftPx = 20f),
+            scrollHandleSlot(pages, true, 250L, 500f, 40f, 500f, 460f),
+        )
+        // 右列（index 3）：项 key 同行首页，页左缘 = 左列 + 中缝 + 右列 inset
+        assertEquals(
+            ScrollHandleSlot(pageCharStart = 300L, itemKey = 200L, pageLeftPx = 560f),
+            scrollHandleSlot(pages, true, 350L, 500f, 40f, 500f, 460f),
+        )
+    }
+
+    private fun pagesOf(vararg bounds: Long): List<Page> =
+        bounds.asIterable().zipWithNext().map { (start, end) ->
+            Page(charStart = start, charEnd = end, lines = emptyList(), paddingLeft = 0f, paddingRight = 0f)
+        }
 }
