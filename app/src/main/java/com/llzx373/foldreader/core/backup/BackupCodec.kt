@@ -33,6 +33,8 @@ class BackupCodec(
     private val readingSessionDao: ReadingSessionDao,
     /** M20 术语表（glossary 段）；null = 不导出（测试或旧装配点）。 */
     private val glossaryTermDao: com.llzx373.foldreader.core.data.db.GlossaryTermDao? = null,
+    /** M28 生词本（vocabulary 段）；null = 不导出。 */
+    private val wordEntryDao: com.llzx373.foldreader.core.data.db.WordEntryDao? = null,
 ) {
 
     suspend fun exportJson(): JSONObject {
@@ -177,6 +179,26 @@ class BackupCodec(
                 )
             }
             root.put("glossary", glossaryJson)
+        }
+        // M28 生词本（v8 起）：词条 + 释义 + 例句 + 位置；bookId 按 contentHash 附带，
+        // 换机恢复时重映射（书未导入则跳过该词条，与术语表同口径）
+        wordEntryDao?.let { dao ->
+            val booksById = books.associateBy { it.id }
+            val vocabularyJson = JSONArray()
+            dao.getAll().forEach { entry ->
+                val book = booksById[entry.bookId] ?: return@forEach
+                vocabularyJson.put(
+                    JSONObject()
+                        .put("word", entry.word)
+                        .put("definition", entry.definition)
+                        .put("contextSentence", entry.contextSentence)
+                        .put("charOffset", entry.charOffset)
+                        .put("source", entry.source)
+                        .put("createdAt", entry.createdAt)
+                        .put("contentHash", book.contentHash),
+                )
+            }
+            root.put("vocabulary", vocabularyJson)
         }
         return root
     }
@@ -383,6 +405,36 @@ class BackupCodec(
             }
         }
 
+        // M28 生词本（v8 起）：按 contentHash 重映射 bookId（书未导入则跳过该词条），
+        // 按 (bookId, word, charOffset) 去重避免重复恢复
+        var restoredVocabulary = 0
+        root.optJSONArray("vocabulary")?.let { arr ->
+            val dao = wordEntryDao
+            if (dao != null) {
+                val existing = dao.getAll()
+                    .mapTo(HashSet()) { "${it.bookId}${it.word}${it.charOffset}" }
+                for (i in 0 until arr.length()) {
+                    val v = arr.getJSONObject(i)
+                    val hash = if (v.isNull("contentHash")) null else v.optString("contentHash")
+                    val book = hash?.let { bookshelfRepository.findByContentHash(it) } ?: continue
+                    val word = v.optString("word")
+                    if (word.isBlank()) continue
+                    val entity = com.llzx373.foldreader.core.data.db.WordEntryEntity(
+                        bookId = book.id,
+                        word = word,
+                        definition = v.optString("definition"),
+                        contextSentence = v.optString("contextSentence"),
+                        charOffset = v.optLong("charOffset"),
+                        source = v.optString("source"),
+                        createdAt = v.optLong("createdAt"),
+                    )
+                    if (!existing.add("${book.id}$word${entity.charOffset}")) continue
+                    dao.insert(entity)
+                    restoredVocabulary++
+                }
+            }
+        }
+
         return ImportResult(
             restoredBooks = restoredBooks,
             missingBookTitles = missing,
@@ -391,6 +443,7 @@ class BackupCodec(
             restoredSessions = restoredSessions,
             restoredBookPrefs = restoredBookPrefs,
             restoredGlossary = restoredGlossary,
+            restoredVocabulary = restoredVocabulary,
         )
     }
 

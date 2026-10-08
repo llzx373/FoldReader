@@ -696,6 +696,7 @@ class AppContainer(context: Context) {
         bookPrefsDao = database.bookPrefsDao(),
         readingSessionDao = database.readingSessionDao(),
         glossaryTermDao = database.glossaryTermDao(),
+        wordEntryDao = database.wordEntryDao(),
     )
     /** WebDAV 备份编排（M25）：编解码复用 backupManager，传输记账进外发历史台账。 */
     val webDavBackupManager = com.llzx373.foldreader.core.backup.webdav.WebDavBackupManager(

@@ -1,5 +1,8 @@
 package com.llzx373.foldreader.feature.settings
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,14 +29,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 生词本对话框（M28）：查词卡片「收藏」的词条列表——按时间 / 按书两种分组，
@@ -41,9 +49,36 @@ import java.util.Locale
  */
 @Composable
 fun VocabularyDialog(viewModel: SettingsViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val items by viewModel.vocabulary.collectAsState()
     var groupByBook by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+
+    // 导出 CSV（Anki 兼容三列）：SAF 另存为；空表时给提示不落空文件
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) {
+            val snapshot = items.map { it.entry }
+            scope.launch {
+                val error = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val stream = context.contentResolver.openOutputStream(uri)
+                            ?: error("无法写入文件")
+                        stream.bufferedWriter(Charsets.UTF_8).use {
+                            it.write(com.llzx373.foldreader.core.export.VocabularyCsv.render(snapshot))
+                        }
+                    }.exceptionOrNull()?.message
+                }
+                Toast.makeText(
+                    context,
+                    error ?: "已导出 ${snapshot.size} 条生词",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -103,6 +138,17 @@ fun VocabularyDialog(viewModel: SettingsViewModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    exportLauncher.launch(
+                        com.llzx373.foldreader.core.export.VocabularyCsv
+                            .fileName(System.currentTimeMillis()),
+                    )
+                },
+                enabled = items.isNotEmpty(),
+            ) { Text("导出 CSV") }
+        },
     )
 }
 

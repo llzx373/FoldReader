@@ -440,6 +440,124 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `v8 生词本随备份往返且按 contentHash 重映射`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceVocabulary = FakeWordEntryDao()
+        sourceVocabulary.rows += com.llzx373.foldreader.core.data.db.WordEntryEntity(
+            id = 1, bookId = 1, word = "apple", definition = "n. 苹果",
+            contextSentence = "an apple a day", charOffset = 100, source = "牛津", createdAt = 42,
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = sourceVocabulary,
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(mutableListOf(book(id = 7, hash = "hashA")))
+        val targetVocabulary = FakeWordEntryDao()
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = targetVocabulary,
+        ).importJson(json)
+
+        assertEquals(1, result.restoredVocabulary)
+        val entry = targetVocabulary.rows.single()
+        assertEquals(7L, entry.bookId) // bookId 已重映射为本机 id
+        assertEquals("apple", entry.word)
+        assertEquals("n. 苹果", entry.definition)
+        assertEquals("an apple a day", entry.contextSentence)
+        assertEquals(100L, entry.charOffset)
+        assertEquals("牛津", entry.source)
+        assertEquals(42L, entry.createdAt)
+    }
+
+    @Test
+    fun `v8 生词本恢复时书未导入则跳过该词条`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceVocabulary = FakeWordEntryDao()
+        sourceVocabulary.rows += com.llzx373.foldreader.core.data.db.WordEntryEntity(
+            id = 1, bookId = 1, word = "apple", definition = "n. 苹果",
+            contextSentence = "", charOffset = 100, source = "牛津", createdAt = 42,
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = sourceVocabulary,
+        ).exportJson().toString()
+
+        val targetVocabulary = FakeWordEntryDao()
+        val result = BackupCodec(
+            FakeBookshelfRepository(), // 目标机没有这本书
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = targetVocabulary,
+        ).importJson(json)
+
+        assertEquals(0, result.restoredVocabulary)
+        assertTrue(targetVocabulary.rows.isEmpty())
+    }
+
+    @Test
+    fun `v7 旧备份缺 vocabulary 段时不产生任何词条`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 7,
+              "books": []
+            }
+        """.trimIndent()
+        val targetVocabulary = FakeWordEntryDao()
+        BackupCodec(
+            FakeBookshelfRepository(),
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = targetVocabulary,
+        ).importJson(legacy)
+
+        assertTrue(targetVocabulary.rows.isEmpty())
+    }
+
+    @Test
+    fun `v8 词条按书加词加位置去重——重复恢复不堆重复行`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
+        val sourceVocabulary = FakeWordEntryDao()
+        sourceVocabulary.rows += com.llzx373.foldreader.core.data.db.WordEntryEntity(
+            id = 1, bookId = 1, word = "apple", definition = "n. 苹果",
+            contextSentence = "", charOffset = 100, source = "牛津", createdAt = 42,
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = sourceVocabulary,
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(mutableListOf(book(id = 7, hash = "hashA")))
+        val targetVocabulary = FakeWordEntryDao()
+        val target = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+            wordEntryDao = targetVocabulary,
+        )
+        target.importJson(json)
+        target.importJson(json) // 再导一次同一备份
+
+        assertEquals(1, targetVocabulary.rows.size)
+    }
+
+    @Test
     fun `v4 备份恢复 EPUB 扩展元数据且空值恢复为 null`() = runBlocking {
         val sourceBooks = FakeBookshelfRepository(
             mutableListOf(
@@ -932,6 +1050,35 @@ class BackupCodecTest {
         override suspend fun getAll(): List<ReadingSessionEntity> = rows.toList()
         override suspend fun countReadingDays(bookId: Long): Int =
             rows.filter { it.bookId == bookId }.size
+    }
+
+    /** 内存生词本：insert 追加，恢复侧的去重在 BackupCodec（bookId+word+charOffset）。 */
+    private class FakeWordEntryDao : com.llzx373.foldreader.core.data.db.WordEntryDao {
+        val rows = mutableListOf<com.llzx373.foldreader.core.data.db.WordEntryEntity>()
+
+        override fun observeAll(): Flow<List<com.llzx373.foldreader.core.data.db.WordEntryEntity>> =
+            flowOf(rows.toList())
+
+        override fun observeByBook(
+            bookId: Long,
+        ): Flow<List<com.llzx373.foldreader.core.data.db.WordEntryEntity>> =
+            flowOf(rows.filter { it.bookId == bookId })
+
+        override suspend fun getAll(): List<com.llzx373.foldreader.core.data.db.WordEntryEntity> =
+            rows.toList()
+
+        override suspend fun insert(
+            entry: com.llzx373.foldreader.core.data.db.WordEntryEntity,
+        ): Long {
+            rows += entry
+            return rows.size.toLong()
+        }
+
+        override suspend fun deleteById(id: Long) {
+            rows.removeAll { it.id == id }
+        }
+
+        override suspend fun count(): Int = rows.size
     }
 
     /** 内存术语表：upsert 按 (scope, ownerKey, source) 去重，与唯一索引同口径。 */
