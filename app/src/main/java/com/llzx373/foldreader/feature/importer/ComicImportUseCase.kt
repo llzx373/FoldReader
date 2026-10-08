@@ -117,6 +117,19 @@ class ComicImportUseCase(
             ?.takeIf { it.isNotBlank() }
             ?: DEFAULT_TITLE
         val coverPath = extractCoverPath(uri, container, contentHash)
+        // ComicInfo.xml（M31）：漫画容器的事实标准元数据——系列/卷号/作者回填，
+        // 系列匹配（前后卷切换）优先用 Series 字段，比文件名主干准。zip 读中央目录、
+        // 目录漫画列目录都很便宜，导入即读；rar/tar/7z 要顺序扫源，挪到预热（prepare）回填。
+        val comicInfo = when (container) {
+            ComicContainer.ZIP, ComicContainer.FOLDER ->
+                archiveFactory.readComicInfo(uri, container, contentHash)
+                    ?.let { bytes ->
+                        com.llzx373.foldreader.core.comic.ComicInfoParser.parse(bytes) {
+                            android.util.Xml.newPullParser()
+                        }
+                    }
+            else -> null
+        }
         // 容器漫画在没有持久授权时（外部「打开方式」的临时 content://）把源文件复制进私有目录，
         // 否则授权失效后这本书就打不开；SAF 导入的有持久授权，直接引用以保住「同目录找卷」。
         // 复制放在页数/封面之后，容器读不出来时不留孤儿副本。目录漫画没有单一文件可复制。
@@ -138,7 +151,7 @@ class ComicImportUseCase(
         val bookId = bookshelfRepository.upsertBook(
             BookEntity(
                 title = title,
-                author = null,
+                author = comicInfo?.writer,
                 fileUri = contentFileUri,
                 contentHash = contentHash,
                 format = BookFormat.COMIC,
@@ -152,6 +165,8 @@ class ComicImportUseCase(
                 coverPath = coverPath,
                 comicContainer = container,
                 comicPageCount = pageCount,
+                seriesName = comicInfo?.series,
+                seriesIndex = comicInfo?.number,
             ),
         )
         return Outcome.Registered(bookId, title, needsPreparation = pageCount == null)
@@ -171,6 +186,24 @@ class ComicImportUseCase(
         val archive = archiveFactory.open(uri, container, book.contentHash)
         val pageCount = archive.use { it.pages.size }
         bookshelfRepository.updateComicPageCount(bookId, pageCount)
+        // ComicInfo.xml 回填（M31）：rar/tar/7z 导入时没读（顺序扫源成本高），预热顺带补上；
+        // 只填空值——用户改过或导入时已读到的字段不动。
+        if (book.author.isNullOrBlank() || book.seriesName.isNullOrBlank()) {
+            archiveFactory.readComicInfo(uri, container, book.contentHash)
+                ?.let { bytes ->
+                    com.llzx373.foldreader.core.comic.ComicInfoParser.parse(bytes) {
+                        android.util.Xml.newPullParser()
+                    }
+                }
+                ?.let { info ->
+                    bookshelfRepository.backfillComicInfo(
+                        bookId,
+                        author = info.writer,
+                        seriesName = info.series,
+                        seriesIndex = info.number,
+                    )
+                }
+        }
         if (book.coverPath == null) {
             val dir = coversDir ?: return
             val cover = archive.use { opened ->

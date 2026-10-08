@@ -232,6 +232,24 @@ class BookshelfRepositoryDeleteTest {
                 }
             }
         }
+        override suspend fun backfillComicInfo(
+            bookId: Long,
+            author: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+        ) {
+            books.replaceAll {
+                if (it.id != bookId) {
+                    it
+                } else {
+                    it.copy(
+                        author = if (author != null && it.author.isNullOrBlank()) author else it.author,
+                        seriesName = if (seriesName != null && it.seriesName.isNullOrBlank()) seriesName else it.seriesName,
+                        seriesIndex = if (seriesIndex != null && it.seriesIndex.isNullOrBlank()) seriesIndex else it.seriesIndex,
+                    )
+                }
+            }
+        }
         override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) {
             books.replaceAll { if (it.id == bookId) it.copy(comicLocalPath = localPath) else it }
         }

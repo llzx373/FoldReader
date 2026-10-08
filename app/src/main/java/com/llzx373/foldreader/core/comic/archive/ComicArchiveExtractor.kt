@@ -82,6 +82,82 @@ internal object ComicArchiveExtractor {
     internal fun isPageCandidate(name: String): Boolean =
         !ComicPageOrdering.isJunkPath(name) && ComicPageOrdering.isImageName(name)
 
+    /**
+     * 顺序容器里找 ComicInfo.xml（M31）：tar/rar/7z 只能顺序扫，按条目名命中即读即停。
+     * 扫不到返回 null。读出的字节按 [ComicInfoParser.MAX_BYTES] 截断（防异常条目）。
+     */
+    fun readComicInfoTar(input: InputStream): ByteArray? {
+        TarArchiveInputStream(input).use { tar ->
+            while (true) {
+                val entry = tar.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val name = entry.name ?: continue
+                if (com.llzx373.foldreader.core.comic.ComicInfoParser.isComicInfoPath(name)) {
+                    return tar.readBounded()
+                }
+            }
+        }
+        return null
+    }
+
+    fun readComicInfoSevenZip(channel: SeekableByteChannel): ByteArray? {
+        SevenZFile.builder().setSeekableByteChannel(channel).get().use { sevenZ ->
+            val buffer = ByteArray(COPY_BUFFER)
+            while (true) {
+                val entry = sevenZ.nextEntry ?: break
+                val name = entry.name
+                if (entry.isDirectory || name == null) {
+                    while (sevenZ.read(buffer) >= 0) Unit
+                    continue
+                }
+                if (com.llzx373.foldreader.core.comic.ComicInfoParser.isComicInfoPath(name)) {
+                    val out = java.io.ByteArrayOutputStream()
+                    var total = 0
+                    while (total < com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES) {
+                        val n = sevenZ.read(buffer)
+                        if (n < 0) break
+                        val take = minOf(n, com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES - total)
+                        out.write(buffer, 0, take)
+                        total += take
+                    }
+                    return out.toByteArray()
+                }
+                // 不取的条目也要读干净，否则下一个 nextEntry 拿到的位置是错的
+                while (sevenZ.read(buffer) >= 0) Unit
+            }
+        }
+        return null
+    }
+
+    fun readComicInfoRar(input: InputStream): ByteArray? {
+        Archive(input).use { archive ->
+            while (true) {
+                val header = archive.nextFileHeader() ?: break
+                val name = header.fileName
+                if (header.isDirectory || name == null) continue
+                if (com.llzx373.foldreader.core.comic.ComicInfoParser.isComicInfoPath(name)) {
+                    return archive.getInputStream(header).use { it.readBounded() }
+                }
+            }
+        }
+        return null
+    }
+
+    /** 有界读取：最多 [ComicInfoParser.MAX_BYTES]，流读完为止。 */
+    private fun InputStream.readBounded(): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(COPY_BUFFER)
+        var total = 0
+        while (total < com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES) {
+            val n = read(buffer)
+            if (n < 0) break
+            val take = minOf(n, com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES - total)
+            out.write(buffer, 0, take)
+            total += take
+        }
+        return out.toByteArray()
+    }
+
     internal fun pageTempName(counter: Int): String = "p%06d".format(counter)
 
     private fun copyToPage(targetDir: File, counter: Int, input: InputStream): File {

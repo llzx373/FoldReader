@@ -860,6 +860,7 @@ class AppContainer(context: Context) {
             uri = book.fileUri,
             bookId = book.id,
             isDirectory = book.comicContainer == ComicContainer.FOLDER,
+            seriesName = book.seriesName,
         )
 
         // 目录来源：同目录里所有「漫画容器或目录」的同级条目
@@ -893,6 +894,7 @@ class AppContainer(context: Context) {
                     uri = it.fileUri,
                     bookId = it.id,
                     isDirectory = it.comicContainer == ComicContainer.FOLDER,
+                    seriesName = it.seriesName,
                 )
             }
 

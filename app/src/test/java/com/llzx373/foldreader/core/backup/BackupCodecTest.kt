@@ -1072,6 +1072,12 @@ class BackupCodecTest {
             description: String?,
             subjects: String?,
         ) = Unit
+        override suspend fun backfillComicInfo(
+            bookId: Long,
+            author: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+        ) = Unit
         override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) = Unit
         override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
         override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit

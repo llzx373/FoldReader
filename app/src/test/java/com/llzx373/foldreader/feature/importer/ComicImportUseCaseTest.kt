@@ -131,6 +131,49 @@ class ComicImportUseCaseTest {
     }
 
     @Test
+    fun `zip 里的 ComicInfo 回填系列卷号作者`() = runBlocking {
+        // cbz 根目录带一份 ComicInfo.xml：登记即读（zip 读中央目录很便宜）
+        val file = temp.newFile("with-info.cbz")
+        ZipOutputStream(file.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("ComicInfo.xml"))
+            zip.write(
+                """<ComicInfo><Series>某系列</Series><Number>7</Number><Writer>某作者</Writer></ComicInfo>"""
+                    .toByteArray(Charsets.UTF_8),
+            )
+            zip.closeEntry()
+            listOf(page1, page2).forEachIndexed { index, bytes ->
+                zip.putNextEntry(ZipEntry("%03d.png".format(index + 1)))
+                zip.write(bytes)
+                zip.closeEntry()
+            }
+        }
+        track(file)
+        val useCase = useCase()
+
+        val outcome = useCase.register(uriOf(file), ComicContainer.ZIP, BookSource.IMPORT)
+
+        assertTrue("outcome=$outcome", outcome is ComicImportUseCase.Outcome.Registered)
+        val book = repository.books.value.single()
+        assertEquals("某系列", book.seriesName)
+        assertEquals("7", book.seriesIndex)
+        assertEquals("某作者", book.author)
+        // 书架标题仍以导入文件名为准（M17 口径）
+        assertEquals("with-info", book.title)
+    }
+
+    @Test
+    fun `无 ComicInfo 时系列字段留空`() = runBlocking {
+        val useCase = useCase()
+
+        useCase.register(uriOf(cbz("plain.cbz")), ComicContainer.ZIP, BookSource.IMPORT)
+
+        val book = repository.books.value.single()
+        assertNull(book.seriesName)
+        assertNull(book.seriesIndex)
+        assertNull(book.author)
+    }
+
+    @Test
     fun `同一路径重复登记判重复`() = runBlocking {
         val file = cbz("same.cbz")
         val useCase = useCase()

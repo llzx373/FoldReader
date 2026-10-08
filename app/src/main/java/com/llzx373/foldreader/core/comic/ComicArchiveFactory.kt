@@ -14,6 +14,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SeekableByteChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.archivers.zip.ZipFile
 
 /**
  * 按容器类型打开漫画。
@@ -54,6 +55,72 @@ class ComicArchiveFactory(
     /** 只数页数（导入/预热用），不做封面、不保留句柄。 */
     suspend fun pageCount(uri: Uri, container: ComicContainer, contentHash: String): Int =
         open(uri, container, contentHash).use { it.pages.size }
+
+    /**
+     * 读容器里的 ComicInfo.xml 原始字节（M31）；没有或读不出来返回 null。
+     *
+     * - ZIP：中央目录里按条目名找（任意深度，大小写不敏感），单条解压；
+     * - FOLDER：只看根目录一级（ComicInfo.xml 事实标准位置）；
+     * - TAR/7z/RAR：没有随机访问，只能顺序扫一遍源（预热时顺带做，别为首屏跑这个）。
+     */
+    suspend fun readComicInfo(
+        uri: Uri,
+        container: ComicContainer,
+        contentHash: String,
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            when (container) {
+                ComicContainer.ZIP -> readComicInfoZip(uri)
+                ComicContainer.FOLDER -> readComicInfoFolder(uri)
+                ComicContainer.TAR -> openChannel(uri).use { channel ->
+                    ComicArchiveExtractor.readComicInfoTar(Channels.newInputStream(channel))
+                }
+                ComicContainer.SEVEN_ZIP -> openChannel(uri).use { channel ->
+                    ComicArchiveExtractor.readComicInfoSevenZip(channel)
+                }
+                ComicContainer.RAR -> openChannel(uri).use { channel ->
+                    ComicArchiveExtractor.readComicInfoRar(Channels.newInputStream(channel))
+                }
+            }
+        }.getOrNull()
+    }
+
+    private fun readComicInfoZip(uri: Uri): ByteArray? =
+        openChannel(uri).use { channel ->
+            ZipFile.Builder().setSeekableByteChannel(channel).get().use { zip ->
+                val entry = zip.entries.asSequence().firstOrNull { entry ->
+                    !entry.isDirectory &&
+                        com.llzx373.foldreader.core.comic.ComicInfoParser.isComicInfoPath(entry.name)
+                } ?: return@use null
+                if (entry.size > com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES) {
+                    return@use null
+                }
+                zip.getInputStream(entry).use { it.readBytes() }
+            }
+        }
+
+    private fun readComicInfoFolder(uri: Uri): ByteArray? {
+        val child = listDocumentChildren(uri).firstOrNull {
+            !it.isDirectory &&
+                com.llzx373.foldreader.core.comic.ComicInfoParser.isComicInfoPath(it.name)
+        } ?: return null
+        return openDocumentStream(child.key)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            var total = 0
+            while (total < com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                val take = minOf(
+                    n,
+                    com.llzx373.foldreader.core.comic.ComicInfoParser.MAX_BYTES - total,
+                )
+                out.write(buffer, 0, take)
+                total += take
+            }
+            out.toByteArray()
+        }
+    }
 
     /**
      * 生成「复制到本地」的持久副本；已存在则直接复用。

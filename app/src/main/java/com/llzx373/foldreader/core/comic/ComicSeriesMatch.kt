@@ -19,6 +19,12 @@ data class ComicSeriesCandidate(
     val uri: String,
     val bookId: Long? = null,
     val isDirectory: Boolean = false,
+    /**
+     * ComicInfo.xml 的 Series 字段（M31，仅已入库的书可能有）。
+     * 两边都有时优先按它判同系列——作者声明的系列名比文件名主干可靠
+     * （文件名可能带汉化组/卷内标题等噪声把主干弄歪）。
+     */
+    val seriesName: String? = null,
 )
 
 /**
@@ -68,6 +74,28 @@ fun isSameComicSeries(a: String, b: String): Boolean {
     return sa.isNotEmpty() && sa == sb
 }
 
+/**
+ * 归一化系列名（ComicInfo.xml 的 Series 字段）：全角折半角、小写、空白压缩。
+ * 空白/缺失返回 null（null = 没有可用系列名，判同系列时退回文件名主干）。
+ */
+fun normalizeComicSeriesName(series: String?): String? = series
+    ?.let { foldFullWidth(it) }
+    ?.lowercase()
+    ?.trim()
+    ?.replace(WHITESPACE_RUN, " ")
+    ?.takeIf { it.isNotEmpty() }
+
+/**
+ * 两个候选是否同系列（M31）：Series 字段两边都有时按归一化 Series 判
+ * （作者声明的系列名，不受文件名噪声影响）；任一侧缺失退回文件名主干相等。
+ */
+fun isSameSeriesCandidate(a: ComicSeriesCandidate, b: ComicSeriesCandidate): Boolean {
+    val sa = normalizeComicSeriesName(a.seriesName)
+    val sb = normalizeComicSeriesName(b.seriesName)
+    if (sa != null && sb != null) return sa == sb
+    return isSameComicSeries(a.name, b.name)
+}
+
 /** 同系列排序：都有卷号按卷号；只有一边有卷号时，**有卷号的排在前面**（有序卷在前、番外在后）。 */
 fun compareComicSeries(a: String, b: String): Int {
     val va = comicSeriesVolume(a)
@@ -103,7 +131,7 @@ fun mergeComicSeries(
     byUri[current.uri] = current
 
     return byUri.values
-        .filter { it.uri == current.uri || isSameComicSeries(it.name, current.name) }
+        .filter { it.uri == current.uri || isSameSeriesCandidate(it, current) }
         .sortedWith { a, b -> compareComicSeries(a.name, b.name) }
 }
 

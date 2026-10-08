@@ -127,4 +127,39 @@ class ComicSeriesMatchTest {
 
         assertEquals(listOf("uri://v1"), merged.map { it.uri })
     }
+
+    @Test
+    fun `ComicInfo 系列名归一化`() {
+        assertEquals("foo bar", normalizeComicSeriesName("  Foo　Bar  "))
+        assertEquals("foo", normalizeComicSeriesName("Ｆｏｏ"))
+        assertNull(normalizeComicSeriesName(null))
+        assertNull(normalizeComicSeriesName("   "))
+    }
+
+    @Test
+    fun `ComicInfo 系列名优先于文件名主干`() {
+        // 文件名主干不同（汉化组噪声把主干弄歪），但 ComicInfo Series 一致 → 同系列
+        val a = ComicSeriesCandidate("[A组] 某漫画 第01卷.cbz", "uri://a", seriesName = "某漫画")
+        val b = ComicSeriesCandidate("[B组] 某漫画 完全版 02.cbz", "uri://b", seriesName = "某漫画")
+        assertTrue(isSameSeriesCandidate(a, b))
+        // 一边没有 Series：退回文件名主干
+        val c = ComicSeriesCandidate("Bar 01.cbz", "uri://c")
+        assertFalse(isSameSeriesCandidate(a, c))
+        // Series 不同：文件名主干相同也不算同系列（作者声明优先）
+        val d = ComicSeriesCandidate("Baz 01.cbz", "uri://d", seriesName = "别的系列")
+        val e = ComicSeriesCandidate("Baz 02.cbz", "uri://e", seriesName = "某漫画")
+        assertFalse(isSameSeriesCandidate(d, e))
+    }
+
+    @Test
+    fun `系列匹配合并用 ComicInfo 系列名`() {
+        // 当前卷有 Series；库内一卷文件名主干不同但 Series 相同 → 并入系列
+        val current = ComicSeriesCandidate("Foo 第02卷.cbz", "uri://v2", bookId = 2L, seriesName = "Foo")
+        val library = listOf(
+            ComicSeriesCandidate("[汉化] Foo v01", "uri://v1", bookId = 1L, seriesName = "foo"),
+            ComicSeriesCandidate("完全无关", "uri://x", bookId = 9L, seriesName = "Bar"),
+        )
+        val merged = mergeComicSeries(current, emptyList(), library)
+        assertEquals(listOf("uri://v1", "uri://v2"), merged.map { it.uri })
+    }
 }

@@ -89,6 +89,13 @@ class BookshelfRepositoryImpl(
         subjects: String?,
     ) = bookDao.backfillPdfMetadata(bookId, title, author, description, subjects)
 
+    override suspend fun backfillComicInfo(
+        bookId: Long,
+        author: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+    ) = bookDao.backfillComicInfo(bookId, author, seriesName, seriesIndex)
+
     override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) =
         bookDao.updateComicLocalPath(bookId, localPath)
 

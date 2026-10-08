@@ -155,6 +155,12 @@ class BookshelfRepositoryGroupTest {
             description: String?,
             subjects: String?,
         ) = Unit
+        override suspend fun backfillComicInfo(
+            bookId: Long,
+            author: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+        ) = Unit
         override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) {
             books.replaceAll { if (it.id == bookId) it.copy(comicPageCount = pageCount) else it }
         }

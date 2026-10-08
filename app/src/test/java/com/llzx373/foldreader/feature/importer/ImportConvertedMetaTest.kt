@@ -50,6 +50,12 @@ class ImportConvertedMetaTest {
             description: String?,
             subjects: String?,
         ) = Unit
+        override suspend fun backfillComicInfo(
+            bookId: Long,
+            author: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+        ) = Unit
         override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) =
             throw UnsupportedOperationException()
         override suspend fun updateCoverPath(bookId: Long, coverPath: String?) =

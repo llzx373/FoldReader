@@ -44,6 +44,14 @@ interface BookshelfRepository {
         subjects: String?,
     )
 
+    /** ComicInfo.xml 元数据回填（M31）：只填空值——作者 / 系列名 / 卷号。 */
+    suspend fun backfillComicInfo(
+        bookId: Long,
+        author: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+    )
+
     /** 记录压平产物（PDF 文本模式用）；cleanedFilePath 为 null 表示没有可读正文。 */
     suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long)
 

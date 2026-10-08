@@ -134,6 +134,24 @@ interface BookDao {
     )
 
     /**
+     * ComicInfo.xml 元数据回填（M31）：只填空值——已有内容（含用户改过的）一律不动，
+     * 传 null 的列也不动。系列名/卷号/作者提升系列匹配准确度。
+     */
+    @Query(
+        "UPDATE books SET " +
+            "author = CASE WHEN :author IS NOT NULL AND (author IS NULL OR author = '') THEN :author ELSE author END, " +
+            "seriesName = CASE WHEN :seriesName IS NOT NULL AND (seriesName IS NULL OR seriesName = '') THEN :seriesName ELSE seriesName END, " +
+            "seriesIndex = CASE WHEN :seriesIndex IS NOT NULL AND (seriesIndex IS NULL OR seriesIndex = '') THEN :seriesIndex ELSE seriesIndex END " +
+            "WHERE id = :bookId",
+    )
+    suspend fun backfillComicInfo(
+        bookId: Long,
+        author: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+    )
+
+    /**
      * 记录压平产物（PDF 文本模式用；EPUB/FB2 在导入时就写好了）。
      * [cleanedFilePath] 为 null = 没有可读正文（扫描件），同时把 totalChars 归零。
      */
