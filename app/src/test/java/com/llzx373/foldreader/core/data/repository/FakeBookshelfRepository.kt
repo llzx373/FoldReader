@@ -134,6 +134,8 @@ class FakeBookshelfRepository : BookshelfRepository {
                 .map { BookWithProgress(it, progress.value[it.id]?.charOffset, progress.value[it.id]?.comicPage) }
         }
 
+    override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) = unsupported()
+
     override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
         books.value = books.value.map {
             if (it.id in bookIds) it.copy(groupName = groupName) else it

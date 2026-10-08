@@ -71,6 +71,8 @@ class ImportConvertedMetaTest {
             throw UnsupportedOperationException()
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) =
             throw UnsupportedOperationException()
+        override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) =
+            throw UnsupportedOperationException()
         override suspend fun clearGroup(groupName: String) = throw UnsupportedOperationException()
         override suspend fun applyAiMetadata(
             bookId: Long,

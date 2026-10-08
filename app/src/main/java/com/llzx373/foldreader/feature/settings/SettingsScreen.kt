@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.FoldReaderApplication
@@ -75,6 +76,7 @@ import com.llzx373.foldreader.core.format.clean.CleanToggles
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.core.reader.FontManager
 import com.llzx373.foldreader.core.tts.TtsSpeech
+import com.llzx373.foldreader.feature.lock.AppLock
 import com.llzx373.foldreader.feature.reader.ThemePicker
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -823,6 +825,39 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                             else -> 0
                         },
                     )
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("隐私")
+            // M34 隐私锁：开关两个方向都要过一次系统验证（防止别人拿到亮屏的 App 直接关掉）；
+            // 设备没有任何验证手段（无锁屏/生物识别）时不允许开启
+            SwitchSetting("应用锁（启动时需生物识别/锁屏密码）", prefs.appLockEnabled) { enabled ->
+                val activity = context as? FragmentActivity
+                when {
+                    activity == null -> Unit
+                    enabled && !AppLock.canAuthenticate(activity) ->
+                        Toast.makeText(
+                            context,
+                            "设备未设置锁屏密码或生物识别，无法开启应用锁",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    else -> AppLock.prompt(
+                        activity,
+                        onSuccess = {
+                            viewModel.updateAppLockEnabled(enabled)
+                            if (enabled) AppLock.unlocked = true
+                        },
+                        onFailed = { message ->
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                }
+            }
+            ListItem(
+                headlineContent = { Text("隐藏书籍") },
+                supportingContent = {
+                    Text("书籍详情里可「隐藏本书」；书架右上角菜单「显示隐藏的书籍」可临时找回（应用锁开启时需先验证）")
                 },
             )
 

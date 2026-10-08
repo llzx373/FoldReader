@@ -212,6 +212,24 @@ fun BookDetailDialog(
                     TextButton(onClick = { annotationExport.open() }) {
                         Text("导出批注（Markdown）")
                     }
+                    // M34 隐私锁：把这本书从默认书架视图中收起来（溢出菜单「显示隐藏的书籍」可见回）
+                    TextButton(
+                        onClick = {
+                            viewModel.updateHidden(listOf(bookId), !book.hidden)
+                            if (!book.hidden) {
+                                Toast.makeText(
+                                    context,
+                                    "已隐藏——在书架右上角菜单「显示隐藏的书籍」里找回",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                onDismiss()
+                            } else {
+                                refreshTick++
+                            }
+                        },
+                    ) {
+                        Text(if (book.hidden) "取消隐藏" else "隐藏本书")
+                    }
                     if (isComic) {
                         Spacer(modifier = Modifier.height(8.dp))
                         // 「复制到本地」让漫画脱离 SAF 授权：源被移动/删除也还能读

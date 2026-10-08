@@ -70,6 +70,11 @@ data class BookEntity(
      * 语义：AI 只补「空值且未被用户锁定」的字段；用户改动某字段即锁定该字段，AI 永不再写。
      */
     @ColumnInfo(defaultValue = "") val metaSource: String = "",
+    /**
+     * M34 隐私锁：指定书籍隐藏——书架默认过滤，经「显示隐藏的书籍」入口（应用锁开启时需过
+     * 生物识别）才展示。隐藏状态随备份走（换机恢复后仍是隐藏的）；不进诊断日志。
+     */
+    @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
 )
 
 /** 需要先解压才知道内容的容器（zip 可直接按条目随机读，目录可直接列）。 */

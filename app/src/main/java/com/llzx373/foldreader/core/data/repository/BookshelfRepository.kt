@@ -66,6 +66,9 @@ interface BookshelfRepository {
     /** 批量设置分组；[groupName] 为 null 表示移出分组。 */
     suspend fun updateGroup(bookIds: List<Long>, groupName: String?)
 
+    /** M34 隐私锁：批量设置/取消「隐藏」。 */
+    suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean)
+
     /** 删除分组：把该分组下所有书移出分组。 */
     suspend fun clearGroup(groupName: String)
 

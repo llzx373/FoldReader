@@ -174,6 +174,11 @@ class BookshelfRepositoryImpl(
         bookDao.updateGroup(bookIds, groupName?.trim()?.takeIf { it.isNotEmpty() })
     }
 
+    override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
+        if (bookIds.isEmpty()) return
+        bookDao.updateHidden(bookIds, hidden)
+    }
+
     override suspend fun clearGroup(groupName: String) = bookDao.clearGroup(groupName)
 
     override suspend fun applyAiMetadata(

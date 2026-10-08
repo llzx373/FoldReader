@@ -126,6 +126,9 @@ class SettingsViewModel(
     fun updateDailyReadingGoalMinutes(minutes: Int) =
         launch { settingsRepository.setDailyReadingGoalMinutes(minutes) }
 
+    fun updateAppLockEnabled(enabled: Boolean) =
+        launch { settingsRepository.setAppLockEnabled(enabled) }
+
     fun updateFontSize(sizeSp: Float) = launch { settingsRepository.setFontSize(sizeSp) }
     fun updateLineSpacing(multiplier: Float) = launch { settingsRepository.setLineSpacing(multiplier) }
     fun updateMarginLevel(level: Int) = launch { settingsRepository.setMarginLevel(level) }

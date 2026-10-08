@@ -184,6 +184,9 @@ class BookshelfRepositoryDeleteTest {
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
             books.replaceAll { if (it.id in bookIds) it.copy(groupName = groupName) else it }
         }
+        override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
+            books.replaceAll { if (it.id in bookIds) it.copy(hidden = hidden) else it }
+        }
         override suspend fun clearGroup(groupName: String) {
             books.replaceAll { if (it.groupName == groupName) it.copy(groupName = null) else it }
         }

@@ -176,6 +176,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // M34 隐私锁：BiometricPrompt（需要 FragmentActivity 承载，故引入 fragment）
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment)
     // 本地存储
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.room.runtime)

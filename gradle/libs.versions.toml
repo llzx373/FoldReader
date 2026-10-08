@@ -55,6 +55,9 @@ javaMammoth = "1.12.2"
 commonmark = "0.30.0"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
+# M34 隐私锁：BiometricPrompt 需要 FragmentActivity 承载
+biometric = "1.1.0"
+androidxFragment = "1.8.8"
 # tools/cleaner 的 material3。CMP 1.12.0 弃用了 compose.material3 访问器，
 # 要求直接声明依赖；而 org.jetbrains.compose.material3:material3 自 1.9.0 之后
 # 只有 alpha 版（1.10/1.11/1.12 全是 alpha），访问器本身也冻结在 1.9.0。
@@ -108,6 +111,9 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+# M34 隐私锁（生物识别/锁屏凭据应用锁）
+androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "androidxFragment" }
 # 办公/网页文档只读支持
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 java-mammoth = { group = "org.zwobble.mammoth", name = "mammoth", version.ref = "javaMammoth" }

@@ -109,4 +109,6 @@ interface SettingsRepository {
     suspend fun setAutoBackupLastRunAt(timestamp: Long)
     /** M34：每日阅读目标（分钟）；0 = 未设目标。 */
     suspend fun setDailyReadingGoalMinutes(minutes: Int)
+    /** M34：隐私锁（应用锁）开关。 */
+    suspend fun setAppLockEnabled(enabled: Boolean)
 }

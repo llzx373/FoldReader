@@ -354,5 +354,6 @@ class BookPrefsRepositoryTest {
         override suspend fun setAutoBackupKeepCount(keep: Int) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) = Unit
         override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
+        override suspend fun setAppLockEnabled(enabled: Boolean) = Unit
     }
 }

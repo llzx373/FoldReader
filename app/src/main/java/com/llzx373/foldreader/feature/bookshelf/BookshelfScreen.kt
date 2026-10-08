@@ -107,6 +107,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -127,6 +128,7 @@ import com.llzx373.foldreader.feature.importer.BatchImportConfirmDialog
 import com.llzx373.foldreader.feature.importer.BatchImportProgressOverlay
 import com.llzx373.foldreader.feature.importer.BatchImportSummaryDialog
 import com.llzx373.foldreader.feature.importer.ImportBookUseCase
+import com.llzx373.foldreader.feature.lock.AppLock
 import com.llzx373.foldreader.ui.EmptyState
 import com.llzx373.foldreader.ui.rememberLocale
 import java.util.Locale
@@ -202,23 +204,40 @@ fun BookshelfScreen(
     var seriesFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showSeriesDialog by rememberSaveable { mutableStateOf(false) }
     val seriesCatalog by viewModel.seriesCatalog.collectAsState()
+    // M34 隐私锁：默认滤掉已隐藏的书，溢出菜单验证身份后才放行
+    val showHidden by viewModel.showHidden.collectAsState()
+    val appLockEnabled by viewModel.appLockEnabled.collectAsState()
     val selectionMode = selectedIds.isNotEmpty()
-    val displayBooks = remember(books, searchQuery, groupFilter, seriesFilter, seriesCatalog) {
+    // 系列总览同样遵守隐藏口径：未验证身份时隐藏的书不进系列列表
+    val visibleSeriesCatalog = remember(seriesCatalog, showHidden) {
+        if (showHidden) {
+            seriesCatalog
+        } else {
+            seriesCatalog.mapNotNull { group ->
+                val members = group.members.filter { !it.item.book.hidden }
+                if (members.isEmpty()) null else group.copy(members = members)
+            }
+        }
+    }
+    val displayBooks = remember(
+        books, searchQuery, groupFilter, seriesFilter, visibleSeriesCatalog, showHidden,
+    ) {
         val q = searchQuery.trim()
         fun matchesQuery(item: BookWithProgress) =
             q.isEmpty() ||
                 item.book.title.contains(q, ignoreCase = true) ||
                 item.book.author?.contains(q, ignoreCase = true) == true
+        fun visible(item: BookWithProgress) = showHidden || !item.book.hidden
         val key = seriesFilter
         if (key != null) {
             // 系列筛选：组内顺序就是卷号序（不再过书架排序）
-            return@remember seriesCatalog.firstOrNull { it.key == key }
+            return@remember visibleSeriesCatalog.firstOrNull { it.key == key }
                 ?.members?.map { it.item }?.filter(::matchesQuery)
                 ?: emptyList()
         }
         val gf = groupFilter
         books.filter {
-            matchesQuery(it) &&
+            visible(it) && matchesQuery(it) &&
                 (gf == null || (if (gf.isEmpty()) it.book.groupName == null else it.book.groupName == gf))
         }
     }
@@ -497,6 +516,31 @@ fun BookshelfScreen(
                                         }
                                     },
                                 )
+                                // M34 隐私锁：显示/收起已隐藏的书。应用锁开启时先过生物识别；
+                                // 「显示」只是本会话有效（showHidden 不落偏好，重启即收回）
+                                DropdownMenuItem(
+                                    text = { Text(if (showHidden) "收起隐藏的书籍" else "显示隐藏的书籍") },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        if (showHidden) {
+                                            viewModel.setShowHidden(false)
+                                        } else if (!appLockEnabled) {
+                                            viewModel.setShowHidden(true)
+                                        } else {
+                                            (context as? FragmentActivity)?.let { activity ->
+                                                AppLock.prompt(
+                                                    activity,
+                                                    onSuccess = { viewModel.setShowHidden(true) },
+                                                    onFailed = { message ->
+                                                        scope.launch {
+                                                            snackbarHostState.showSnackbar(message)
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    },
+                                )
                             }
                         }
                     },
@@ -577,7 +621,7 @@ fun BookshelfScreen(
                                     // 分组与系列筛选互斥：两边同时开着谁也看不懂这份列表是按什么排的
                                     seriesFilter = null
                                 },
-                                seriesCount = seriesCatalog.size,
+                                seriesCount = visibleSeriesCatalog.size,
                                 seriesSelected = seriesFilter != null,
                                 onSeriesClick = { showSeriesDialog = true },
                             )
@@ -787,7 +831,7 @@ fun BookshelfScreen(
 
     if (showSeriesDialog) {
         SeriesListDialog(
-            series = seriesCatalog,
+            series = visibleSeriesCatalog,
             currentKey = seriesFilter,
             onSelect = { key ->
                 seriesFilter = key

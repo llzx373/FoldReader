@@ -193,6 +193,11 @@ data class ReadingPreferences(
      * 打卡数据零新采集：今日时长与连续天数全部复用 reading_sessions 日桶。
      */
     val dailyReadingGoalMinutes: Int = 0,
+    /**
+     * M34：隐私锁（应用锁）。开启后冷启动需过 BiometricPrompt（生物识别/锁屏凭据）；
+     * 只锁冷启动，退后台不重复锁。隐藏书籍的「显示」入口也走同一验证。
+     */
+    val appLockEnabled: Boolean = false,
 )
 
 private const val RULE_LIST_SEPARATOR = "\u001F"

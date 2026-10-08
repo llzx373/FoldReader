@@ -779,4 +779,52 @@ class DatabaseMigrationTest {
             assertEquals("0.05,0.03,0.96,0.98", c.getString(0))
         }
     }
+
+    /** 建一个 v11 形态的库（`books` 含一行老数据），之后手动跑 v11→v12 迁移。 */
+    private fun openV11(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(11) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`title` TEXT NOT NULL, `genreTag` TEXT, `metaSource` TEXT NOT NULL DEFAULT '')",
+                )
+                db.execSQL("INSERT INTO `books` (`id`, `title`) VALUES (7, '老书')")
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v11 升到 v12 books 加隐藏列且老行默认不隐藏`() {
+        val v11 = openV11()
+        val migrated = openV11()
+
+        MIGRATION_11_12.migrate(migrated)
+
+        // 老行原样还在，hidden 按 DEFAULT 0 落地（= 不隐藏）
+        migrated.query("SELECT `title`, `hidden` FROM `books` WHERE `id` = 7").use { c ->
+            assertTrue("老数据行不见了", c.moveToFirst())
+            assertEquals("老书", c.getString(0))
+            assertEquals(0, c.getInt(1))
+        }
+        // 列结构 = v11 的全部列 + 新列（名字/类型/非空/默认值逐项一致，顺序无关）
+        assertEquals(
+            columns(v11, "books") + Column("hidden", "INTEGER", true, "0"),
+            columns(migrated, "books"),
+        )
+        // 新列可写可清
+        migrated.execSQL("UPDATE `books` SET `hidden` = 1 WHERE `id` = 7")
+        migrated.query("SELECT `hidden` FROM `books` WHERE `id` = 7").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(1, c.getInt(0))
+        }
+    }
 }

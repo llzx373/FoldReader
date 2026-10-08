@@ -127,6 +127,28 @@ class BookshelfViewModel(
         viewModelScope.launch { settingsRepository.setBookshelfSort(sort) }
     }
 
+    /**
+     * M34 隐私锁：是否展示已隐藏的书。只在会话内存活（不落偏好）——
+     * 杀掉进程重来就回到"隐藏"默认；应用锁开启时界面层先过 BiometricPrompt 才置 true。
+     */
+    private val _showHidden = MutableStateFlow(false)
+    val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
+
+    fun setShowHidden(show: Boolean) {
+        _showHidden.value = show
+    }
+
+    /** 应用锁是否开启（书架据此决定「显示隐藏的书籍」前要不要先过生物识别）。 */
+    val appLockEnabled: StateFlow<Boolean> = settingsRepository.preferences
+        .map { it.appLockEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** M34：批量隐藏/取消隐藏。 */
+    fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
+        if (bookIds.isEmpty()) return
+        viewModelScope.launch { bookshelfRepository.updateHidden(bookIds, hidden) }
+    }
+
     // 首个书架快照到达前视为加载中，区分"加载中"与"空书架"
     val loading: StateFlow<Boolean> = bookshelfRepository.observeBookshelfWithProgress()
         .map { false }

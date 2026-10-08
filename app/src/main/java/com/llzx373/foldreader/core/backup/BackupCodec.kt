@@ -81,6 +81,8 @@ class BackupCodec(
                 // M17（v7 起）：题材标签与逐字段来源标记（「AI 生成」/用户锁定的语义随备份走）
                 .put("genreTag", book.genreTag ?: JSONObject.NULL)
                 .put("metaSource", book.metaSource)
+                // M34（v10 起）：隐私锁「指定书籍隐藏」状态随备份走，恢复后仍是隐藏的
+                .put("hidden", book.hidden)
 
             val progress = bookshelfRepository.getProgress(book.id)
             bookJson.put(
@@ -283,13 +285,18 @@ class BackupCodec(
                 bookshelfRepository.updateGroup(listOf(local.id), groupName)
             }
 
+            // v10 起备份隐藏状态（M34 隐私锁）：字段缺失（旧备份）时保持本地值。
+            // 不走单独 update——下方元数据 upsert 是整行覆盖，会把这个字段顶回去，所以并进去。
+            val restoredHidden =
+                if (bookJson.has("hidden")) bookJson.optBoolean("hidden") else local.hidden
+
             // v4 起备份 EPUB 扩展元数据，v7 起加 genreTag / metaSource（M17）；
             // 字段缺省（旧版本备份）时保持本地值
             val metaKeys = listOf(
                 "description", "publisher", "language", "pubDate",
                 "subjects", "identifier", "seriesName", "seriesIndex", "genreTag",
             )
-            if (metaKeys.any { bookJson.has(it) } || bookJson.has("metaSource")) {
+            if (metaKeys.any { bookJson.has(it) } || bookJson.has("metaSource") || bookJson.has("hidden")) {
                 fun opt(key: String, current: String?): String? =
                     if (!bookJson.has(key)) {
                         current
@@ -300,6 +307,7 @@ class BackupCodec(
                     }
                 bookshelfRepository.upsertBook(
                     local.copy(
+                        hidden = restoredHidden,
                         description = opt("description", local.description),
                         publisher = opt("publisher", local.publisher),
                         language = opt("language", local.language),

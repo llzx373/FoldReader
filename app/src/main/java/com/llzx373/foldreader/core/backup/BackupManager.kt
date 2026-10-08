@@ -83,6 +83,7 @@ class BackupManager(
 
     companion object {
         /**
+         * v10：书籍新增 `hidden`（M34 隐私锁：指定书籍隐藏状态随备份走，恢复后仍隐藏）。
          * v9：新增章节摘要 `summaries` 与全书大纲 `outlines` 段（M29，与术语表同口径：
          * 按 contentHash 重映射来源书，只备份 done 摘要）。
          * v8：新增生词本 `vocabulary` 段（M28：词条/释义/上下文例句/位置，按 contentHash 重映射来源书）。
@@ -91,7 +92,7 @@ class BackupManager(
          * v5：书签/标注增加页式锚点（页序号 + 归一化页内坐标），中间点击区动作入备份。
          * 导入侧对老版本仍然兼容——新字段缺失即按 null / 默认值处理。
          */
-        const val BACKUP_VERSION = 9
+        const val BACKUP_VERSION = 10
 
         /** 解析备份元信息供恢复前预览（M25）；不碰数据库，纯函数可测。 */
         fun preview(text: String): BackupPreview {

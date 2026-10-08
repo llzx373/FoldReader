@@ -3,19 +3,21 @@ package com.llzx373.foldreader
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.fragment.app.FragmentActivity
 import com.llzx373.foldreader.core.data.settings.DarkThemeOption
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.ui.FoldReaderApp
 import com.llzx373.foldreader.ui.theme.FoldReaderTheme
 
-class MainActivity : ComponentActivity() {
+// M34：FragmentActivity 而非 ComponentActivity——隐私锁的 BiometricPrompt 必须由它承载。
+// 主题不变（仍是 Material.NoActionBar），不上 AppCompat。
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

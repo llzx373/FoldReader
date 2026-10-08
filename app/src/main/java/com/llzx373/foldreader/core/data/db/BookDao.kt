@@ -50,6 +50,10 @@ interface BookDao {
     @Query("UPDATE books SET groupName = :groupName WHERE id IN (:bookIds)")
     suspend fun updateGroup(bookIds: List<Long>, groupName: String?)
 
+    /** M34 隐私锁：批量设置/取消「隐藏」（书架默认过滤隐藏书）。 */
+    @Query("UPDATE books SET hidden = :hidden WHERE id IN (:bookIds)")
+    suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean)
+
     @Query("UPDATE books SET groupName = NULL WHERE groupName = :groupName")
     suspend fun clearGroup(groupName: String)
 

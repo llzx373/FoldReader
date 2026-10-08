@@ -333,6 +333,61 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `v10 备份恢复隐藏状态且旧备份缺字段时保持本地值`() = runBlocking {
+        val sourceBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 1, hash = "hashA").copy(hidden = true),
+                book(id = 2, hash = "hashB"),
+            ),
+        )
+        val json = BackupCodec(
+            sourceBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).exportJson().toString()
+
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                book(id = 7, hash = "hashA"),
+                book(id = 8, hash = "hashB").copy(hidden = true),
+            ),
+        )
+        val result = BackupCodec(
+            targetBooks,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(json)
+
+        assertEquals(2, result.restoredBooks)
+        assertEquals(true, targetBooks.books.first { it.id == 7L }.hidden)
+        // 备份里 hidden=false 会把本地隐藏状态清掉（字段存在即以备份为准）
+        assertEquals(false, targetBooks.books.first { it.id == 8L }.hidden)
+
+        // 老备份（v9 及更早）没有 hidden 字段：保持本地值不动
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 9,
+              "books": [
+                {"title": "书hashA", "contentHash": "hashA"}
+              ]
+            }
+        """.trimIndent()
+        val legacyTarget = FakeBookshelfRepository(
+            mutableListOf(book(id = 7, hash = "hashA").copy(hidden = true)),
+        )
+        BackupCodec(
+            legacyTarget,
+            FakeSettingsRepository(),
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        ).importJson(legacy)
+        assertEquals(true, legacyTarget.books.single().hidden)
+    }
+
+    @Test
     fun `v6 术语表随备份往返且单书行按 contentHash 重映射`() = runBlocking {
         val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
         val sourceGlossary = FakeGlossaryTermDao()
@@ -1034,6 +1089,7 @@ class BackupCodecTest {
             update { copy(autoBackupKeepCount = keep) }
 
         override suspend fun setDailyReadingGoalMinutes(minutes: Int) = Unit
+        override suspend fun setAppLockEnabled(enabled: Boolean) = Unit
         override suspend fun setAutoBackupLastRunAt(timestamp: Long) =
             update { copy(autoBackupLastRunAt = timestamp) }
 
@@ -1088,6 +1144,10 @@ class BackupCodecTest {
         override fun observeBookshelfWithProgressInGroup(
             groupName: String?,
         ): Flow<List<BookWithProgress>> = flowOf(emptyList())
+        override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
+            books.replaceAll { if (it.id in bookIds) it.copy(hidden = hidden) else it }
+        }
+
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
             groupCalls += bookIds to groupName
         }
