@@ -600,4 +600,104 @@ class DatabaseMigrationTest {
             assertEquals("牛津", c.getString(1))
         }
     }
+
+    /** 建一个 v9 形态的库（`books` 含一行老数据），之后手动跑 v9→v10 迁移。 */
+    private fun openV9(): SupportSQLiteDatabase {
+        val callback = object : SupportSQLiteOpenHelper.Callback(9) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `books` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL)")
+                db.execSQL("INSERT INTO `books` (`id`) VALUES (7)")
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name(null)
+                .callback(callback)
+                .build(),
+        )
+        return helper.writableDatabase
+    }
+
+    @Test
+    fun `v9 升到 v10 建章节摘要与全书大纲表且可写可查`() {
+        val migrated = openV9()
+
+        MIGRATION_9_10.migrate(migrated)
+
+        // 章节摘要表列结构与 Room 期望逐项一致
+        assertEquals(
+            listOf(
+                Column("bookId", "INTEGER", true, null),
+                Column("lang", "TEXT", true, null),
+                Column("unitIndex", "INTEGER", true, null),
+                Column("unitKind", "TEXT", true, null),
+                Column("unitTitle", "TEXT", true, null),
+                Column("status", "TEXT", true, null),
+                Column("summary", "TEXT", true, null),
+                Column("model", "TEXT", true, null),
+                Column("updatedAt", "INTEGER", true, null),
+            ),
+            columns(migrated, "chapter_summaries"),
+        )
+        // 全书大纲表列结构与 Room 期望逐项一致
+        assertEquals(
+            listOf(
+                Column("bookId", "INTEGER", true, null),
+                Column("lang", "TEXT", true, null),
+                Column("outline", "TEXT", true, null),
+                Column("summaryCount", "INTEGER", true, null),
+                Column("model", "TEXT", true, null),
+                Column("updatedAt", "INTEGER", true, null),
+            ),
+            columns(migrated, "book_outlines"),
+        )
+        // 两表外键均随书级联
+        for (table in listOf("chapter_summaries", "book_outlines")) {
+            migrated.query("PRAGMA foreign_key_list(`$table`)").use { c ->
+                assertTrue("$table 缺外键", c.moveToFirst())
+                assertEquals("books", c.getString(2))
+                assertEquals("CASCADE", c.getString(6))
+            }
+        }
+        // 复合主键 (bookId, lang, unitIndex)：同键二插必败、不同语言同单位共存
+        migrated.execSQL(
+            "INSERT INTO `chapter_summaries` (`bookId`, `lang`, `unitIndex`, `unitKind`, `unitTitle`, " +
+                "`status`, `summary`, `model`, `updatedAt`) " +
+                "VALUES (7, 'ZH_HANS', 0, 'chapter', '第一章', 'done', '摘要', 'm', 1)",
+        )
+        migrated.execSQL(
+            "INSERT INTO `chapter_summaries` (`bookId`, `lang`, `unitIndex`, `unitKind`, `unitTitle`, " +
+                "`status`, `summary`, `model`, `updatedAt`) " +
+                "VALUES (7, 'EN', 0, 'chapter', '第一章', 'pending', '', '', 1)",
+        )
+        var duplicateRejected = false
+        try {
+            migrated.execSQL(
+                "INSERT INTO `chapter_summaries` (`bookId`, `lang`, `unitIndex`, `unitKind`, `unitTitle`, " +
+                    "`status`, `summary`, `model`, `updatedAt`) " +
+                    "VALUES (7, 'ZH_HANS', 0, 'chapter', '第一章', 'failed', '', '', 2)",
+            )
+        } catch (_: android.database.SQLException) {
+            duplicateRejected = true
+        }
+        assertTrue("主键约束未生效", duplicateRejected)
+        migrated.query("SELECT COUNT(*) FROM `chapter_summaries`").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
+        }
+        // 大纲表抽查可写
+        migrated.execSQL(
+            "INSERT INTO `book_outlines` (`bookId`, `lang`, `outline`, `summaryCount`, `model`, `updatedAt`) " +
+                "VALUES (7, 'ZH_HANS', '大纲', 3, 'm', 1)",
+        )
+        migrated.query(
+            "SELECT `outline`, `summaryCount` FROM `book_outlines` WHERE `bookId` = 7 AND `lang` = 'ZH_HANS'",
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("大纲", c.getString(0))
+            assertEquals(3, c.getInt(1))
+        }
+    }
 }
