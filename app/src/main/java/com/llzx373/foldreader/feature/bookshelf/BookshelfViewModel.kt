@@ -117,6 +117,12 @@ class BookshelfViewModel(
         .map { it.bookshelfSort }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookshelfSort.IMPORT_TIME)
 
+    /** M34：系列聚合（漫画主干/ComicInfo 系列名 + EPUB series 元数据统一抽象，组内按卷号升序）。 */
+    val seriesCatalog: StateFlow<List<com.llzx373.foldreader.core.series.SeriesGroup>> =
+        bookshelfRepository.observeBookshelfWithProgress()
+            .map { com.llzx373.foldreader.core.series.groupBooksIntoSeries(it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     fun setSortOrder(sort: BookshelfSort) {
         viewModelScope.launch { settingsRepository.setBookshelfSort(sort) }
     }

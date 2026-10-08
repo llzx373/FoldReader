@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
@@ -195,14 +197,27 @@ fun BookshelfScreen(
     }
     // null = 全部；"" = 未分组；其余为分组名
     var groupFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    // M34：系列筛选（聚合键）；与分组筛选互斥——系列组内有自己的卷号排序
+    var seriesFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSeriesDialog by rememberSaveable { mutableStateOf(false) }
+    val seriesCatalog by viewModel.seriesCatalog.collectAsState()
     val selectionMode = selectedIds.isNotEmpty()
-    val displayBooks = remember(books, searchQuery, groupFilter) {
+    val displayBooks = remember(books, searchQuery, groupFilter, seriesFilter, seriesCatalog) {
         val q = searchQuery.trim()
+        fun matchesQuery(item: BookWithProgress) =
+            q.isEmpty() ||
+                item.book.title.contains(q, ignoreCase = true) ||
+                item.book.author?.contains(q, ignoreCase = true) == true
+        val key = seriesFilter
+        if (key != null) {
+            // 系列筛选：组内顺序就是卷号序（不再过书架排序）
+            return@remember seriesCatalog.firstOrNull { it.key == key }
+                ?.members?.map { it.item }?.filter(::matchesQuery)
+                ?: emptyList()
+        }
         val gf = groupFilter
         books.filter {
-            (q.isEmpty() ||
-                it.book.title.contains(q, ignoreCase = true) ||
-                it.book.author?.contains(q, ignoreCase = true) == true) &&
+            matchesQuery(it) &&
                 (gf == null || (if (gf.isEmpty()) it.book.groupName == null else it.book.groupName == gf))
         }
     }
@@ -536,7 +551,14 @@ fun BookshelfScreen(
                             GroupFilterChips(
                                 groups = groups,
                                 selected = groupFilter,
-                                onSelect = { groupFilter = it },
+                                onSelect = {
+                                    groupFilter = it
+                                    // 分组与系列筛选互斥：两边同时开着谁也看不懂这份列表是按什么排的
+                                    seriesFilter = null
+                                },
+                                seriesCount = seriesCatalog.size,
+                                seriesSelected = seriesFilter != null,
+                                onSeriesClick = { showSeriesDialog = true },
                             )
                         }
                         when {
@@ -553,7 +575,7 @@ fun BookshelfScreen(
                                 )
                             }
                             displayBooks.isEmpty() -> EmptyState(
-                                title = "该分组暂无书籍",
+                                title = if (seriesFilter != null) "该系列暂无匹配书籍" else "该分组暂无书籍",
                                 description = "长按书籍多选后可移动到分组",
                                 modifier = Modifier.weight(1f),
                             )
@@ -739,6 +761,23 @@ fun BookshelfScreen(
             },
             onDeleteGroup = viewModel::deleteGroup,
             onDismiss = { showMoveToGroupDialog = false },
+        )
+    }
+
+    if (showSeriesDialog) {
+        SeriesListDialog(
+            series = seriesCatalog,
+            currentKey = seriesFilter,
+            onSelect = { key ->
+                seriesFilter = key
+                groupFilter = null
+                showSeriesDialog = false
+            },
+            onClear = {
+                seriesFilter = null
+                showSeriesDialog = false
+            },
+            onDismiss = { showSeriesDialog = false },
         )
     }
 
@@ -928,6 +967,9 @@ private fun GroupFilterChips(
     groups: List<String>,
     selected: String?,
     onSelect: (String?) -> Unit,
+    seriesCount: Int = 0,
+    seriesSelected: Boolean = false,
+    onSeriesClick: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier
@@ -937,7 +979,7 @@ private fun GroupFilterChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FilterChip(
-            selected = selected == null,
+            selected = selected == null && !seriesSelected,
             onClick = { onSelect(null) },
             label = { Text("全部") },
         )
@@ -953,7 +995,76 @@ private fun GroupFilterChips(
                 label = { Text(name) },
             )
         }
+        // M34：系列聚合入口——有 ≥2 本的系列才出现；点开是系列总览对话框
+        if (seriesCount > 0) {
+            FilterChip(
+                selected = seriesSelected,
+                onClick = onSeriesClick,
+                label = { Text("系列（$seriesCount）") },
+            )
+        }
     }
+}
+
+/** M34 系列总览：漫画主干匹配与 EPUB series 元数据统一聚合；点系列进入「按卷号排序」的筛选视图。 */
+@Composable
+private fun SeriesListDialog(
+    series: List<com.llzx373.foldreader.core.series.SeriesGroup>,
+    currentKey: String?,
+    onSelect: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = {
+            Row {
+                if (currentKey != null) {
+                    TextButton(onClick = onClear) { Text("取消系列筛选") }
+                }
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
+        },
+        title = { Text("系列") },
+        text = {
+            if (series.isEmpty()) {
+                Text(
+                    text = "还没有成系列的书。漫画按书名主干或 ComicInfo 系列名归并，" +
+                        "EPUB 等按元数据的 series 字段归并；同一系列至少 2 本才会聚合。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    series.forEach { group ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(group.key) }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(group.displayName, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = "共 ${group.size} 本 · 已开始 ${group.startedCount} 本",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (group.key == currentKey) {
+                                Icon(Icons.Filled.Check, contentDescription = "当前筛选")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable
