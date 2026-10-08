@@ -36,6 +36,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -254,6 +255,19 @@ fun BookshelfScreen(
     var annotationExportOptions by remember {
         mutableStateOf<com.llzx373.foldreader.core.export.AnnotationExportOptions?>(null)
     }
+    // M34：批量导出正文的书单快照（点动作时取定）；null = 未在流程中
+    var textExportIds by remember { mutableStateOf<List<Long>?>(null) }
+    val textExportTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        val ids = textExportIds
+        textExportIds = null
+        if (uri != null && ids != null) {
+            viewModel.exportTextBatch(ids, uri) { message ->
+                scope.launch { snackbarHostState.showSnackbar(message) }
+            }
+        }
+    }
     val annotationExportTreeLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -372,6 +386,13 @@ fun BookshelfScreen(
                         // M27：批量导出批注（逐书一个 Markdown，选目录落盘）
                         IconButton(onClick = { annotationExportIds = selectedIds.toList() }) {
                             Icon(Icons.Filled.Share, contentDescription = "导出批注")
+                        }
+                        // M34：批量导出正文（逐书一个 .txt，选目录落盘；漫画/扫描件跳过）
+                        IconButton(onClick = {
+                            textExportIds = selectedIds.toList()
+                            textExportTreeLauncher.launch(null)
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "导出正文")
                         }
                         // M17：批量 AI 补全信息（仅 AI 已配置时显示）
                         if (aiAvailable) {

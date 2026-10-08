@@ -516,6 +516,62 @@ class BookshelfViewModel(
         }
     }
 
+    /**
+     * M34：多选批量导出正文——逐书一个 .txt 写入用户授权的 SAF 目录。
+     *
+     * 导出口径与单本「导出正文」一致：有副本（TXT 清洗副本 / EPUB 等压平产物）导出副本，
+     * 否则 TXT/Markdown 导原文件；漫画与没有文本层的扫描件 PDF 没有正文可导，跳过。
+     * 同名文件由文档提供方自行改名（不覆盖），单本失败不中断，最后汇总一句提示。
+     */
+    fun exportTextBatch(
+        bookIds: List<Long>,
+        treeUri: Uri,
+        onResult: (String) -> Unit,
+    ) {
+        if (bookIds.isEmpty()) return
+        viewModelScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                val treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+                val dirUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
+                var exported = 0
+                var skippedNoText = 0
+                var failed = 0
+                for (id in bookIds) {
+                    val book = bookshelfRepository.getBook(id) ?: continue
+                    val sourceKey = when {
+                        book.cleanedFilePath != null ->
+                            Uri.fromFile(File(book.cleanedFilePath!!)).toString()
+                        book.format == BookFormat.TXT || book.format == BookFormat.MARKDOWN ->
+                            book.fileUri
+                        else -> null
+                    }
+                    if (sourceKey == null) {
+                        skippedNoText++
+                        continue
+                    }
+                    val ok = runCatching {
+                        val name = batchExportFileName(book.title)
+                        val docUri = android.provider.DocumentsContract.createDocument(
+                            appContext.contentResolver, dirUri, "text/plain", name,
+                        ) ?: error("无法在目录中创建文件")
+                        val out = appContext.contentResolver.openOutputStream(docUri)
+                            ?: error("无法写入文件")
+                        UriChannels.open(appContext, Uri.parse(sourceKey)).use { channel ->
+                            out.use { Channels.newInputStream(channel).copyTo(it) }
+                        }
+                    }.isSuccess
+                    if (ok) exported++ else failed++
+                }
+                buildString {
+                    append("已导出 ").append(exported).append(" 本书的正文")
+                    if (skippedNoText > 0) append("，").append(skippedNoText).append(" 本无正文可导跳过")
+                    if (failed > 0) append("，").append(failed).append(" 本导出失败")
+                }
+            }
+            onResult(message)
+        }
+    }
+
     fun moveSelectedToGroup(groupName: String?) {
         val ids = _selectedIds.value.toList()
         if (ids.isEmpty()) return
@@ -597,6 +653,14 @@ class BookshelfViewModel(
     }
 
     companion object {
+        /** 批量导出正文的默认文件名：清掉非法文件名字符，超长截断。 */
+        private val ILLEGAL_FILE_NAME_CHARS = Regex("[\\\\/:*?\"<>|]")
+
+        internal fun batchExportFileName(title: String): String {
+            val safe = title.replace(ILLEGAL_FILE_NAME_CHARS, "_").trim().take(80).ifBlank { "book" }
+            return "$safe.txt"
+        }
+
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 BookshelfViewModel(

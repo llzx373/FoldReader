@@ -151,3 +151,28 @@ class ContentPreparationTest {
         assertEquals(false, book(BookFormat.TXT, 1L).needsContentPreparation())
     }
 }
+
+/** M34：批量导出正文的默认文件名规则（非法字符清洗 + 截断）。 */
+class BatchExportFileNameTest {
+
+    @Test
+    fun `路径分隔符等非法字符清洗为下划线`() {
+        assertEquals(
+            "a_b_c.txt",
+            BookshelfViewModel.batchExportFileName("a/b\\c"),
+        )
+        assertEquals(
+            "书_名.txt",
+            BookshelfViewModel.batchExportFileName("书:名"),
+        )
+    }
+
+    @Test
+    fun `空名兜底且超长截断`() {
+        assertEquals("book.txt", BookshelfViewModel.batchExportFileName("  "))
+        assertEquals(
+            "x".repeat(80) + ".txt",
+            BookshelfViewModel.batchExportFileName("x".repeat(200)),
+        )
+    }
+}
