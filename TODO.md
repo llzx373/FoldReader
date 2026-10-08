@@ -80,15 +80,28 @@
 
 ---
 
-## M28 词典取词 + 生词本（P1）
+## M28 词典取词 + 生词本（P1）✅ 已完成（2026-10-08）
 
 **验收标准**：长按选中可查词典释义（离线词典或 AI 解释至少其一可用）；生词收藏带上下文例句与来源书，可导出 CSV。
 
-- [ ] AI 划词解释：复用选中即译链路换词典式 prompt（释义 / 词性 / 例句），零新底座，台账 feature=划词解释
-- [ ] 本地词典：StarDict / MDict 格式选型评审（离线优先，契合产品哲学）；SAF 导入词典文件，查词优先本地、无命中回落 AI（已配置时）
-- [ ] 生词本：词条 + 上下文例句 + 来源书与位置；列表管理（按书 / 按时间）
-- [ ] 导出 CSV（Anki 兼容列：单词 / 释义 / 例句）
-- [ ] 生词本进备份
+- [x] AI 划词解释：复用选中即译链路换词典式 prompt（释义 / 词性 / 例句），零新底座，台账 feature=划词解释
+- [x] 本地词典：StarDict / MDict 格式选型评审（离线优先，契合产品哲学）；SAF 导入词典文件，查词优先本地、无命中回落 AI（已配置时）
+- [x] 生词本：词条 + 上下文例句 + 来源书与位置；列表管理（按书 / 按时间）
+- [x] 导出 CSV（Anki 兼容列：单词 / 释义 / 例句）
+- [x] 生词本进备份
+
+验收记录（2026-10-08）：
+
+- StarDict 纯 JVM 解析层：`core/dict/StarDict` 零 android import——ifo 解析、idx 流式索引、按 UTF-8 无符号字节序二分查词、大小写三档回落（原样 → 小写 → 首字母大写）、dict 按区间读取、html 词条剥标签纯文本化、`.dz`（dictzip）解压。`StarDictTest` 11 用例。
+- 词典导入与查词服务：`DictionaryStore` 把 SAF 目录导入的三件套（ifo/idx/dict，dz 自动解压）落到 `filesDir/dicts/<stem>/` 并校验完整性，MDict（.mdx/.mdd）明确报「暂不支持」；`DictionaryLookupService` 本地优先，未命中返回 `Miss(aiAvailable)` 由 UI 决定是否回落 AI，词典增删后 `invalidate()` 重建索引。设置页「词典管理」对话框（SAF 目录导入 / 逐个删除）。`DictionaryStoreTest` 13 用例。
+- AI 划词解释：`core/ai/prompt/SelectionExplainPrompt` 词典式输出（释义 / 词性 / 例句），解释语言占位符注入，登记 `BuiltinPrompts`（feature 名「划词解释」），4 用例。
+- 阅读器集成：选区操作条新增「查词」——`lookupAvailable = aiConfigured || hasDictionaries`，两者皆无时不出现，译文视角禁用；DictCard 状态机（LocalHit / Miss / AwaitConfirmation / Loading / AiStreaming / Error）：本地命中零网络零确认直显释义，未命中且已配 AI 时先经 `aiExplainConfirmed` 一次性确认再走通用模型流式解释（台账 feature=划词解释）；卡片「收藏」落生词本。
+- 生词本：DB v9 新建 `vocabulary_entries`（词条 / 释义 / 上下文例句 / 来源书与 charOffset / 来源 / 时间，FK 随书级联，索引 bookId+word），MIGRATION_8_9 + 迁移单测 + schema 快照（9.json）；例句抽取纯函数 `ContextSentence` 6 用例；设置页生词本列表按时间 / 按书分组、逐条删除。
+- 导出与备份：`VocabularyCsv` Anki 兼容三列（单词,释义,例句）RFC4180 转义，SAF 另存为导出（4 用例）；BACKUP_VERSION 7→8 备份含 vocabulary 段，恢复按 contentHash 重映射 bookId、以 (bookId, word, charOffset) 去重，旧备份缺段兼容（BackupCodecTest +4）。
+- 合规自查：本地查词零网络零确认 ✓；未配置 AI 且无本地词典时查词入口不出现（lookupAvailable 把关）✓；台账 feature=划词解释 ✓；MDict 明确不支持 ✓；生词本进备份 ✓。
+- 测试：`testLiteDebugUnitTest` 全绿（本里程碑新增 43 用例：11+13+4+1 迁移+6+4+4）；`assembleLiteDebug` 通过。
+- 提交拆分备注：与主 agent 建议的 6 提交略有出入——原「提交 3/4」对调（先 prompt 后阅读器集成），生词本拆成「底座（DB）」与「集成（阅读器+设置）」两笔，保证每个提交独立可编译。
+- 真机待验：真实 StarDict 词典导入观感与查词卡片交互；SAF 目录授权在各品牌文档提供方下的行为；CSV 导出落盘。
 
 ---
 
