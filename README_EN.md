@@ -39,6 +39,9 @@ English | [简体中文](README.md)
 | EPUB | `.epub` (EPUB3 NAV and EPUB2 NCX) |
 | FictionBook | `.fb2`, `.fb2.zip` |
 | PDF | `.pdf` — text PDFs can also be read as reflowable e-books; scanned PDFs get an on-device OCR text layer (searchable / selectable) |
+| Word documents | `.docx` — read-only; Mammoth converts to HTML, then the shared flattening pipeline (headings become the table of contents) |
+| Web pages | `.html`, `.htm` — read-only; jsoup sanitizing + the same flattening pipeline, h1–h6 become the table of contents |
+| Markdown | `.md`, `.markdown` — read-only; rendered natively from a commonmark AST (no flattening), headings become the table of contents, GFM tables / task lists / strikethrough supported |
 | Comics | `.cbz`/`.zip`, `.cbr`/`.rar`, `.cbt`/`.tar`, `.cb7`/`.7z`, or an image folder picked via SAF |
 
 Format detection is **magic-bytes first, extension/MIME as fallback** — mislabelled archives (a `.cbr` that is really a zip) are common in comic collections and only open correctly when the real bytes are inspected.
