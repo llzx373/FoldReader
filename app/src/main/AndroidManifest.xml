@@ -160,6 +160,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 章节摘要预生成前台服务（M29）：队列在 AppContainer 的 BookSummaryQueue，这里托进程 + 进度/完成通知 -->
+        <service
+            android:name=".feature.summary.SummaryService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- 诊断日志分享（设置 → 诊断 → 分享日志文件）：仅暴露 cacheDir/diagnostics -->
         <provider
             android:name="androidx.core.content.FileProvider"

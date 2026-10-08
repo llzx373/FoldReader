@@ -79,6 +79,8 @@ interface SettingsRepository {
     suspend fun setAiTranslationConfirmed(confirmed: Boolean)
     /** M28：AI 划词解释的首次外发一次性确认（幂等）。 */
     suspend fun setAiExplainConfirmed(confirmed: Boolean)
+    /** M29：AI 章节摘要的首次外发一次性确认（幂等）。 */
+    suspend fun setAiSummaryConfirmed(confirmed: Boolean)
     suspend fun setAiComicTranslateConfirmed(confirmed: Boolean)
     /** M23：漫画视觉翻译（页图像外发）对某书的明示确认落账（幂等）。 */
     suspend fun confirmAiComicVisionForBook(bookId: Long)

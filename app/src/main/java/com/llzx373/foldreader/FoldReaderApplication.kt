@@ -270,8 +270,9 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * 设置页「清除全部 AI 数据」（M19/M20/M21/M22）：译本副本目录整体清空 + 翻译台账与术语表清零 +
-     * 扫描 PDF 的 OCR 文本层缓存与漫画翻译产物（气泡缓存 + 译文 + 页台账）清空。不影响 API 凭据与外发历史（各有独立入口），
+     * 设置页「清除全部 AI 数据」（M19/M20/M21/M22/M29）：译本副本目录整体清空 + 翻译台账与术语表清零 +
+     * 扫描 PDF 的 OCR 文本层缓存与漫画翻译产物（气泡缓存 + 译文 + 页台账）清空 +
+     * 章节摘要与全书大纲清零。不影响 API 凭据与外发历史（各有独立入口），
      * 也不删除 OCR 模型本体（filesDir/models/ 在设置页「模型管理」单独删除）。
      */
     suspend fun clearAiData() = withContext(Dispatchers.IO) {
@@ -281,6 +282,8 @@ class AppContainer(context: Context) {
         database.translationDao().deleteAll()
         database.comicPageTranslationDao().deleteAll()
         database.glossaryTermDao().deleteAll()
+        database.chapterSummaryDao().deleteAll()
+        database.bookOutlineDao().deleteAll()
     }
 
     /**
@@ -359,6 +362,49 @@ class AppContainer(context: Context) {
         },
         currentLang = { settingsRepository.preferences.first().aiTargetLang },
     )
+
+    // ---- 章节摘要（M29）----
+
+    /**
+     * 装配摘要引擎（M29）：每次按当前配置新建（同 translateEngine 约定），未配置时
+     * 引擎内 provider 为 null、所有摘要入口直接失败返回。引擎无状态，随取随用。
+     */
+    suspend fun summaryEngine(): com.llzx373.foldreader.feature.summary.SummaryEngine =
+        com.llzx373.foldreader.feature.summary.SummaryEngine(
+            provider = aiProvider(),
+            contentGate = aiContentGate,
+            summaryDao = database.chapterSummaryDao(),
+            outlineDao = database.bookOutlineDao(),
+            preferences = { settingsRepository.preferences.first() },
+        )
+
+    /**
+     * 全书摘要批量预生成队列（M29）：AppContainer 单例，与翻译队列共用同一内容源
+     * （单位划分一致——摘要单位就是翻译单位），进度 StateFlow 喂 SummaryService 通知。
+     */
+    val bookSummaryQueue = com.llzx373.foldreader.feature.summary.BookSummaryQueue(
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        sourceFor = { bookId -> openTranslationSource(bookId) },
+        summaryDao = database.chapterSummaryDao(),
+        summarizeUnitCall = { bookId, title, unit, text, lang ->
+            summaryEngine().summarizeUnit(bookId, title, unit, text, lang)
+        },
+    )
+
+    /**
+     * 全书摘要预生成入队（详情页确认入口）：断点续做（done 单位跳过）。
+     * 返回 false = AI 未配置（入口本该隐藏，这里是兜底）。
+     */
+    suspend fun enqueueBookSummary(bookId: Long, lang: com.llzx373.foldreader.core.ai.AiTargetLang): Boolean {
+        if (!aiConfigured()) return false
+        bookSummaryQueue.enqueueBook(bookId, lang)
+        // 前台服务托住队列（退桌面/锁屏不断）；POST_NOTIFICATIONS 被拒时静默降级
+        ContextCompat.startForegroundService(
+            appContext,
+            Intent(appContext, com.llzx373.foldreader.feature.summary.SummaryService::class.java),
+        )
+        return true
+    }
 
     /**
      * 全书翻译入队（详情页确认入口）：人物候选先落表（幂等 upsert），再入队断点续译。

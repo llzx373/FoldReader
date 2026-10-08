@@ -252,6 +252,8 @@ fun BookDetailDialog(
                         MetadataAiEntry(bookId, onApplied = { refreshTick++ })
                         // M20：全文本书籍 + AI 已配置时渲染（组件内部自查），确认页含成本预估
                         com.llzx373.foldreader.feature.translate.BookTranslateEntry(bookId)
+                        // M29：同上口径，摘要预生成确认页含外发范围与成本预估
+                        com.llzx373.foldreader.feature.summary.BookSummaryEntry(bookId)
                         if (book.format == BookFormat.TXT) {
                             val cleanDefaults by viewModel.cleanDefaults.collectAsState()
                             val cleanPreview by viewModel.cleanPreview.collectAsState()
