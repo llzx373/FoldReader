@@ -183,7 +183,19 @@ class TxtBookParser(
             // 分段落盘交给独立消费者协程：TxtIndexer 的解码循环不是 suspend 的，
             // 回调里没有挂起点，直接写库只能 runBlocking 占住一个 IO 线程。
             val persistQueue = Channel<List<OffsetIndexBlock>>(Channel.UNLIMITED)
-            val persistJob = launch { for (pending in persistQueue) store.appendBlocks(key, pending) }
+            // 落盘失败不能拖垮消费循环（channel 无人再收会反压索引器）：
+            // 记下失败继续排空队列，由主流程在 join 后处置（作废而非封口）。
+            var persistFailure: Throwable? = null
+            val persistJob = launch {
+                for (pending in persistQueue) {
+                    try {
+                        store.appendBlocks(key, pending)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        persistFailure = t
+                    }
+                }
+            }
             try {
                 indexChannel = UriChannels.open(context, uri)
                 store.begin(key)
@@ -211,7 +223,18 @@ class TxtBookParser(
                 if (batch.isNotEmpty()) persistQueue.trySend(batch)
                 persistQueue.close()
                 persistJob.join()
-                store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
+                val persistError = persistFailure
+                if (persistError == null) {
+                    store.complete(key, fileLength, contentHash, charset.name(), shared.totalChars)
+                } else {
+                    // 分段落盘失败的快照缺块，不得封口为完成：作废让下次打开重建。
+                    // 内存索引是完整的，本次会话照常交付。
+                    runCatching { store.invalidate(key) }
+                    DiagnosticLog.line(
+                        "txt索引: bookId=$bookId 分段落盘失败，快照已作废: " +
+                            "${persistError.javaClass.simpleName}: ${persistError.message}",
+                    )
+                }
                 progress.value = 1f
                 trace.logSummary(rules.size, chapters, shared.totalChars)
                 runCatching { onChaptersIndexed(bookId, chapters) }
