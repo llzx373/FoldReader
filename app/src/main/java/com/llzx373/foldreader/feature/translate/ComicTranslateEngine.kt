@@ -68,6 +68,7 @@ class ComicTranslateEngine(
         val langKey = lang.name
         // bubblesFor/preferences()/台账写入/术语合并等在下方重试 try 之外：异常逃逸会掀掉
         // 队列消费循环（SupervisorJob 无 CEH），这里兜底成单页失败，由队列记 failed 继续
+        var mergePlan: CrossPageMerge.MergePlan? = null
         val bubbles: List<OcrBubble>
         val prefs: ReadingPreferences
         val model: String
@@ -77,8 +78,12 @@ class ComicTranslateEngine(
             if (rawBubbles.isEmpty()) {
                 return Result.failure(IllegalArgumentException("该页未识别到文字气泡"))
             }
-            // 条漫跨页气泡合并（R10）：页边被切断的气泡与下一页顶部续段并成一个再翻
-            bubbles = maybeMergeCrossPage(bookId, pageIndex, langKey, rawBubbles)
+            // 条漫跨页气泡合并（R10）：页边被切断的气泡与下一页顶部续段并成一个再翻。
+            // 这里只产出计划：气泡表改写推迟到本页翻译成功落库之后，
+            // 否则本页失败时下一页的续段已被吞掉、两页都看不见。
+            val planned = planCrossPageMerge(bookId, pageIndex, langKey, rawBubbles)
+            bubbles = planned.first
+            mergePlan = planned.second
             prefs = preferences()
             model = prefs.aiModelTranslation.ifBlank { prefs.aiModelGeneral }
             val totalChars = bubbles.sumOf { it.text.length }
@@ -127,7 +132,18 @@ class ComicTranslateEngine(
                 }
                 val translated = ComicTranslatePrompt.parseTranslations(reply.toString(), bubbles.size)
                 if (translated != null) {
-                    store.saveTranslation(bookId, langKey, pageIndex, translated)
+                    try {
+                        store.saveTranslation(bookId, langKey, pageIndex, translated)
+                        // 跨页合并的气泡表改写只能在译文落库之后做
+                        mergePlan?.let { plan ->
+                            store.saveOcr(bookId, pageIndex, plan.owner)
+                            store.saveOcr(bookId, pageIndex + 1, plan.next)
+                        }
+                    } catch (e: Exception) {
+                        // 半成品（译文已存但气泡表没改成）不能留：撤掉译文，按失败走重试
+                        runCatching { store.deleteTranslation(bookId, langKey, pageIndex) }
+                        throw e
+                    }
                     pageDao.updateStatus(
                         bookId = bookId,
                         lang = langKey,
@@ -272,24 +288,24 @@ class ComicTranslateEngine(
     }
 
     /**
-     * 跨页合并判定与落盘（R10）：只在**两页都未译**时做——已译页的译文按下标对气泡，
-     * 合并会改动页 N+1 的气泡表（序号前移），动了就错位。无可配对片段原样返回。
+     * 跨页合并判定（R10）：只在**两页都未译**（按 bookId + 目标语言口径）时做——
+     * 已译页的译文按下标对气泡，合并会改动页 N+1 的气泡表（序号前移），动了就错位。
+     * 纯判定不落盘：返回 (本页实际用于翻译的气泡表, 待落盘的合并计划)，
+     * 计划由调用方在本页翻译成功落库之后才写入气泡缓存。
      */
-    private suspend fun maybeMergeCrossPage(
+    private suspend fun planCrossPageMerge(
         bookId: Long,
         pageIndex: Int,
         langKey: String,
         page: List<OcrBubble>,
-    ): List<OcrBubble> {
-        if (page.none { it.rect.bottom > 1f - CrossPageMerge.EDGE_EPS }) return page
-        if (store.loadTranslation(bookId, langKey, pageIndex) != null) return page
-        if (store.loadTranslation(bookId, langKey, pageIndex + 1) != null) return page
+    ): Pair<List<OcrBubble>, CrossPageMerge.MergePlan?> {
+        if (page.none { it.rect.bottom > 1f - CrossPageMerge.EDGE_EPS }) return page to null
+        if (store.loadTranslation(bookId, langKey, pageIndex) != null) return page to null
+        if (store.loadTranslation(bookId, langKey, pageIndex + 1) != null) return page to null
         val next = bubblesFor(bookId, pageIndex + 1)
-        if (next.isEmpty()) return page
-        val plan = CrossPageMerge.plan(page, next) ?: return page
-        store.saveOcr(bookId, pageIndex, plan.owner)
-        store.saveOcr(bookId, pageIndex + 1, plan.next)
-        return plan.owner
+        if (next.isEmpty()) return page to null
+        val plan = CrossPageMerge.plan(page, next) ?: return page to null
+        return plan.owner to plan
     }
 
     companion object {

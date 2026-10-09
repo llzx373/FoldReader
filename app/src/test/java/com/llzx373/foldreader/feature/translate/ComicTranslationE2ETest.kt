@@ -548,6 +548,32 @@ class ComicTranslationE2ETest {
     }
 
     @Test
+    fun `页 N 翻译失败不改写两页气泡缓存`() = runTest {
+        bubbles[0] = listOf(
+            bubble(0, "上部"),
+            cutBubble(1, OcrRect(0.2f, 0.9f, 0.6f, 0.998f), "被切断的"),
+        )
+        bubbles[1] = listOf(
+            cutBubble(0, OcrRect(0.25f, 0.002f, 0.55f, 0.1f), "后半句"),
+            bubble(1, "整气泡"),
+        )
+        // 两次都吐出解析不了的东西：合并计划存在，但翻译没成功
+        server.enqueue(sse("这不是 JSON"))
+        server.enqueue(sse("仍然不是 JSON"))
+
+        val result = newEngine().translatePage(1, "测试漫画", 0, AiTargetLang.ZH_HANS)
+
+        assertTrue(result.isFailure)
+        assertEquals(2, server.requestCount)
+        // 页 N+1 的续段必须还在原气泡表里：页 N 没译成，续段不能两页都看不见
+        assertTrue("页 0 气泡缓存不得被改写", store.loadOcr(1, 0) == null)
+        assertTrue("页 1 气泡缓存不得被改写", store.loadOcr(1, 1) == null)
+        assertTrue(store.loadTranslation(1, "ZH_HANS", 0) == null)
+        val row = db.comicPageTranslationDao().getForBook(1, "ZH_HANS").single()
+        assertEquals(ComicPageTranslationEntity.STATUS_FAILED, row.status)
+    }
+
+    @Test
     fun `下一页已译则不合并`() = runTest {
         // 页 1 已有译文：合并会改动它的气泡序号，必须跳过
         store.saveTranslation(1, "ZH_HANS", 1, listOf("已有"))
