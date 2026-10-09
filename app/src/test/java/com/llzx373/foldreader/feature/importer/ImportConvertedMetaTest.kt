@@ -74,6 +74,21 @@ class ImportConvertedMetaTest {
         override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) =
             throw UnsupportedOperationException()
         override suspend fun clearGroup(groupName: String) = throw UnsupportedOperationException()
+        override suspend fun restoreBookMetadata(
+            bookId: Long,
+            groupName: String?,
+            hidden: Boolean,
+            description: String?,
+            publisher: String?,
+            language: String?,
+            pubDate: String?,
+            subjects: String?,
+            identifier: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = throw UnsupportedOperationException()
         override suspend fun applyAiMetadata(
             bookId: Long,
             author: String?,

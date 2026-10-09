@@ -96,6 +96,27 @@ interface BookshelfRepository {
     /** 规则版按题材自动分组（M17）：有题材标签的书 groupName 落题材名；返回归入分组的本数。 */
     suspend fun groupBooksByGenreTag(): Int
 
+    /**
+     * 备份恢复命中已有书时的元数据定点更新（A4）：要恢复的字段一次写完，
+     * 绝不整行 REPLACE——REPLACE 会级联清空 CASCADE 子表（chapters/translations 等）。
+     * 字段值由调用方按「备份缺失则保留本地」预先合并好，[groupName] 已归一化（空白 = null）。
+     */
+    suspend fun restoreBookMetadata(
+        bookId: Long,
+        groupName: String?,
+        hidden: Boolean,
+        description: String?,
+        publisher: String?,
+        language: String?,
+        pubDate: String?,
+        subjects: String?,
+        identifier: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
     fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?>
     suspend fun getProgress(bookId: Long): ReadingProgressEntity?
     suspend fun saveProgress(progress: ReadingProgressEntity)

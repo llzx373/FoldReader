@@ -174,6 +174,34 @@ interface BookDao {
     suspend fun deleteByIds(bookIds: List<Long>)
 
     /**
+     * 备份恢复命中已有书时的元数据定点更新（A4）：要恢复的字段一次写完，
+     * 绝不走 [upsert]——整行 REPLACE 会级联清空 CASCADE 子表（chapters/translations 等），
+     * 且先 `updateGroup` 再整行 upsert 会把 groupName 顶回旧实体的值。
+     */
+    @Query(
+        "UPDATE books SET groupName = :groupName, hidden = :hidden, " +
+            "description = :description, publisher = :publisher, language = :language, " +
+            "pubDate = :pubDate, subjects = :subjects, identifier = :identifier, " +
+            "seriesName = :seriesName, seriesIndex = :seriesIndex, genreTag = :genreTag, " +
+            "metaSource = :metaSource WHERE id = :bookId",
+    )
+    suspend fun restoreMetadata(
+        bookId: Long,
+        groupName: String?,
+        hidden: Boolean,
+        description: String?,
+        publisher: String?,
+        language: String?,
+        pubDate: String?,
+        subjects: String?,
+        identifier: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+        genreTag: String?,
+        metaSource: String,
+    )
+
+    /**
      * AI 元数据补全回写（M17）：**只填空值**——目标列已有内容（非 NULL 非空串）一律不动，
      * 传 null 的列也不动；「哪些字段允许 AI 写」由调用方按 metaSource 快照先行决策
      * （见 `core/metadata/BookMetaSources.planAiMetadataWrite`），这里的 CASE WHEN 是

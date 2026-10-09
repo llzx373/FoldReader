@@ -215,6 +215,25 @@ class BookshelfRepositoryImpl(
 
     override suspend fun groupBooksByGenreTag(): Int = bookDao.groupByGenreTag()
 
+    override suspend fun restoreBookMetadata(
+        bookId: Long,
+        groupName: String?,
+        hidden: Boolean,
+        description: String?,
+        publisher: String?,
+        language: String?,
+        pubDate: String?,
+        subjects: String?,
+        identifier: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) = bookDao.restoreMetadata(
+        bookId, groupName, hidden, description, publisher, language, pubDate,
+        subjects, identifier, seriesName, seriesIndex, genreTag, metaSource,
+    )
+
     override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
         progressDao.observe(bookId)
 

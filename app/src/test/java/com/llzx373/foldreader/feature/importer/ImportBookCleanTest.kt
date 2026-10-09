@@ -285,6 +285,21 @@ class ImportBookCleanTest {
         override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) = Unit
         override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) = Unit
         override suspend fun clearGroup(groupName: String) = Unit
+        override suspend fun restoreBookMetadata(
+            bookId: Long,
+            groupName: String?,
+            hidden: Boolean,
+            description: String?,
+            publisher: String?,
+            language: String?,
+            pubDate: String?,
+            subjects: String?,
+            identifier: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) = Unit
         override suspend fun applyAiMetadata(
             bookId: Long,
             author: String?,

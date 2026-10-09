@@ -336,17 +336,17 @@ class BackupCodec(
             restoredBooks++
 
             // v3 起备份分组：字段存在（含 null）时恢复/清除分组；v2 及更早无此字段，保持现状不动
-            if (bookJson.has("groupName")) {
-                val groupName = if (bookJson.isNull("groupName")) {
+            val restoredGroupName = if (bookJson.has("groupName")) {
+                if (bookJson.isNull("groupName")) {
                     null
                 } else {
                     bookJson.optString("groupName").trim().takeIf { it.isNotEmpty() }
                 }
-                bookshelfRepository.updateGroup(listOf(local.id), groupName)
+            } else {
+                local.groupName
             }
 
             // v10 起备份隐藏状态（M34 隐私锁）：字段缺失（旧备份）时保持本地值。
-            // 不走单独 update——下方元数据 upsert 是整行覆盖，会把这个字段顶回去，所以并进去。
             val restoredHidden =
                 if (bookJson.has("hidden")) bookJson.optBoolean("hidden") else local.hidden
 
@@ -356,7 +356,9 @@ class BackupCodec(
                 "description", "publisher", "language", "pubDate",
                 "subjects", "identifier", "seriesName", "seriesIndex", "genreTag",
             )
-            if (metaKeys.any { bookJson.has(it) } || bookJson.has("metaSource") || bookJson.has("hidden")) {
+            if (bookJson.has("groupName") || metaKeys.any { bookJson.has(it) } ||
+                bookJson.has("metaSource") || bookJson.has("hidden")
+            ) {
                 fun opt(key: String, current: String?): String? =
                     if (!bookJson.has(key)) {
                         current
@@ -365,24 +367,27 @@ class BackupCodec(
                     } else {
                         bookJson.optString(key).takeIf { it.isNotEmpty() }
                     }
-                bookshelfRepository.upsertBook(
-                    local.copy(
-                        hidden = restoredHidden,
-                        description = opt("description", local.description),
-                        publisher = opt("publisher", local.publisher),
-                        language = opt("language", local.language),
-                        pubDate = opt("pubDate", local.pubDate),
-                        subjects = opt("subjects", local.subjects),
-                        identifier = opt("identifier", local.identifier),
-                        seriesName = opt("seriesName", local.seriesName),
-                        seriesIndex = opt("seriesIndex", local.seriesIndex),
-                        genreTag = opt("genreTag", local.genreTag),
-                        metaSource = when {
-                            !bookJson.has("metaSource") -> local.metaSource
-                            bookJson.isNull("metaSource") -> ""
-                            else -> bookJson.optString("metaSource")
-                        },
-                    ),
+                // 要恢复的字段一次定点 UPDATE 写完。不可「先 updateGroup 再整行 upsert」：
+                // upsert 是 INSERT OR REPLACE，用更新前抓的旧实体写回会把 groupName 顶回旧值，
+                // 且 REPLACE（删旧行+插新行）会级联清空 chapters/translations 等 CASCADE 子表
+                bookshelfRepository.restoreBookMetadata(
+                    bookId = local.id,
+                    groupName = restoredGroupName,
+                    hidden = restoredHidden,
+                    description = opt("description", local.description),
+                    publisher = opt("publisher", local.publisher),
+                    language = opt("language", local.language),
+                    pubDate = opt("pubDate", local.pubDate),
+                    subjects = opt("subjects", local.subjects),
+                    identifier = opt("identifier", local.identifier),
+                    seriesName = opt("seriesName", local.seriesName),
+                    seriesIndex = opt("seriesIndex", local.seriesIndex),
+                    genreTag = opt("genreTag", local.genreTag),
+                    metaSource = when {
+                        !bookJson.has("metaSource") -> local.metaSource
+                        bookJson.isNull("metaSource") -> ""
+                        else -> bookJson.optString("metaSource")
+                    },
                 )
             }
 

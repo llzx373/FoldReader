@@ -302,9 +302,12 @@ class BackupCodecTest {
 
         assertEquals(2, result.restoredBooks)
         assertEquals(
-            listOf(listOf(7L) to "科幻", listOf(8L) to null),
-            targetBooks.groupCalls,
+            listOf(7L to "科幻", 8L to null),
+            targetBooks.restoreCalls.map { it.bookId to it.groupName },
         )
+        // 分组真实落到书籍行上（A4：单条定点 UPDATE，不再「先 updateGroup 再整行覆盖」）
+        assertEquals("科幻", targetBooks.books.first { it.id == 7L }.groupName)
+        assertNull(targetBooks.books.first { it.id == 8L }.groupName)
     }
 
     @Test
@@ -329,7 +332,8 @@ class BackupCodecTest {
         ).importJson(legacy)
 
         assertEquals(1, result.restoredBooks)
-        assertTrue(targetBooks.groupCalls.isEmpty())
+        assertTrue(targetBooks.restoreCalls.isEmpty())
+        assertEquals("旧组", targetBooks.books.single().groupName)
     }
 
     @Test
@@ -814,7 +818,7 @@ class BackupCodecTest {
         ).importJson(legacy)
 
         assertEquals("本地简介", targetBooks.books.single().description)
-        assertEquals(listOf(listOf(7L) to "科幻"), targetBooks.groupCalls)
+        assertEquals(listOf(7L to "科幻"), targetBooks.restoreCalls.map { it.bookId to it.groupName })
     }
 
     @Test

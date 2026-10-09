@@ -266,6 +266,49 @@ internal class FakeBookshelfRepository(
         books += book.copy(id = id)
         return id
     }
+
+    /** 备份恢复的定点更新（A4）：记录调用（分组断言用）并真实落值。 */
+    data class RestoreCall(val bookId: Long, val groupName: String?, val hidden: Boolean)
+
+    val restoreCalls = mutableListOf<RestoreCall>()
+
+    override suspend fun restoreBookMetadata(
+        bookId: Long,
+        groupName: String?,
+        hidden: Boolean,
+        description: String?,
+        publisher: String?,
+        language: String?,
+        pubDate: String?,
+        subjects: String?,
+        identifier: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) {
+        restoreCalls += RestoreCall(bookId, groupName, hidden)
+        books.replaceAll {
+            if (it.id != bookId) {
+                it
+            } else {
+                it.copy(
+                    groupName = groupName,
+                    hidden = hidden,
+                    description = description,
+                    publisher = publisher,
+                    language = language,
+                    pubDate = pubDate,
+                    subjects = subjects,
+                    identifier = identifier,
+                    seriesName = seriesName,
+                    seriesIndex = seriesIndex,
+                    genreTag = genreTag,
+                    metaSource = metaSource,
+                )
+            }
+        }
+    }
     override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
     override suspend fun markContentPrepared(bookId: Long, timestamp: Long) = Unit
     override suspend fun backfillPdfMetadata(

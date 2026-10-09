@@ -170,6 +170,42 @@ class BookshelfRepositoryGroupTest {
         override suspend fun updateTotalChars(bookId: Long, totalChars: Long) {
             books.replaceAll { if (it.id == bookId) it.copy(totalChars = totalChars) else it }
         }
+        override suspend fun restoreMetadata(
+            bookId: Long,
+            groupName: String?,
+            hidden: Boolean,
+            description: String?,
+            publisher: String?,
+            language: String?,
+            pubDate: String?,
+            subjects: String?,
+            identifier: String?,
+            seriesName: String?,
+            seriesIndex: String?,
+            genreTag: String?,
+            metaSource: String,
+        ) {
+            books.replaceAll {
+                if (it.id != bookId) {
+                    it
+                } else {
+                    it.copy(
+                        groupName = groupName,
+                        hidden = hidden,
+                        description = description,
+                        publisher = publisher,
+                        language = language,
+                        pubDate = pubDate,
+                        subjects = subjects,
+                        identifier = identifier,
+                        seriesName = seriesName,
+                        seriesIndex = seriesIndex,
+                        genreTag = genreTag,
+                        metaSource = metaSource,
+                    )
+                }
+            }
+        }
         override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
         override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit
         override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) = Unit

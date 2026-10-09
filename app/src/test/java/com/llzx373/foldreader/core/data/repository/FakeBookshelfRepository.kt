@@ -191,6 +191,43 @@ class FakeBookshelfRepository : BookshelfRepository {
         return tagged.size
     }
 
+    override suspend fun restoreBookMetadata(
+        bookId: Long,
+        groupName: String?,
+        hidden: Boolean,
+        description: String?,
+        publisher: String?,
+        language: String?,
+        pubDate: String?,
+        subjects: String?,
+        identifier: String?,
+        seriesName: String?,
+        seriesIndex: String?,
+        genreTag: String?,
+        metaSource: String,
+    ) {
+        books.value = books.value.map {
+            if (it.id != bookId) {
+                it
+            } else {
+                it.copy(
+                    groupName = groupName,
+                    hidden = hidden,
+                    description = description,
+                    publisher = publisher,
+                    language = language,
+                    pubDate = pubDate,
+                    subjects = subjects,
+                    identifier = identifier,
+                    seriesName = seriesName,
+                    seriesIndex = seriesIndex,
+                    genreTag = genreTag,
+                    metaSource = metaSource,
+                )
+            }
+        }
+    }
+
     override fun observeProgress(bookId: Long): Flow<ReadingProgressEntity?> =
         MutableStateFlow(progress.value[bookId])
 
