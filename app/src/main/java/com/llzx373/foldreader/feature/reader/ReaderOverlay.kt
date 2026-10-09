@@ -73,6 +73,12 @@ fun ReaderOverlay(
             // 这里防止任何时序反转导致 viewModel() 访问已销毁 entry 的 ViewModelStore。
             val entryState by entry.lifecycle.currentStateFlow.collectAsState()
             if (entryState.isAtLeast(Lifecycle.State.CREATED)) {
+                // entry 离开组合（退出阅读页）后，它在 holder 里的 rememberSaveable 存档
+                // 一并清掉：entry 自带的 SavedStateRegistry 才是真正的持久层，这里不清会
+                // 随开过的每本书在 holder 里越攒越多
+                androidx.compose.runtime.DisposableEffect(entry.id) {
+                    onDispose { saveableStateHolder.removeState(entry.id) }
+                }
                 CompositionLocalProvider(
                     LocalViewModelStoreOwner provides entry,
                     LocalLifecycleOwner provides entry,
