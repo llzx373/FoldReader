@@ -8,7 +8,10 @@ import com.llzx373.foldreader.core.ai.AiProtocol
 import com.llzx373.foldreader.core.ai.AiRole
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -159,6 +162,23 @@ class ChatCompletionsProviderTest {
         assertEquals("POST", request.method)
         assertEquals("/chat/completions", request.path)
         assertEquals("Bearer test-key", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `取消收集端立即中断底层 HTTP 调用`() = runBlocking {
+        // 服务器收下请求后永远不发响应（僵死连接）：
+        // 取消若不 call.cancel()，收集端要干等到 readTimeout
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val job = launch {
+            provider.chat(listOf(AiMessage.of(AiRole.USER, "hi")), "m").toList()
+        }
+        server.takeRequest(5, TimeUnit.SECONDS)
+
+        job.cancel()
+        val finished = withTimeoutOrNull(10_000) { job.join(); true }
+
+        assertEquals("取消应立即结束协程，而不是干等到 readTimeout", true, finished)
+        assertTrue(job.isCancelled)
     }
 
     @Test

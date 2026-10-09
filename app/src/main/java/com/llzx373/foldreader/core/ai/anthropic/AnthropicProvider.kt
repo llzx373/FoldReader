@@ -8,6 +8,7 @@ import com.llzx373.foldreader.core.ai.AiProvider
 import com.llzx373.foldreader.core.ai.AiRole
 import com.llzx373.foldreader.core.ai.httpError
 import com.llzx373.foldreader.core.ai.sse.readSseEvents
+import com.llzx373.foldreader.core.ai.sse.withCancellation
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
@@ -63,30 +64,37 @@ class AnthropicProvider(
             .post(requestBody)
             .build()
 
+        val call = client.newCall(request)
         try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw httpError(response.code, response.body?.string())
-                val source = response.body!!.source()
-                for (event in source.readSseEvents()) {
-                    currentCoroutineContext().ensureActive()
-                    when (event.event) {
-                        "content_block_delta" -> {
-                            val text = extractTextDelta(event.data)
-                            if (!text.isNullOrEmpty()) emit(text)
+            // execute 与整个 SSE 读取循环都挂在取消上：cancel() 会打断阻塞的 readUtf8Line
+            call.withCancellation { c ->
+                c.execute().use { response ->
+                    if (!response.isSuccessful) throw httpError(response.code, response.body?.string())
+                    val source = response.body!!.source()
+                    for (event in source.readSseEvents()) {
+                        currentCoroutineContext().ensureActive()
+                        when (event.event) {
+                            "content_block_delta" -> {
+                                val text = extractTextDelta(event.data)
+                                if (!text.isNullOrEmpty()) emit(text)
+                            }
+                            "message_stop" -> break
+                            "error" -> throw AiException(
+                                AiException.Kind.PROTOCOL,
+                                "服务方出错：${extractError(event.data) ?: event.data.take(200)}",
+                            )
                         }
-                        "message_stop" -> break
-                        "error" -> throw AiException(
-                            AiException.Kind.PROTOCOL,
-                            "服务方出错：${extractError(event.data) ?: event.data.take(200)}",
-                        )
                     }
                 }
             }
         } catch (e: SocketTimeoutException) {
+            currentCoroutineContext().ensureActive()
             throw AiException(AiException.Kind.TIMEOUT, "请求超时，请检查网络或调大超时时间", e)
         } catch (e: InterruptedIOException) {
+            currentCoroutineContext().ensureActive()
             throw AiException(AiException.Kind.TIMEOUT, "请求被中断", e)
         } catch (e: IOException) {
+            currentCoroutineContext().ensureActive()
             throw AiException(AiException.Kind.NETWORK, "网络错误：${e.message}", e)
         }
     }.flowOn(Dispatchers.IO)

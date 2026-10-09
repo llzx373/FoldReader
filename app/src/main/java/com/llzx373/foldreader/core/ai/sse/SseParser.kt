@@ -1,5 +1,8 @@
 package com.llzx373.foldreader.core.ai.sse
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import okhttp3.Call
 import okio.BufferedSource
 
 /**
@@ -41,4 +44,25 @@ internal fun BufferedSource.readSseEvents(): Sequence<SseEvent> = sequence {
         }
     }
     dispatchPending()?.let { yield(it) }
+}
+
+/**
+ * 把阻塞的 OkHttp 调用绑到协程取消上：收集端取消时 `call.cancel()` 立刻中断
+ * 底层 HTTP（execute/read），不再干等到 readTimeout——「取消会中断底层 HTTP」
+ * 是 [com.llzx373.foldreader.core.ai.AiProvider] 注释对外的承诺。
+ *
+ * 取消后 OkHttp 抛 IOException("Canceled")：调用方的 catch 必须先
+ * `ensureActive()` 把真正的协程取消抛回去，不能包成网络错误。
+ */
+internal suspend inline fun <T> Call.withCancellation(block: (Call) -> T): T {
+    // invokeOnCancellation 是内部 API；invokeOnCompletion 等价覆盖——
+    // 正常完成时 finally 的 dispose 会抢在前面摘掉注册，cancel() 不会误伤已完成的调用
+    val handle = currentCoroutineContext().job.invokeOnCompletion { cause ->
+        if (cause != null) cancel()
+    }
+    return try {
+        block(this)
+    } finally {
+        handle.dispose()
+    }
 }
