@@ -544,11 +544,14 @@ class AppContainer(context: Context) {
         val ranges = tiles.tileRanges(h, tileH, tileH / tiles.OVERLAP_DIVISOR)
         val detected = ArrayList<Pair<IntRange, List<com.llzx373.foldreader.core.ocr.OcrBubble>>>(ranges.size)
         for (range in ranges) {
+            // tileRanges 产出的是半开区间 [top, bottom)，但 IntRange.last 是闭区间语义，
+            // 片高必须 +1，否则每片少一行像素、坐标换算同口径偏一行
+            val tileHeight = range.last - range.first + 1
             val tile = runCatching {
-                android.graphics.Bitmap.createBitmap(tall, 0, range.first, w, range.last - range.first)
+                android.graphics.Bitmap.createBitmap(tall, 0, range.first, w, tileHeight)
             }.getOrNull() ?: continue
             val bubbles = ocrEngine.detectBubbles(tile, recSpec, rtl)
-                .map { tiles.toPageBubble(it, range.first, range.last - range.first, h) }
+                .map { tiles.toPageBubble(it, range.first, tileHeight, h) }
             detected += range to bubbles
         }
         if (detected.isEmpty()) return null
