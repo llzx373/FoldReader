@@ -123,6 +123,7 @@ class OcrEngine(
         val (detW, detH) = OcrPostprocess.detInputSize(pageWidth, pageHeight)
         val detInput = scaled(bitmap, detW, detH)
         val detTensor = tensor3ch(detInput, detW, detH)
+        recycleDetInput(bitmap, detInput)
         val probMap: FloatArray
         detTensor.use { input ->
             val inputName = det.inputNames.first()
@@ -138,9 +139,8 @@ class OcrEngine(
             val crop = crop(bitmap, box) ?: continue
             val (recW, recH) = OcrPostprocess.recInputSize(crop.width, crop.height)
             val line = scaled(crop, recW, recH)
-            if (line !== crop) crop.recycle()
             val recTensor = tensor3ch(line, recW, recH)
-            if (line !== bitmap) line.recycle()
+            recycleLineChain(bitmap, crop, line)
             val scores: FloatArray
             recTensor.use { input ->
                 val inputName = rec.inputNames.first()
@@ -300,5 +300,23 @@ class OcrEngine(
 
     companion object {
         private const val BUBBLE_INPUT = 640
+
+        /**
+         * det 输入位图的回收守卫：[scaled] 在目标尺寸与源相同时返回源位图本身，
+         * 只有真正新建的缩放图才回收（此前 detInput 从不回收，整页 OCR 每张漏一份缩放图）。
+         */
+        internal fun recycleDetInput(bitmap: Bitmap, detInput: Bitmap) {
+            if (detInput !== bitmap) detInput.recycle()
+        }
+
+        /**
+         * 行裁剪链的回收守卫：整页检测框（裁剪区=整图）时 createBitmap 走恒等优化
+         * 返回**源位图本身**，crop === bitmap——此时回收 crop 会连带回收调用方的页位图，
+         * 后续行裁剪全炸。只有 crop 是真正的副本且 line 另有缩放图时才回收。
+         */
+        internal fun recycleLineChain(bitmap: Bitmap, crop: Bitmap, line: Bitmap) {
+            if (crop !== bitmap && line !== crop) crop.recycle()
+            if (line !== bitmap) line.recycle()
+        }
     }
 }
