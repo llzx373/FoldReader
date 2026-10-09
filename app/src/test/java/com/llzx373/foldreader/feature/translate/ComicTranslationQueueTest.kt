@@ -59,6 +59,7 @@ class ComicTranslationQueueTest {
         val calls = mutableListOf<Pair<Long, Int>>() // bookId to pageIndex
         val visionCalls = mutableListOf<Pair<Long, Int>>() // 视觉模式的调用
         val failures = mutableSetOf<Pair<Long, Int>>() // 恒败页
+        val throws = mutableSetOf<Pair<Long, Int>>() // 直接抛异常的页（模拟坏图解码等逃逸异常）
         var gate: CompletableDeferred<Unit>? = null // 非空时每次调用前等待放行
 
         suspend fun translate(
@@ -69,9 +70,10 @@ class ComicTranslationQueueTest {
             vision: Boolean,
         ): Result<Int> {
             gate?.await()
-            calls += bookId to pageIndex
-            if (vision) visionCalls += bookId to pageIndex
             val key = bookId to pageIndex
+            if (key in throws) throw IllegalStateException("坏图解码炸了")
+            calls += key
+            if (vision) visionCalls += key
             return if (key in failures) {
                 Result.failure(IllegalStateException("恒败"))
             } else {
@@ -175,6 +177,27 @@ class ComicTranslationQueueTest {
         assertEquals(listOf(0, 1, 1, 1, 2), translate.calls.map { it.second })
         assertEquals(2, done?.done)
         assertEquals(1, done?.failedPages)
+    }
+
+    @Test
+    fun `单本书引擎抛异常不终止队列：该书 FAILED 后续书照常完成`() = runBlocking {
+        val translate = FakeTranslate()
+        translate.throws += 8L to 1 // 模拟坏图解码等护栏外异常：第 8 本书翻到第 2 页炸
+        val queue = newQueue(
+            this, FakePageDao(),
+            mapOf(7L to ("甲" to 1), 8L to ("乙" to 2), 9L to ("丙" to 1)),
+            translate,
+        )
+
+        queue.enqueueBook(7L, AiTargetLang.ZH_HANS)
+        queue.enqueueBook(8L, AiTargetLang.ZH_HANS)
+        queue.enqueueBook(9L, AiTargetLang.ZH_HANS)
+        val last = awaitProgress(queue, 9L) { it?.status == ComicTranslationQueue.Status.DONE }
+
+        assertEquals(ComicTranslationQueue.Status.DONE, last?.status)
+        assertEquals(ComicTranslationQueue.Status.FAILED, queue.progress.value[8L]?.status)
+        // 第 2 本书中途抛异常后队列仍活着：第 3 本书照常处理
+        assertEquals(listOf(7L to 0, 8L to 0, 9L to 0), translate.calls)
     }
 
     @Test

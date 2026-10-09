@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.translate
 
+import com.llzx373.foldreader.core.ai.AiMessage
 import com.llzx373.foldreader.core.ai.AiProvider
 import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.ai.gate.AiContentGate
@@ -9,6 +10,7 @@ import com.llzx373.foldreader.core.ai.prompt.PartialJsonArray
 import com.llzx373.foldreader.core.data.db.ComicPageTranslationDao
 import com.llzx373.foldreader.core.data.db.ComicPageTranslationEntity
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.ocr.OcrBubble
 import com.llzx373.foldreader.core.ocr.OcrTextLine
 import com.llzx373.foldreader.core.translate.ComicTranslationStore
@@ -63,38 +65,51 @@ class ComicTranslateEngine(
     ): Result<Int> {
         val provider = provider
             ?: return Result.failure(IllegalStateException("AI 服务未配置"))
-        val rawBubbles = bubblesFor(bookId, pageIndex)
-        if (rawBubbles.isEmpty()) {
-            return Result.failure(IllegalArgumentException("该页未识别到文字气泡"))
-        }
         val langKey = lang.name
-        // 条漫跨页气泡合并（R10）：页边被切断的气泡与下一页顶部续段并成一个再翻
-        val bubbles = maybeMergeCrossPage(bookId, pageIndex, langKey, rawBubbles)
-        val prefs = preferences()
-        val model = prefs.aiModelTranslation.ifBlank { prefs.aiModelGeneral }
-        val totalChars = bubbles.sumOf { it.text.length }
-        // 外发台账：token 估算口径同其他功能——字符数 / 2 的保守量级估算
-        contentGate.record(FEATURE_COMIC_TRANSLATION, "$bookTitle 第${pageIndex + 1}页", totalChars / 2)
-        pageDao.upsert(
-            ComicPageTranslationEntity(
-                bookId = bookId,
-                lang = langKey,
-                pageIndex = pageIndex,
-                status = ComicPageTranslationEntity.STATUS_TRANSLATING,
-                model = model,
-                bubbleCount = 0,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        // bubblesFor/preferences()/台账写入/术语合并等在下方重试 try 之外：异常逃逸会掀掉
+        // 队列消费循环（SupervisorJob 无 CEH），这里兜底成单页失败，由队列记 failed 继续
+        val bubbles: List<OcrBubble>
+        val prefs: ReadingPreferences
+        val model: String
+        val messages: List<AiMessage>
+        try {
+            val rawBubbles = bubblesFor(bookId, pageIndex)
+            if (rawBubbles.isEmpty()) {
+                return Result.failure(IllegalArgumentException("该页未识别到文字气泡"))
+            }
+            // 条漫跨页气泡合并（R10）：页边被切断的气泡与下一页顶部续段并成一个再翻
+            bubbles = maybeMergeCrossPage(bookId, pageIndex, langKey, rawBubbles)
+            prefs = preferences()
+            model = prefs.aiModelTranslation.ifBlank { prefs.aiModelGeneral }
+            val totalChars = bubbles.sumOf { it.text.length }
+            // 外发台账：token 估算口径同其他功能——字符数 / 2 的保守量级估算
+            contentGate.record(FEATURE_COMIC_TRANSLATION, "$bookTitle 第${pageIndex + 1}页", totalChars / 2)
+            pageDao.upsert(
+                ComicPageTranslationEntity(
+                    bookId = bookId,
+                    lang = langKey,
+                    pageIndex = pageIndex,
+                    status = ComicPageTranslationEntity.STATUS_TRANSLATING,
+                    model = model,
+                    bubbleCount = 0,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
 
-        // 术语注入现取（书 > 系列 > 全局；确认动作对下一页即时生效，R6）
-        val glossary = glossaryRepository.mergedConfirmed(bookId.toString(), seriesKeyFor(bookId))
-        val messages = ComicTranslatePrompt.buildMessages(
-            bubbleTexts = bubbles.map { it.text },
-            targetLang = lang,
-            glossary = glossary,
-            systemOverride = systemOverride,
-        )
+            // 术语注入现取（书 > 系列 > 全局；确认动作对下一页即时生效，R6）
+            val glossary = glossaryRepository.mergedConfirmed(bookId.toString(), seriesKeyFor(bookId))
+            messages = ComicTranslatePrompt.buildMessages(
+                bubbleTexts = bubbles.map { it.text },
+                targetLang = lang,
+                glossary = glossary,
+                systemOverride = systemOverride,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DiagnosticLog.line("漫画页翻译前置处理异常 bookId=$bookId page=$pageIndex：${e.stackTraceToString()}")
+            return Result.failure(e)
+        }
         var lastError: Throwable = IllegalStateException("翻译失败")
         // 首次 + 整体重试 1 次：流异常或气泡数量校验失败都算一次失败
         repeat(2) {
@@ -160,35 +175,46 @@ class ComicTranslateEngine(
     ): Result<Int> {
         val provider = provider
             ?: return Result.failure(IllegalStateException("AI 服务未配置"))
-        val prefs = preferences()
-        // 视觉模型未配时回落通用模型（与翻译模型同一约定）：多模态通用模型一次配置全场景可用
-        val model = prefs.aiModelVision.ifBlank { prefs.aiModelGeneral }
-        if (model.isBlank()) {
-            return Result.failure(IllegalStateException("未配置视觉模型（且通用模型也未配置）"))
-        }
-        val imageBase64 = pageImageBase64For(bookId, pageIndex)
-            ?: return Result.failure(IllegalStateException("无法读取页面图像"))
-        // 外发台账：图像外发——估算口径 = base64 字符 / 16 的粗略 token 量级
-        contentGate.record(
-            FEATURE_COMIC_VISION,
-            "$bookTitle 第${pageIndex + 1}页（页图像）",
-            imageBase64.length / 16,
-        )
+        // preferences()/取页图像/台账写入等在下方重试 try 之外：异常逃逸会掀掉队列消费循环
+        // （SupervisorJob 无 CEH），这里兜底成单页失败，由队列记 failed 继续
         val langKey = lang.name
-        pageDao.upsert(
-            ComicPageTranslationEntity(
-                bookId = bookId,
-                lang = langKey,
-                pageIndex = pageIndex,
-                status = ComicPageTranslationEntity.STATUS_TRANSLATING,
-                model = model,
-                bubbleCount = 0,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        val model: String
+        val messages: List<AiMessage>
+        try {
+            val prefs = preferences()
+            // 视觉模型未配时回落通用模型（与翻译模型同一约定）：多模态通用模型一次配置全场景可用
+            model = prefs.aiModelVision.ifBlank { prefs.aiModelGeneral }
+            if (model.isBlank()) {
+                return Result.failure(IllegalStateException("未配置视觉模型（且通用模型也未配置）"))
+            }
+            val imageBase64 = pageImageBase64For(bookId, pageIndex)
+                ?: return Result.failure(IllegalStateException("无法读取页面图像"))
+            // 外发台账：图像外发——估算口径 = base64 字符 / 16 的粗略 token 量级
+            contentGate.record(
+                FEATURE_COMIC_VISION,
+                "$bookTitle 第${pageIndex + 1}页（页图像）",
+                imageBase64.length / 16,
+            )
+            pageDao.upsert(
+                ComicPageTranslationEntity(
+                    bookId = bookId,
+                    lang = langKey,
+                    pageIndex = pageIndex,
+                    status = ComicPageTranslationEntity.STATUS_TRANSLATING,
+                    model = model,
+                    bubbleCount = 0,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
 
-        val glossary = glossaryRepository.mergedConfirmed(bookId.toString(), seriesKeyFor(bookId))
-        val messages = ComicVisionTranslatePrompt.buildMessages(imageBase64, lang, glossary)
+            val glossary = glossaryRepository.mergedConfirmed(bookId.toString(), seriesKeyFor(bookId))
+            messages = ComicVisionTranslatePrompt.buildMessages(imageBase64, lang, glossary)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DiagnosticLog.line("漫画视觉翻译前置处理异常 bookId=$bookId page=$pageIndex：${e.stackTraceToString()}")
+            return Result.failure(e)
+        }
         var lastError: Throwable = IllegalStateException("翻译失败")
         // 首次 + 整体重试 1 次：流异常或输出契约校验失败都算一次失败
         repeat(2) {

@@ -493,7 +493,15 @@ class AppContainer(context: Context) {
         val source = runCatching { openPagedSource(book, null) }.getOrNull()
             ?: return@withContext emptyList()
         try {
-            val image = source.loadPage(pageIndex, COMIC_OCR_TARGET_PX, COMIC_OCR_TARGET_PX)
+            // 坏图/容器损坏时解码抛异常不能逃逸（会掀掉漫画翻译队列消费循环）：该页按无气泡处理
+            val image = try {
+                source.loadPage(pageIndex, COMIC_OCR_TARGET_PX, COMIC_OCR_TARGET_PX)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DiagnosticLog.line("漫画页解码失败 bookId=$bookId page=$pageIndex：${e.stackTraceToString()}")
+                return@withContext emptyList()
+            }
             val bitmap = (image as? com.llzx373.foldreader.core.paged.PagedPageImage.Still)?.bitmap
                 ?: return@withContext emptyList()
             // 原生超长图（未预切的长条漫，M31）：整页压进 RT-DETR 的 640 方形输入会纵向

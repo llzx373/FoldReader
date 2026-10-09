@@ -81,6 +81,7 @@ class BookSummaryQueueTest {
         val calls = mutableListOf<Pair<Long, Int>>() // bookId to unitIndex
         val failures = mutableSetOf<Pair<Long, Int>>() // 恒败单位
         val failOnce = mutableSetOf<Pair<Long, Int>>() // 第一次败、重试成
+        val throws = mutableSetOf<Pair<Long, Int>>() // 直接抛异常的单位（模拟引擎护栏外的逃逸）
         private val attempts = mutableMapOf<Pair<Long, Int>, Int>()
         var gate: CompletableDeferred<Unit>? = null // 非空时每次调用前等待放行
 
@@ -92,8 +93,9 @@ class BookSummaryQueueTest {
             lang: AiTargetLang,
         ): Result<Int> {
             gate?.await()
-            calls += bookId to unit.index
             val key = bookId to unit.index
+            if (key in throws) throw IllegalStateException("引擎炸了")
+            calls += key
             val attempt = (attempts[key] ?: 0) + 1
             attempts[key] = attempt
             return when {
@@ -195,6 +197,27 @@ class BookSummaryQueueTest {
         assertEquals(listOf(0, 0, 1, 1, 1, 2), summarize.calls.map { it.second })
         assertEquals(2, done?.done)
         assertEquals(1, done?.failedUnits)
+    }
+
+    @Test
+    fun `单本书引擎抛异常不终止队列：该书 FAILED 后续书照常完成`() = runBlocking {
+        val summarize = FakeSummarize()
+        summarize.throws += 8L to 0 // 模拟引擎护栏之外的异常逃逸（IO/SQLite 等）
+        val queue = newQueue(
+            FakeSummaryDao(),
+            mapOf(7L to FakeSource("甲", 1), 8L to FakeSource("乙", 1), 9L to FakeSource("丙", 1)),
+            summarize,
+        )
+
+        queue.enqueueBook(7L, AiTargetLang.ZH_HANS)
+        queue.enqueueBook(8L, AiTargetLang.ZH_HANS)
+        queue.enqueueBook(9L, AiTargetLang.ZH_HANS)
+        val last = awaitProgress(queue, 9L) { it?.status == BookSummaryQueue.Status.DONE }
+
+        assertEquals(BookSummaryQueue.Status.DONE, last?.status)
+        assertEquals(BookSummaryQueue.Status.FAILED, queue.progress.value[8L]?.status)
+        // 第 2 本书抛异常后队列仍活着：第 3 本书照常处理
+        assertEquals(listOf(7L to 0, 9L to 0), summarize.calls)
     }
 
     @Test

@@ -3,9 +3,11 @@ package com.llzx373.foldreader.feature.summary
 import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.data.db.ChapterSummaryDao
 import com.llzx373.foldreader.core.data.db.ChapterSummaryEntity
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.translate.TranslationUnit
 import com.llzx373.foldreader.feature.translate.BookTranslationSource
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -73,7 +75,16 @@ class BookSummaryQueue(
                     removeProgress(job.bookId)
                     continue
                 }
-                process(job)
+                try {
+                    process(job)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 单本书的未预料异常（引擎 try 之外的 IO/SQLite 等）不能掀掉消费循环：
+                    // 注入 scope 是 SupervisorJob 且无 CEH，逃逸即崩溃 + 队列永久失活。
+                    DiagnosticLog.line("摘要队列 bookId=${job.bookId} 异常终止：${e.stackTraceToString()}")
+                    updateProgress(job.bookId) { it?.copy(status = Status.FAILED) }
+                }
                 if (betweenUnitsDelayMs > 0) delay(betweenUnitsDelayMs)
             }
         }

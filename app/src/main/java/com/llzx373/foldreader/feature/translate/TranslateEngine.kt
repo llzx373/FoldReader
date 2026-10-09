@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.feature.translate
 
+import com.llzx373.foldreader.core.ai.AiMessage
 import com.llzx373.foldreader.core.ai.AiProvider
 import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.ai.gate.AiContentGate
@@ -9,6 +10,7 @@ import com.llzx373.foldreader.core.data.db.GlossaryTermEntity
 import com.llzx373.foldreader.core.data.db.TranslationDao
 import com.llzx373.foldreader.core.data.db.TranslationEntity
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.translate.GlossaryRepository
 import com.llzx373.foldreader.core.translate.TranslationStore
 import com.llzx373.foldreader.core.translate.TranslationUnit
@@ -57,36 +59,49 @@ class TranslateEngine(
     ): Result<Int> {
         val provider = provider
             ?: return Result.failure(IllegalStateException("AI 服务未配置"))
-        val prefs = preferences()
-        val model = prefs.aiModelTranslation.ifBlank { prefs.aiModelGeneral }
         val paragraphs = splitIntoParagraphs(unitText)
         if (paragraphs.isEmpty()) {
             return Result.failure(IllegalArgumentException("单位文本为空或无有效段落"))
         }
-        // 外发台账：token 估算口径同「选中即译」——字符数 / 2 的保守量级估算，台账只用于审计
-        contentGate.record(FEATURE_UNIT_TRANSLATION, bookTitle, unitText.length / 2)
         val langKey = lang.name
-        translationDao.upsert(
-            TranslationEntity(
-                bookId = bookId,
-                lang = langKey,
-                unitKind = unit.kind.name.lowercase(),
-                unitIndex = unit.index,
-                status = TranslationEntity.STATUS_TRANSLATING,
-                model = model,
-                paragraphCount = 0,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        // preferences()/台账写入/术语合并等在下方重试 try 之外：异常逃逸会掀掉队列消费循环
+        // （SupervisorJob 无 CEH），这里兜底成单单位失败，由队列记 failed 继续
+        val prefs: ReadingPreferences
+        val model: String
+        val glossary: List<Pair<String, String>>
+        val messages: List<AiMessage>
+        try {
+            prefs = preferences()
+            model = prefs.aiModelTranslation.ifBlank { prefs.aiModelGeneral }
+            // 外发台账：token 估算口径同「选中即译」——字符数 / 2 的保守量级估算，台账只用于审计
+            contentGate.record(FEATURE_UNIT_TRANSLATION, bookTitle, unitText.length / 2)
+            translationDao.upsert(
+                TranslationEntity(
+                    bookId = bookId,
+                    lang = langKey,
+                    unitKind = unit.kind.name.lowercase(),
+                    unitIndex = unit.index,
+                    status = TranslationEntity.STATUS_TRANSLATING,
+                    model = model,
+                    paragraphCount = 0,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
 
-        // 术语注入现取：确认动作对下一个单位即时生效（R6 优先级合并在仓库层）
-        val glossary = glossaryRepository?.mergedConfirmed(bookId.toString()).orEmpty()
-        val messages = UnitTranslatePrompt.buildMessages(
-            paragraphs = paragraphs,
-            targetLang = lang,
-            glossary = glossary,
-            systemOverride = systemOverride,
-        )
+            // 术语注入现取：确认动作对下一个单位即时生效（R6 优先级合并在仓库层）
+            glossary = glossaryRepository?.mergedConfirmed(bookId.toString()).orEmpty()
+            messages = UnitTranslatePrompt.buildMessages(
+                paragraphs = paragraphs,
+                targetLang = lang,
+                glossary = glossary,
+                systemOverride = systemOverride,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DiagnosticLog.line("单位翻译前置处理异常 bookId=$bookId unit=${unit.index}：${e.stackTraceToString()}")
+            return Result.failure(e)
+        }
         var lastError: Throwable = IllegalStateException("翻译失败")
         // 首次 + 整体重试 1 次：流异常或段落数量校验失败都算一次失败
         repeat(2) {
