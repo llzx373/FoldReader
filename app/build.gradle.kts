@@ -199,6 +199,8 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.xz)
     implementation(libs.junrar)
+    // 漫画页 EXIF 方向（手机扫描件常见 90°/270° 标签）
+    implementation(libs.androidx.exifinterface)
     // PDF：渲染走 androidx.pdf 的文档服务（沙箱进程 + 平台 PdfRenderer），
     // 元数据/目录/文本走 PdfBox。
     //

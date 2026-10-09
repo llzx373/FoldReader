@@ -15,6 +15,30 @@ object ComicTestImages {
 
     fun jpeg(width: Int, height: Int): ByteArray = encode("jpeg", width, height)
 
+    /**
+     * 在 JPEG 的 SOI 之后插入一个最小 EXIF APP1 段（IFD0 只有方向标签）。
+     * 模拟手机扫描件：像素排列不变，展示方向由标签决定。
+     */
+    fun jpegWithExifOrientation(width: Int, height: Int, orientation: Int): ByteArray {
+        val jpeg = jpeg(width, height)
+        check(jpeg[0] == 0xFF.toByte() && jpeg[1] == 0xD8.toByte()) { "不是 JPEG" }
+        // "Exif"00 00 + TIFF 头(II*00, IFD0@8) + 1 个条目(tag 0x0112, SHORT, count 1) + 下一 IFD=0
+        val payload = byteArrayOf(
+            'E'.code.toByte(), 'x'.code.toByte(), 'i'.code.toByte(), 'f'.code.toByte(), 0, 0,
+            0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x01, 0x00,
+            0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+            orientation.toByte(), 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        )
+        val length = payload.size + 2
+        val app1 = byteArrayOf(
+            0xFF.toByte(), 0xE1.toByte(),
+            ((length shr 8) and 0xFF).toByte(), (length and 0xFF).toByte(),
+        ) + payload
+        return jpeg.copyOfRange(0, 2) + app1 + jpeg.copyOfRange(2, jpeg.size)
+    }
+
     fun bmp(width: Int, height: Int): ByteArray = encode("bmp", width, height)
 
     /** WebP 扩展格式（VP8X）头：只有头，够 [ComicImageSizing] 判画布尺寸与动画标志。 */

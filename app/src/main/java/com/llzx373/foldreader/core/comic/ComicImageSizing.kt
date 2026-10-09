@@ -1,25 +1,52 @@
 package com.llzx373.foldreader.core.comic
 
+import androidx.exifinterface.media.ExifInterface
+import java.io.ByteArrayInputStream
+
 /**
  * 图片头解析：只读头几十字节就拿到像素尺寸，不解码像素。
  *
  * 存在意义：双页配对要判「这张是不是横向跨页图」，若靠解码才知道尺寸，
  * 就得把前后几页全解一遍。纯 Java 实现（不碰 `BitmapFactory`）也让容器层留在 JVM 单测范围内。
+ *
+ * JPEG 的 EXIF 方向标签（手机扫描件常见 90°/270°）参与返回值：
+ * 探测到的是「展示尺寸」——解码后画面会按标签旋转，跨页判定与滚动条目高度
+ * 必须以旋转后的宽高为准，否则竖躺的扫描页会被误判成跨页大图。
  */
 object ComicImageSizing {
 
-    /** 返回 `[width, height]`；认不出返回 null。 */
+    /** 返回 `[width, height]`（已按 EXIF 方向换算成展示尺寸）；认不出返回 null。 */
     fun probe(bytes: ByteArray): IntArray? {
         if (bytes.size < 16) return null
         return when {
             isPng(bytes) -> pngSize(bytes)
             isGif(bytes) -> gifSize(bytes)
             isBmp(bytes) -> bmpSize(bytes)
-            isJpeg(bytes) -> jpegSize(bytes)
+            isJpeg(bytes) -> jpegSize(bytes)?.let { size ->
+                if (swapsDimensions(exifOrientation(bytes))) intArrayOf(size[1], size[0]) else size
+            }
             isWebp(bytes) -> webpSize(bytes)
             else -> null
         }
     }
+
+    /** EXIF 方向标签（只有 JPEG 携带）；无标签/解析失败返回 [ExifInterface.ORIENTATION_NORMAL]。 */
+    fun exifOrientation(bytes: ByteArray): Int {
+        if (bytes.size < 4 || !isJpeg(bytes)) return ExifInterface.ORIENTATION_NORMAL
+        return runCatching {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    }
+
+    /** 该方向是否交换宽高（90°/270° 旋转家族：TRANSPOSE/ROTATE_90/TRANSVERSE/ROTATE_270）。 */
+    fun swapsDimensions(orientation: Int): Boolean =
+        orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+            orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+            orientation == ExifInterface.ORIENTATION_TRANSVERSE ||
+            orientation == ExifInterface.ORIENTATION_ROTATE_270
 
     private fun isPng(b: ByteArray): Boolean =
         b.size > 24 && b[0] == 0x89.toByte() && b[1] == 'P'.code.toByte() &&

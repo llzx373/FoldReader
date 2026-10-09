@@ -58,6 +58,8 @@ composeMultiplatform = "1.12.0"
 # M34 隐私锁：BiometricPrompt 需要 FragmentActivity 承载
 biometric = "1.1.0"
 androidxFragment = "1.8.8"
+# C5 漫画页 EXIF 方向：扫描件 JPEG 的旋转/镜像标签（体积/收益见 CHANGELOG）
+exifinterface = "1.3.7"
 # M35 工程质量：Baseline Profile 生成器 + Macrobenchmark（benchmark 全家桶同版本对齐；
 # baselineprofile 插件 1.5.0 声明支持 AGP 8.0–10.0，覆盖当前 AGP 9.4.1）
 benchmark = "1.5.0"
@@ -119,6 +121,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # M34 隐私锁（生物识别/锁屏凭据应用锁）
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "androidxFragment" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 # M35：Macrobenchmark / Baseline Profile（只进 :baselineprofile 测试模块，不进 APK）；
 # profileinstaller 进 app（Baseline Profile 运行时安装与编译状态查询）
 androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }

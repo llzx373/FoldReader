@@ -3,7 +3,9 @@ package com.llzx373.foldreader.core.comic
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.drawable.Drawable
+import androidx.exifinterface.media.ExifInterface
 import com.llzx373.foldreader.core.reader.sampleSizeFor
 import java.nio.ByteBuffer
 
@@ -40,6 +42,7 @@ object ComicImageDecoder {
      * 固定 `RGB_565`：漫画页不需要 alpha，每像素 2 字节而不是 4 字节，
      * 同样的 LRU 预算能多装一倍页，直接减少「解码 → 被挤掉 → 再解码」。
      * 边界尺寸优先用 [ComicImageSizing] 的头解析拿到（省掉一次 `inJustDecodeBounds` 全扫）。
+     * JPEG 按 EXIF 方向旋转/镜像（手机扫描件常见），封面提取走同一入口故一并生效。
      */
     fun decodeSampled(bytes: ByteArray, targetW: Int, targetH: Int): Bitmap? {
         val size = ComicImageSizing.probe(bytes) ?: probeWithFactory(bytes) ?: return null
@@ -47,7 +50,38 @@ object ComicImageDecoder {
             inSampleSize = sampleSizeFor(size[0], size[1], targetW, targetH)
             inPreferredConfig = Bitmap.Config.RGB_565
         }
-        return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
+        val decoded = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }
+            .getOrNull() ?: return null
+        return applyExifOrientation(decoded, ComicImageSizing.exifOrientation(bytes))
+    }
+
+    /** 按 EXIF 方向旋转/镜像。原方向直接返回原位图；变换后旧位图由这里回收（调用方只持有返回值）。 */
+    private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+                matrix.setRotate(180f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(-90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
+            else -> return bitmap
+        }
+        val transformed = runCatching {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }.getOrNull() ?: return bitmap
+        if (transformed !== bitmap) bitmap.recycle()
+        return transformed
     }
 
     /**
