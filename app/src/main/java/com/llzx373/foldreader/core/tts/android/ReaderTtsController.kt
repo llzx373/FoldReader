@@ -169,6 +169,9 @@ class ReaderTtsController(context: Context) {
     ) {
         main.post {
             if (segments.isEmpty()) return@post
+            // 新会话开始先清旧会话的睡眠定时（与 stop 路径同口径）：否则旧定时到点会
+            // 停掉**新**会话并弹过期文案，旧 tick 还继续写状态流
+            clearSleepTimer()
             this.segments = segments
             currentIndex = 0
             generation++
