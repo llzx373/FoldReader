@@ -49,7 +49,8 @@ class DictionaryStore(private val dictsDir: File) {
      * MDict（.mdx/.mdd）明确不支持（格式多变体且可能加密），报清楚的错。
      */
     fun import(stem: String, openFile: (fileName: String) -> InputStream?): DictInfo {
-        if (openFile("$stem.mdx") != null || openFile("$stem.mdd") != null) {
+        // 探测流也要关：SAF 来的流不关会泄漏底层 ParcelFileDescriptor
+        if (probeExists(openFile, "$stem.mdx") || probeExists(openFile, "$stem.mdd")) {
             throw ImportException("MDict 格式暂不支持（格式多变体且可能加密），请改用 StarDict 格式（.ifo + .idx + .dict）")
         }
         val id = sanitize(stem)
@@ -86,6 +87,9 @@ class DictionaryStore(private val dictsDir: File) {
             throw ImportException("导入失败：${e.message ?: "文件读取异常"}")
         }
     }
+
+    private fun probeExists(openFile: (String) -> InputStream?, name: String): Boolean =
+        openFile(name)?.use { true } ?: false
 
     private fun copyRequired(
         openFile: (String) -> InputStream?,

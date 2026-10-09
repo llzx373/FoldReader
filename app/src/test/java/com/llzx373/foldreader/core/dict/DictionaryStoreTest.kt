@@ -138,6 +138,35 @@ class DictionaryStoreTest {
     }
 
     @Test
+    fun `mdx 探测流用后即关`() {
+        val dir = tempDir()
+        try {
+            val store = DictionaryStore(dir)
+            var closed = false
+            val files = fixtureFiles("m", listOf("a" to "b"))
+            try {
+                store.import("m") { name ->
+                    when (name) {
+                        "m.mdx" -> object : ByteArrayInputStream(byteArrayOf(1)) {
+                            override fun close() {
+                                closed = true
+                                super.close()
+                            }
+                        }
+                        else -> files[name]?.let { ByteArrayInputStream(it) }
+                    }
+                }
+                fail("mdx 应该报错")
+            } catch (e: DictionaryStore.ImportException) {
+                assertTrue(e.message!!.contains("MDict"))
+            }
+            assertTrue("探测流必须关闭", closed)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `删除词典后列表清空`() {
         val dir = tempDir()
         try {
