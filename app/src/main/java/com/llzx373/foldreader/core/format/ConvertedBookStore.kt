@@ -101,13 +101,15 @@ internal class ConvertedBookStore(private val convertedDir: File) {
             writeAnchors(anchorsFile, content.anchors)
             writePages(pagesFile, content.pageLabels)
             writeSpans(File(convertedDir, "$hash.spans"), content.spans)
-            File(convertedDir, "$hash.version").writeText(FLATTEN_VERSION.toString(), Charsets.UTF_8)
             if (target.exists() && !target.delete()) {
                 throw IOException("压平缓存写入失败: ${target.absolutePath}")
             }
             if (!tmpTxt.renameTo(target)) {
                 throw IOException("压平缓存写入失败: ${target.absolutePath}")
             }
+            // 版本号必须是最后落笔：崩溃留下的中间态（新正文 + 旧版本号/缺版本号）
+            // 会被 cacheFilesValid 判失效重压平，而不是静默读到错配的缓存。
+            File(convertedDir, "$hash.version").writeText(FLATTEN_VERSION.toString(), Charsets.UTF_8)
             val stored = FlattenedBook(
                 target,
                 content.chapters,
