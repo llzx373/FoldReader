@@ -9,6 +9,7 @@ import com.llzx373.foldreader.core.format.ContentHasher
 import com.llzx373.foldreader.core.format.txt.UriChannels
 import java.io.File
 import java.nio.channels.SeekableByteChannel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,7 +51,11 @@ class PdfImportUseCase(
         groupName: String? = null,
     ): Outcome = withContext(ioDispatcher) {
         runCatching { doRegister(uri, source, groupName) }
-            .getOrElse { Outcome.Failure(it.message) }
+            .getOrElse {
+                // 批量导入点取消时当前这本不能被记成虚假「失败」
+                if (it is CancellationException) throw it
+                Outcome.Failure(it.message)
+            }
     }
 
     private suspend fun doRegister(

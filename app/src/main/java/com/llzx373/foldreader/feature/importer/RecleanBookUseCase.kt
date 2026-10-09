@@ -16,6 +16,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SeekableByteChannel
 import java.security.MessageDigest
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -95,7 +96,11 @@ class RecleanBookUseCase(
             } finally {
                 tmp.delete()
             }
-        }.getOrElse { Outcome.Failure(it.message ?: "智能整理失败") }
+        }.getOrElse {
+            // 重洗中途取消不是「整理失败」：取消上抛，由调用方按取消处理
+            if (it is CancellationException) throw it
+            Outcome.Failure(it.message ?: "智能整理失败")
+        }
     }
 
     /**

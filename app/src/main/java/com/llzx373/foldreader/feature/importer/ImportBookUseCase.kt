@@ -28,6 +28,7 @@ import java.io.RandomAccessFile
 import java.nio.channels.Channels
 import java.nio.channels.SeekableByteChannel
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -109,7 +110,11 @@ class ImportBookUseCase(
         source: BookSource = BookSource.IMPORT,
         onProgress: (Float) -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
-        runCatching { doImport(uriKey, profile, source, onProgress) }.getOrElse { Result.Failure(it.message) }
+        runCatching { doImport(uriKey, profile, source, onProgress) }.getOrElse {
+            // 批量导入点取消时当前这本不能被记成虚假「失败」
+            if (it is CancellationException) throw it
+            Result.Failure(it.message)
+        }
     }
 
     /**
@@ -353,6 +358,8 @@ class ImportBookUseCase(
         } catch (e: DrmProtectedException) {
             return Result.Failure(e.message ?: "受 DRM 保护，无法导入")
         } catch (t: Throwable) {
+            // 元数据读不出可以降级，但协程取消必须上抛，不能降级成「无元数据」继续导
+            if (t is CancellationException) throw t
             null
         }
         val title = meta?.title?.takeIf { it.isNotBlank() }

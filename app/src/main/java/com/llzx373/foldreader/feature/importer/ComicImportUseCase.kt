@@ -15,6 +15,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.channels.SeekableByteChannel
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,7 +72,11 @@ class ComicImportUseCase(
         onProgress: (Float) -> Unit = {},
     ): Outcome = withContext(ioDispatcher) {
         runCatching { doRegister(uri, container, source, groupName, onProgress) }
-            .getOrElse { Outcome.Failure(it.message) }
+            .getOrElse {
+                // 批量导入点取消时当前这本不能被记成虚假「失败」
+                if (it is CancellationException) throw it
+                Outcome.Failure(it.message)
+            }
     }
 
     private suspend fun doRegister(
@@ -108,6 +113,7 @@ class ComicImportUseCase(
             ComicContainer.ZIP -> try {
                 archiveFactory.pageCount(uri, container, contentHash)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 return Outcome.Failure(t.message ?: "无法读取压缩包")
             }
             ComicContainer.RAR, ComicContainer.TAR, ComicContainer.SEVEN_ZIP -> null
