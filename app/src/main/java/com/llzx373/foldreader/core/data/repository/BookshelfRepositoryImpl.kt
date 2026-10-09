@@ -298,14 +298,9 @@ class BookshelfRepositoryImpl(
 
     override suspend fun addReadingSession(bookId: Long, dayStartMs: Long, deltaMs: Long) {
         if (deltaMs <= 0L) return
-        val existing = sessionDao.get(bookId, dayStartMs)
-        sessionDao.upsert(
-            ReadingSessionEntity(
-                bookId = bookId,
-                dayStartMs = dayStartMs,
-                durationMs = (existing?.durationMs ?: 0L) + deltaMs,
-            ),
-        )
+        // 单条 SQL 原子累加：此前先 get 再 upsert 的读-改-写在并发（前台阅读 + 后台翻页落账）
+        // 下会互相覆盖丢时长
+        sessionDao.addDuration(bookId, dayStartMs, deltaMs)
     }
 
     override suspend fun getReadingSessionsBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =

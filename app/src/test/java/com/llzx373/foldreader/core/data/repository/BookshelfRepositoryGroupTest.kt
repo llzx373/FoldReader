@@ -264,11 +264,13 @@ class BookshelfRepositoryGroupTest {
         override suspend fun deleteById(id: Long) = Unit
         override suspend fun deleteByBookIds(bookIds: List<Long>) = Unit
         override suspend fun deleteByBookAndNotePrefix(bookId: Long, notePrefix: String) = Unit
+        override suspend fun deleteByNotePrefixEscaped(bookId: Long, notePrefix: String) = Unit
     }
 
     private class FakeSessionDao : ReadingSessionDao {
         override suspend fun get(bookId: Long, dayStartMs: Long): ReadingSessionEntity? = null
         override suspend fun upsert(session: ReadingSessionEntity) = Unit
+        override suspend fun addDuration(bookId: Long, dayStartMs: Long, deltaMs: Long) = Unit
         override suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> = emptyList()
         override suspend fun getAll(): List<ReadingSessionEntity> = emptyList()
 

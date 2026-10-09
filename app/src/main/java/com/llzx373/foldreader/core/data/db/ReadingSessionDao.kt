@@ -14,6 +14,13 @@ interface ReadingSessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(session: ReadingSessionEntity)
 
+    /** 原子累加当日时长：单条 SQL 完成，杜绝「读-改-写」并发丢增量。 */
+    @Query(
+        "INSERT INTO reading_sessions (bookId, dayStartMs, durationMs) VALUES (:bookId, :dayStartMs, :deltaMs) " +
+            "ON CONFLICT(bookId, dayStartMs) DO UPDATE SET durationMs = durationMs + :deltaMs",
+    )
+    suspend fun addDuration(bookId: Long, dayStartMs: Long, deltaMs: Long)
+
     @Query("SELECT * FROM reading_sessions WHERE dayStartMs >= :startMs AND dayStartMs <= :endMs")
     suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity>
 

@@ -440,6 +440,11 @@ internal class FakeSessionDao : ReadingSessionDao {
         rows.removeAll { it.bookId == session.bookId && it.dayStartMs == session.dayStartMs }
         rows += session
     }
+    override suspend fun addDuration(bookId: Long, dayStartMs: Long, deltaMs: Long) {
+        val existing = rows.find { it.bookId == bookId && it.dayStartMs == dayStartMs }
+        rows.removeAll { it.bookId == bookId && it.dayStartMs == dayStartMs }
+        rows += ReadingSessionEntity(bookId, dayStartMs, (existing?.durationMs ?: 0L) + deltaMs)
+    }
     override suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> =
         rows.filter { it.dayStartMs in startMs..endMs }
     override suspend fun getAll(): List<ReadingSessionEntity> = rows.toList()

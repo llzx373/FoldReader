@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 每书阅读偏好：首次打开书籍时以当时的全局默认落库，之后读写均走 book_prefs。
@@ -38,10 +40,18 @@ class BookPrefsRepository(
         }
     }
 
+    /**
+     * 读-改-写串行化：两个并发 update（如裁边检测回填与手动开关同时落）此前会互相覆盖。
+     * 进程内互斥足够——BookPrefsDao 不走跨进程写入。
+     */
+    private val updateMutex = Mutex()
+
     suspend fun update(bookId: Long, transform: (BookPrefsEntity) -> BookPrefsEntity) {
-        val current = bookPrefsDao.get(bookId)
-            ?: settingsRepository.preferences.first().toBookPrefsEntity(bookId)
-        bookPrefsDao.upsert(transform(current))
+        updateMutex.withLock {
+            val current = bookPrefsDao.get(bookId)
+                ?: settingsRepository.preferences.first().toBookPrefsEntity(bookId)
+            bookPrefsDao.upsert(transform(current))
+        }
     }
 
     /** 按书自定义章节规则（原始正则串列表）；未自定义（或尚未落库）时为空列表。 */
