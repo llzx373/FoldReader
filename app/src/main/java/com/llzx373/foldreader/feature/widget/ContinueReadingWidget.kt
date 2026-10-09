@@ -59,6 +59,9 @@ class ContinueReadingWidget : AppWidgetProvider() {
                     (context.applicationContext as com.llzx373.foldreader.FoldReaderApplication).container
                 val books = container.bookshelfRepository.observeBookshelfWithProgress().first()
                 render(context, appWidgetManager, appWidgetIds, pickRecent(books))
+            } catch (t: Throwable) {
+                // 取数/渲染失败静默保持旧卡片：小部件没有理由把宿主进程拉崩
+                if (t is kotlinx.coroutines.CancellationException) throw t
             } finally {
                 pending.finish()
             }
