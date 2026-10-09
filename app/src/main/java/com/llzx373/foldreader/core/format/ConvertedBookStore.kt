@@ -31,7 +31,7 @@ internal data class FlattenContent(
 
 /**
  * 非 TXT 格式共用的压平缓存：`convertedDir/<contentHash>.txt`（UTF-8 纯文本）
- * + `<contentHash>.toc` sidecar（章节 charStart/charEnd/title）
+ * + `<contentHash>.toc` sidecar（章节 charStart/charEnd/depth/pageIndex/title）
  * + `<contentHash>.anchors` / `<contentHash>.pages` sidecar（锚点表 / 纸书页码，可空内容但必须存在）
  * + `<contentHash>.spans` sidecar（样式/结构 span，可空内容但必须存在）
  * + `<contentHash>.version` sidecar（压平规范版本号）。
@@ -186,6 +186,11 @@ internal class ConvertedBookStore(private val convertedDir: File) {
                 writer.write('\t'.code)
                 writer.write(chapter.charEnd.toString())
                 writer.write('\t'.code)
+                writer.write(chapter.depth.toString())
+                writer.write('\t'.code)
+                // 页式格式（PDF）的跳转锚点；文本格式恒为 null，落盘记 -1。
+                writer.write((chapter.pageIndex ?: -1L).toString())
+                writer.write('\t'.code)
                 writer.write(escapeTocField(chapter.title))
                 writer.write('\n'.code)
             }
@@ -288,11 +293,14 @@ internal class ConvertedBookStore(private val convertedDir: File) {
         return runCatching {
             file.readLines(Charsets.UTF_8).map { line ->
                 val parts = line.split('\t')
-                require(parts.size >= 3) { "损坏的章节缓存行" }
+                require(parts.size >= 5) { "损坏的章节缓存行" }
+                val pageIndex = parts[3].toLong()
                 Chapter(
-                    title = unescapeTocField(parts.subList(2, parts.size).joinToString("\t")),
+                    title = unescapeTocField(parts.subList(4, parts.size).joinToString("\t")),
                     charStart = parts[0].toLong(),
                     charEnd = parts[1].toLong(),
+                    depth = parts[2].toInt(),
+                    pageIndex = pageIndex.takeIf { it >= 0 },
                 )
             }
         }.getOrNull()
@@ -332,9 +340,11 @@ internal class ConvertedBookStore(private val convertedDir: File) {
     companion object {
         /**
          * 压平规范版本：压平输出规则变更时递增，旧缓存自动重压平。
-         * v2：ruby/表格/列表结构化；v3：img 占位块（U+FFFC）+ 样式/链接/图片 span 记录。
+         * v2：ruby/表格/列表结构化；v3：img 占位块（U+FFFC）+ 样式/链接/图片 span 记录；
+         * v4：目录 sidecar 持久化 depth 与页锚点 pageIndex（此前回读退化为 depth=0/pageIndex=null，
+         * PDF 双锚点目录在「从缓存回读」路径上点不动）。
          */
-        const val FLATTEN_VERSION = 3
+        const val FLATTEN_VERSION = 4
 
         /** sidecar 解析结果备忘容量：同一时刻只有一本书在阅读，2 条足够。 */
         const val MEMO_SIZE = 2
