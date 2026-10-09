@@ -843,9 +843,10 @@ class AppContainer(context: Context) {
     )
     /** WebDAV 备份编排（M25）：编解码复用 backupManager，传输记账进外发历史台账。 */
     val webDavBackupManager = com.llzx373.foldreader.core.backup.webdav.WebDavBackupManager(
-        exportJsonText = backupManager::exportJsonText,
-        importJsonText = backupManager::importFromText,
-        preview = { text -> com.llzx373.foldreader.core.backup.BackupManager.preview(text) },
+        exportToFile = { file -> backupManager.exportToFile(file) },
+        importFromFile = backupManager::importFromFile,
+        previewFile = backupManager::previewFile,
+        tempDir = { appContext.cacheDir },
         clientFor = { webDavClient() },
         gate = aiContentGate,
     )
@@ -853,7 +854,7 @@ class AppContainer(context: Context) {
     val autoBackupRunner = com.llzx373.foldreader.core.backup.AutoBackupRunner(
         context = appContext,
         settingsRepository = settingsRepository,
-        exportJsonText = backupManager::exportJsonText,
+        exportTo = backupManager::exportTo,
         safTree = safTree,
     )
     /** 漫画容器读取（zip 随机访问 / tar·7z·rar 解压缓存 / SAF 目录）。 */

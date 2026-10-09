@@ -41,7 +41,7 @@ class AutoBackupRunnerTest {
     private fun runnerOf(settings: SettingsRepository) = AutoBackupRunner(
         context = context,
         settingsRepository = settings,
-        exportJsonText = { "{}" },
+        exportTo = { BackupManager.ExportResult() },
         safTree = SafTree(context),
     )
 

@@ -1,7 +1,10 @@
 package com.llzx373.foldreader.core.backup
 
 import com.llzx373.foldreader.core.backup.BackupManager.ImportResult
+import com.llzx373.foldreader.core.comic.ComicContainer
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
+import com.llzx373.foldreader.core.data.db.BookEntity
+import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.db.BookPrefsDao
 import com.llzx373.foldreader.core.data.db.BookPrefsEntity
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
@@ -20,6 +23,15 @@ import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * 一本书在 zip 备份内的归档位置（v11 起导出）：[file] 是 `files/` 下书文件条目名，
+ * [cover] 是 `covers/` 下封面条目名；都遵循 BackupArchive 的命名约定。
+ */
+data class BookArchiveRefs(val file: String? = null, val cover: String? = null)
+
+/** zip 恢复钩子解析出的本地落盘位置：新建书籍行的 fileUri/coverPath 指向这里。 */
+data class ResolvedBookFile(val fileUri: String, val coverPath: String?)
 
 /**
  * 备份 JSON 的编解码：导出书架数据 + 阅读偏好，导入时按 contentHash 匹配书籍，
@@ -41,7 +53,11 @@ class BackupCodec(
     private val bookOutlineDao: com.llzx373.foldreader.core.data.db.BookOutlineDao? = null,
 ) {
 
-    suspend fun exportJson(): JSONObject {
+    /**
+     * 导出书架数据 + 阅读偏好。[archiveRefs] 由 zip 打包方提供：给出每本书在包内的
+     * 归档条目名，写进该书的 `archiveFile`/`archiveCover` 字段；默认恒 null（纯 JSON）。
+     */
+    suspend fun exportJson(archiveRefs: (BookEntity) -> BookArchiveRefs? = { null }): JSONObject {
         val books = bookshelfRepository.observeBookshelf().first()
         val bookmarks = bookshelfRepository.observeAllBookmarks().first().groupBy { it.bookId }
         val annotations = bookshelfRepository.observeAllAnnotations().first().groupBy { it.bookId }
@@ -53,9 +69,9 @@ class BackupCodec(
             .put("app", "FoldReader")
             .put("version", BackupManager.BACKUP_VERSION)
             .put("exportedAt", System.currentTimeMillis())
-            .put("note", "不含书籍文件本体；偏移索引与分页缓存不包含，打开书籍时自动重建")
             .put("preferences", preferencesJson(prefs))
 
+        var anyFilePacked = false
         val booksJson = JSONArray()
         books.forEach { book ->
             val bookJson = JSONObject()
@@ -83,6 +99,17 @@ class BackupCodec(
                 .put("metaSource", book.metaSource)
                 // M34（v10 起）：隐私锁「指定书籍隐藏」状态随备份走，恢复后仍是隐藏的
                 .put("hidden", book.hidden)
+                // v11 起：漫画容器信息随备份走——zip 恢复新建书籍时需要原样还原才能打开
+                .put("comicContainer", book.comicContainer?.name ?: JSONObject.NULL)
+                .put("comicPageCount", book.comicPageCount ?: JSONObject.NULL)
+
+            // v11 起（zip 备份）：书文件/封面在包内的条目名；读不到文件的书不带 archiveFile
+            val refs = archiveRefs(book)
+            if (refs?.file != null) {
+                bookJson.put("archiveFile", refs.file)
+                anyFilePacked = true
+            }
+            if (refs?.cover != null) bookJson.put("archiveCover", refs.cover)
 
             val progress = bookshelfRepository.getProgress(book.id)
             bookJson.put(
@@ -156,6 +183,14 @@ class BackupCodec(
             booksJson.put(bookJson)
         }
         root.put("books", booksJson)
+        root.put(
+            "note",
+            if (anyFilePacked) {
+                "含书籍文件本体（zip 内 files/ 目录）与封面；偏移索引、分页缓存、清洗/压平产物等派生数据不包含，打开书籍时自动重建"
+            } else {
+                "不含书籍文件本体；偏移索引与分页缓存不包含，打开书籍时自动重建"
+            },
+        )
         // M20 术语表（v6 起）：全部层级整表导出。单书行的 ownerKey 是本机 bookId，
         // 换机恢复时按 contentHash 重映射（书没导入则跳过该行），所以附带 contentHash。
         glossaryTermDao?.let { dao ->
@@ -248,7 +283,15 @@ class BackupCodec(
         return root
     }
 
-    suspend fun importJson(text: String): ImportResult {
+    /**
+     * 导入。[resolveBookFile] 是 zip 备份的「文件解析钩子」：给定书的 JSON，返回该书文件
+     * 解压落盘后的本地位置；返回 null 表示包里没有这本书的文件。纯 JSON 旧备份走默认值
+     * （恒 null），行为与 v10 及更早完全一致——未匹配的书进 missing 清单。
+     */
+    suspend fun importJson(
+        text: String,
+        resolveBookFile: (bookJson: JSONObject) -> ResolvedBookFile? = { null },
+    ): ImportResult {
         val root = JSONObject(text)
         val version = root.optInt("version", 0)
         // 向前兼容：只拒绝认不出的版本（缺 version / 非法值），比本机新的备份照样尽力导入——
@@ -258,6 +301,7 @@ class BackupCodec(
         root.optJSONObject("preferences")?.let { applyPreferences(it) }
 
         var restoredBooks = 0
+        var createdBooks = 0
         var restoredBookmarks = 0
         var restoredAnnotations = 0
         var restoredSessions = 0
@@ -268,10 +312,22 @@ class BackupCodec(
         for (i in 0 until booksJson.length()) {
             val bookJson = booksJson.getJSONObject(i)
             val title = bookJson.optString("title", "未知书名")
-            val local = bookshelfRepository.findByContentHash(bookJson.optString("contentHash"))
-            if (local == null) {
-                missing += title
-                continue
+            val found = bookshelfRepository.findByContentHash(bookJson.optString("contentHash"))
+            val local: BookEntity
+            if (found == null) {
+                // v11 zip 备份：本机没有这本书，但包里带了它的文件——按 JSON 元数据新建书籍行，
+                // fileUri 指向刚解压的本地副本，之后与匹配上的书走同一条合并逻辑
+                val resolved = resolveBookFile(bookJson)
+                if (resolved == null) {
+                    missing += title
+                    continue
+                }
+                val entity = bookEntityFromJson(bookJson, resolved)
+                val newId = bookshelfRepository.upsertBook(entity)
+                local = entity.copy(id = newId)
+                createdBooks++
+            } else {
+                local = found
             }
             restoredBooks++
 
@@ -559,6 +615,57 @@ class BackupCodec(
             restoredVocabulary = restoredVocabulary,
             restoredSummaries = restoredSummaries,
             restoredOutlines = restoredOutlines,
+            createdBooks = createdBooks,
+        )
+    }
+
+    /**
+     * 用 zip 备份里的元数据新建书籍行（v11）：正文/封面指向钩子解压出的本地文件。
+     * 派生物字段（cleanedFilePath / comicLocalPath / contentPreparedAt）一律留空，
+     * 打开书籍时自动重建，与「不打包派生物」的导出口径对应。
+     */
+    private fun bookEntityFromJson(bookJson: JSONObject, resolved: ResolvedBookFile): BookEntity {
+        fun optStr(key: String): String? =
+            if (!bookJson.has(key) || bookJson.isNull(key)) {
+                null
+            } else {
+                bookJson.optString(key).takeIf { it.isNotEmpty() }
+            }
+        return BookEntity(
+            title = bookJson.optString("title", "未知书名"),
+            author = optStr("author"),
+            fileUri = resolved.fileUri,
+            contentHash = bookJson.optString("contentHash"),
+            format = enumOrDefault(optStr("format"), BookFormat.TXT),
+            totalChars = bookJson.optLong("totalChars"),
+            encoding = optStr("encoding") ?: Charsets.UTF_8.name(),
+            importedAt = bookJson.optLong("importedAt").takeIf { it > 0 } ?: System.currentTimeMillis(),
+            lastReadAt = if (!bookJson.has("lastReadAt") || bookJson.isNull("lastReadAt")) {
+                null
+            } else {
+                bookJson.optLong("lastReadAt")
+            },
+            groupName = optStr("groupName"),
+            coverPath = resolved.coverPath,
+            comicContainer = optStr("comicContainer")?.let { name ->
+                runCatching { ComicContainer.valueOf(name) }.getOrNull()
+            },
+            comicPageCount = if (!bookJson.has("comicPageCount") || bookJson.isNull("comicPageCount")) {
+                null
+            } else {
+                bookJson.optInt("comicPageCount")
+            },
+            description = optStr("description"),
+            publisher = optStr("publisher"),
+            language = optStr("language"),
+            pubDate = optStr("pubDate"),
+            subjects = optStr("subjects"),
+            identifier = optStr("identifier"),
+            seriesName = optStr("seriesName"),
+            seriesIndex = optStr("seriesIndex"),
+            genreTag = optStr("genreTag"),
+            metaSource = bookJson.optString("metaSource"),
+            hidden = bookJson.optBoolean("hidden"),
         )
     }
 

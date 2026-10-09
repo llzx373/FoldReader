@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -18,9 +19,10 @@ class WebDavBackupManagerTest {
     private lateinit var server: MockWebServer
     private lateinit var gate: AiContentGate
     private lateinit var gateFile: java.io.File
+    private lateinit var tempDir: java.io.File
 
-    /** 收到的导入文本（验证恢复链路把下载原文原样交给编解码）。 */
-    private var importedText: String? = null
+    /** 收到的导入文件内容（验证恢复链路把下载文件原样交给编解码）。 */
+    private var importedContent: String? = null
 
     private val backupJson = """{"app":"FoldReader","version":7,"exportedAt":1759900000000,"books":[{},{}]}"""
 
@@ -30,22 +32,25 @@ class WebDavBackupManagerTest {
         server.start()
         gateFile = java.io.File.createTempFile("gate", ".json")
         gate = AiContentGate(gateFile)
-        importedText = null
+        tempDir = java.nio.file.Files.createTempDirectory("webdav-backup-test").toFile()
+        importedContent = null
     }
 
     @After
     fun tearDown() {
         server.shutdown()
         gateFile.delete()
+        tempDir.deleteRecursively()
     }
 
     private fun newManager(configured: Boolean = true): WebDavBackupManager = WebDavBackupManager(
-        exportJsonText = { backupJson },
-        importJsonText = { text ->
-            importedText = text
+        exportToFile = { file -> file.writeText(backupJson) },
+        importFromFile = { file ->
+            importedContent = file.readText()
             BackupManager.ImportResult(restoredBooks = 1, missingBookTitles = emptyList(), 0, 0)
         },
-        preview = { text -> BackupManager.preview(text) },
+        previewFile = { file -> BackupManager.preview(file.readText()) },
+        tempDir = { tempDir },
         clientFor = {
             if (!configured) {
                 null
@@ -69,12 +74,14 @@ class WebDavBackupManagerTest {
 
         val name = newManager().upload()
 
-        assertTrue(name, name.matches(Regex("foldreader-backup-\\d{8}-\\d{6}\\.json")))
+        assertTrue(name, name.matches(Regex("foldreader-backup-\\d{8}-\\d{6}\\.zip")))
         val records = gate.history()
         assertEquals(1, records.size)
         assertEquals("WebDAV 备份", records[0].feature)
         assertTrue(records[0].scope.startsWith("上传 $name"))
         assertTrue(records[0].scope.contains("KB").or(records[0].scope.contains("B）")))
+        // 上传用的临时文件已清理
+        assertTrue(tempDir.listFiles().orEmpty().isEmpty())
     }
 
     @Test
@@ -98,13 +105,13 @@ class WebDavBackupManagerTest {
   <D:response><D:href>/dav/FoldReader/</D:href>
     <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop>
     <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
-  <D:response><D:href>/dav/FoldReader/foldreader-backup-20261001-100000.json</D:href>
+  <D:response><D:href>/dav/FoldReader/foldreader-backup-20261001-100000.zip</D:href>
     <D:propstat><D:prop><D:getcontentlength>10</D:getcontentlength><D:resourcetype/></D:prop>
     <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
   <D:response><D:href>/dav/FoldReader/readme.txt</D:href>
     <D:propstat><D:prop><D:getcontentlength>5</D:getcontentlength><D:resourcetype/></D:prop>
     <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
-  <D:response><D:href>/dav/FoldReader/foldreader-backup-20261008-143000.json</D:href>
+  <D:response><D:href>/dav/FoldReader/foldreader-backup-20261008-143000.zip</D:href>
     <D:propstat><D:prop><D:getcontentlength>20</D:getcontentlength><D:resourcetype/></D:prop>
     <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
 </D:multistatus>""",
@@ -115,8 +122,8 @@ class WebDavBackupManagerTest {
 
         assertEquals(
             listOf(
-                "foldreader-backup-20261008-143000.json",
-                "foldreader-backup-20261001-100000.json",
+                "foldreader-backup-20261008-143000.zip",
+                "foldreader-backup-20261001-100000.zip",
             ),
             entries.map { it.name },
         )
@@ -126,21 +133,24 @@ class WebDavBackupManagerTest {
     fun `预览解析版本与条目数且台账记下载`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody(backupJson))
 
-        val (preview, text) = newManager().downloadForPreview("foldreader-backup-20261008-143000.json")
+        val (preview, file) = newManager().downloadForPreview("foldreader-backup-20261008-143000.zip")
 
         assertEquals(7, preview.version)
         assertEquals(2, preview.bookCount)
         assertEquals(1759900000000L, preview.exportedAt)
-        assertEquals(backupJson, text)
+        assertEquals(backupJson, file.readText())
         val records = gate.history()
         assertEquals(1, records.size)
-        assertTrue(records[0].scope.startsWith("下载 foldreader-backup-20261008-143000.json"))
+        assertTrue(records[0].scope.startsWith("下载 foldreader-backup-20261008-143000.zip"))
     }
 
     @Test
-    fun `恢复把原文交给既有导入链路`() = runTest {
-        newManager().restore(backupJson)
+    fun `恢复把下载文件交给既有导入链路并清理临时文件`() = runTest {
+        val file = java.io.File(tempDir, "webdav-restore-test.zip").apply { writeText(backupJson) }
 
-        assertEquals(backupJson, importedText)
+        newManager().restore(file)
+
+        assertEquals(backupJson, importedContent)
+        assertFalse(file.exists())
     }
 }

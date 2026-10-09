@@ -121,9 +121,9 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     val webDavUploading by viewModel.webDavUploading.collectAsState()
     val autoBackupRunning by viewModel.autoBackupRunning.collectAsState()
     var showWebDavListDialog by remember { mutableStateOf(false) }
-    /** 远端备份的待恢复确认：预览 + 已下载的备份原文（确认后不再二次下载）。 */
+    /** 远端备份的待恢复确认：预览 + 已下载的备份临时文件（确认后不再二次下载）。 */
     var webDavPendingRestore by remember {
-        mutableStateOf<Pair<BackupManager.BackupPreview, String>?>(null)
+        mutableStateOf<Pair<BackupManager.BackupPreview, java.io.File>?>(null)
     }
     var webDavPreviewLoading by remember { mutableStateOf<String?>(null) }
     var showWebDavUrlDialog by remember { mutableStateOf(false) }
@@ -199,12 +199,21 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     }
 
     val backupExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
+        ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
         if (uri != null) {
-            viewModel.exportBackup(uri) { error ->
-                val message = error?.let { "导出失败：$it" } ?: "备份已导出"
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.exportBackup(uri) { result, error ->
+                val message = when {
+                    error != null -> "导出失败：$error"
+                    result != null && result.skippedBookTitles.isNotEmpty() -> {
+                        val skipped = result.skippedBookTitles
+                        val names = skipped.take(3).joinToString("、") +
+                            if (skipped.size > 3) " 等" else ""
+                        "备份已导出；${skipped.size} 本书的文件未能打包（$names）"
+                    }
+                    else -> "备份已导出"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -909,7 +918,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             ListItem(
                 headlineContent = { Text("导出备份") },
                 supportingContent = {
-                    Text("书架数据与阅读偏好导出为 JSON（不含书籍文件本身；偏移索引与分页缓存不包含，打开书籍时自动重建）")
+                    Text("书架数据、阅读偏好与书籍文件本体导出为 zip（偏移索引与分页缓存等派生数据不包含，打开书籍时自动重建）")
                 },
                 modifier = Modifier.clickable {
                     backupExportLauncher.launch(defaultBackupFileName())
@@ -918,10 +927,10 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             ListItem(
                 headlineContent = { Text("导入备份") },
                 supportingContent = {
-                    Text("恢复按书籍内容哈希匹配，请先将原书 TXT 文件导入书架，再执行恢复；未匹配的书籍会列出")
+                    Text("备份含书籍文件，恢复时自动还原入架；仅当备份来自旧版本（纯 JSON）或文件缺失时，才需要先把原书导入书架再恢复")
                 },
                 modifier = Modifier.clickable {
-                    backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    backupImportLauncher.launch(arrayOf("application/zip", "application/json", "*/*"))
                 },
             )
 
@@ -936,7 +945,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                             prefs.autoBackupDirUri
                                 .takeIf { it.isNotBlank() }
                                 ?.let { android.net.Uri.decode(android.net.Uri.parse(it).lastPathSegment) }
-                                ?: "未选择（选一个目录，备份 JSON 会导出到这里）",
+                                ?: "未选择（选一个目录，备份文件会导出到这里）",
                         )
                     },
                     modifier = Modifier.clickable { autoBackupDirPicker.launch(null) },
@@ -1378,7 +1387,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             text = {
                 Text(
                     "备份将上传到你配置的服务器：\n${prefs.webdavBaseUrl.ifBlank { "（未配置）"}}\n\n" +
-                        "传输内容为备份 JSON（书架数据与阅读偏好，不含书籍文件本体）。" +
+                        "传输内容为备份 zip（书架数据、阅读偏好与书籍文件本体）。" +
                         "服务器由你自托管/自行选择，请自行评估其隐私政策；每次传输会记入「外发历史」。" +
                         "此确认只提示一次。",
                 )
@@ -1403,10 +1412,10 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             onRefresh = { viewModel.refreshWebDavBackups() },
             onRestore = { name ->
                 webDavPreviewLoading = name
-                viewModel.previewWebDavBackup(name) { preview, text, error ->
+                viewModel.previewWebDavBackup(name) { preview, file, error ->
                     webDavPreviewLoading = null
-                    if (preview != null && text != null) {
-                        webDavPendingRestore = preview to text
+                    if (preview != null && file != null) {
+                        webDavPendingRestore = preview to file
                     } else {
                         Toast.makeText(context, "下载失败：${error ?: "未知错误"}", Toast.LENGTH_LONG).show()
                     }
@@ -1415,19 +1424,24 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
             onDismiss = { showWebDavListDialog = false },
         )
     }
-    webDavPendingRestore?.let { (preview, backupText) ->
+    webDavPendingRestore?.let { (preview, backupFile) ->
         val exportedAt = remember(preview.exportedAt) {
             SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(preview.exportedAt))
         }
+        // 取消/关闭对话框时删掉已下载的临时备份文件（确认恢复则由 restore 链路负责删除）
+        fun dismissPendingRestore() {
+            webDavPendingRestore = null
+            backupFile.delete()
+        }
         AlertDialog(
-            onDismissRequest = { webDavPendingRestore = null },
+            onDismissRequest = { dismissPendingRestore() },
             title = { Text("恢复备份") },
             text = {
                 Column {
                     Text("版本 v${preview.version} · ${preview.bookCount} 本书 · 导出于 $exportedAt")
                     Text(
-                        "恢复按书籍内容哈希匹配既有书籍：匹配上的恢复进度/书签/标注/偏好，" +
-                            "未匹配的会列入「文件缺失」清单。",
+                        "备份含书籍文件的会自动还原入架；其余按内容哈希匹配既有书籍，" +
+                            "恢复进度/书签/标注/偏好，仍缺失的会列入清单。",
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -1436,7 +1450,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 TextButton(onClick = {
                     webDavPendingRestore = null
                     showWebDavListDialog = false
-                    viewModel.restoreWebDavBackup(backupText) { result, error ->
+                    viewModel.restoreWebDavBackup(backupFile) { result, error ->
                         if (error != null || result == null) {
                             Toast.makeText(
                                 context,
@@ -1450,7 +1464,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 }) { Text("恢复") }
             },
             dismissButton = {
-                TextButton(onClick = { webDavPendingRestore = null }) { Text("取消") }
+                TextButton(onClick = { dismissPendingRestore() }) { Text("取消") }
             },
         )
     }
@@ -1463,16 +1477,17 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 Column {
                     Text(
                         "已恢复 ${result.restoredBooks} 本书" +
+                            if (result.createdBooks > 0) "（其中 ${result.createdBooks} 本由备份内文件新建入架）" else "" +
                             "（书签 ${result.restoredBookmarks}、标注 ${result.restoredAnnotations}、" +
                             "阅读统计 ${result.restoredSessions} 条）",
                     )
                     Text(
-                        "恢复按书籍内容哈希匹配，请先将原书 TXT 文件导入书架，再执行恢复。",
+                        "备份含书籍文件的书籍已自动还原；仅旧版本备份或文件缺失的书需要重新导入原书。",
                         modifier = Modifier.padding(top = 8.dp),
                     )
                     if (result.missingBookTitles.isNotEmpty()) {
                         Text(
-                            "以下 ${result.missingBookTitles.size} 本书未在书架找到，暂未恢复：",
+                            "以下 ${result.missingBookTitles.size} 本书未找到文件，暂未恢复：",
                             modifier = Modifier.padding(top = 8.dp),
                         )
                         result.missingBookTitles.forEach { Text("· $it") }
@@ -1488,7 +1503,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
 private fun defaultBackupFileName(): String {
     val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
-    return "foldreader-backup-$stamp.json"
+    return "foldreader-backup-$stamp.zip"
 }
 
 /** 导出诊断日志并走系统分享；分享不可用时退回剪贴板 */

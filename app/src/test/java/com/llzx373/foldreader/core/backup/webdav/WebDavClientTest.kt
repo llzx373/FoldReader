@@ -181,18 +181,24 @@ class WebDavClientTest {
 
     // ---------- upload ----------
 
+    private fun tempUploadFile(content: String): java.io.File =
+        java.io.File.createTempFile("webdav-upload", ".zip").apply {
+            writeText(content)
+            deleteOnExit()
+        }
+
     @Test
     fun `上传先确保目录再 PUT，已存在目录的 405 被容忍`() {
         server.enqueue(MockResponse().setResponseCode(405)) // MKCOL：目录已存在
         server.enqueue(MockResponse().setResponseCode(201)) // PUT
 
-        client.upload("foldreader-backup-20261008-143000.json", "{}".toByteArray())
+        client.upload("foldreader-backup-20261008-143000.zip", tempUploadFile("{}"))
 
         val mkcol = server.takeRequest(2, TimeUnit.SECONDS)!!
         assertEquals("MKCOL", mkcol.method)
         val put = server.takeRequest(2, TimeUnit.SECONDS)!!
         assertEquals("PUT", put.method)
-        assertEquals("/dav/FoldReader/foldreader-backup-20261008-143000.json", put.path)
+        assertEquals("/dav/FoldReader/foldreader-backup-20261008-143000.zip", put.path)
         assertEquals("{}", put.body.readUtf8())
     }
 
@@ -201,7 +207,7 @@ class WebDavClientTest {
         server.enqueue(MockResponse().setResponseCode(401))
 
         try {
-            client.upload("a.json", "{}".toByteArray())
+            client.upload("a.zip", tempUploadFile("{}"))
             fail("401 应抛出 WebDavException")
         } catch (e: WebDavException) {
             assertEquals(WebDavException.Kind.AUTH, e.kind)
@@ -214,23 +220,25 @@ class WebDavClientTest {
         server.enqueue(MockResponse().setResponseCode(201)) // MKCOL
         server.enqueue(MockResponse().setResponseCode(201)) // PUT
 
-        client.upload("备份 2026.json", "x".toByteArray())
+        client.upload("备份 2026.zip", tempUploadFile("x"))
 
         server.takeRequest(2, TimeUnit.SECONDS) // MKCOL
         val put = server.takeRequest(2, TimeUnit.SECONDS)!!
-        assertEquals("/dav/FoldReader/%E5%A4%87%E4%BB%BD%202026.json", put.path)
+        assertEquals("/dav/FoldReader/%E5%A4%87%E4%BB%BD%202026.zip", put.path)
     }
 
     // ---------- download ----------
 
     @Test
-    fun `下载成功返回字节`() {
+    fun `下载成功落盘到目标文件`() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{\"version\":7}"))
+        val target = java.io.File.createTempFile("webdav-download", ".zip")
 
-        val bytes = client.download("foldreader-backup-20261008-143000.json")
+        client.downloadTo("foldreader-backup-20261008-143000.zip", target)
 
-        assertEquals("{\"version\":7}", String(bytes, Charsets.UTF_8))
+        assertEquals("{\"version\":7}", target.readText())
         assertEquals("GET", server.takeRequest(2, TimeUnit.SECONDS)!!.method)
+        target.delete()
     }
 
     @Test
@@ -238,7 +246,7 @@ class WebDavClientTest {
         server.enqueue(MockResponse().setResponseCode(404))
 
         try {
-            client.download("missing.json")
+            client.downloadTo("missing.zip", java.io.File.createTempFile("webdav-download", ".zip"))
             fail("404 应抛出 WebDavException")
         } catch (e: WebDavException) {
             assertEquals(WebDavException.Kind.NOT_FOUND, e.kind)

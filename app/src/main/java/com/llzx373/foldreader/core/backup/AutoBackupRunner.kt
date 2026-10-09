@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /**
- * 本地自动备份（M25）：每日一次把备份 JSON 导出到用户在 SAF 选定的目录，
+ * 本地自动备份（M25）：每日一次把备份 zip（v11 起含书籍文件本体）导出到用户在 SAF 选定的目录，
  * 按时间戳命名并轮转保留最近 N 份（[BackupFileNames.rotationDeletes]）。
  *
  * 「每日一次」的触发口径：进程启动后的维护协程里检查（AppContainer.init），
@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
 class AutoBackupRunner(
     private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val exportJsonText: suspend () -> String,
+    private val exportTo: suspend (Uri) -> BackupManager.ExportResult,
     private val safTree: SafTree,
 ) {
 
@@ -57,19 +57,19 @@ class AutoBackupRunner(
     ): String = withContext(Dispatchers.IO) {
         val treeUri = Uri.parse(treeUriString)
         val name = BackupFileNames.timestamped(nowMs)
-        val text = exportJsonText()
 
         val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
         val dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
         val docUri = DocumentsContract.createDocument(
             context.contentResolver,
             dirUri,
-            "application/json",
+            "application/zip",
             name,
         ) ?: error("无法在备份目录创建文件（授权可能已失效，请重新选择目录）")
-        context.contentResolver.openOutputStream(docUri)
-            ?.bufferedWriter(Charsets.UTF_8)?.use { it.write(text) }
-            ?: error("无法写入备份文件")
+        val result = exportTo(docUri)
+        if (result.skippedBookTitles.isNotEmpty()) {
+            DiagnosticLog.line("自动备份：${result.skippedBookTitles.size} 本书的文件未打包（${result.skippedBookTitles.joinToString("、")}）")
+        }
 
         // 轮转：删最旧的超额份（只动本应用命名的备份，同目录其他文件不碰）
         val children = runCatching { safTree.listChildren(treeUri, treeDocId) }.getOrDefault(emptyList())

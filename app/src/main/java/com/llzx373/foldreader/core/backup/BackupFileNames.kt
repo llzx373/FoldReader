@@ -11,7 +11,7 @@ import java.util.Locale
 object BackupFileNames {
 
     const val PREFIX = "foldreader-backup-"
-    const val SUFFIX = ".json"
+    const val SUFFIX = ".zip"
 
     fun timestamped(nowMs: Long = System.currentTimeMillis()): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(nowMs))

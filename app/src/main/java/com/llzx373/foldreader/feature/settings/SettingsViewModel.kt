@@ -410,15 +410,15 @@ class SettingsViewModel(
         }
     }
 
-    /** 恢复前预览：下载并解析元信息，成功后回调（预览 + 待确认恢复的原文）。 */
+    /** 恢复前预览：下载并解析元信息，成功后回调（预览 + 待确认恢复的临时文件）。 */
     fun previewWebDavBackup(
         name: String,
-        onResult: (BackupManager.BackupPreview?, String?, String?) -> Unit,
+        onResult: (BackupManager.BackupPreview?, java.io.File?, String?) -> Unit,
     ) {
         launch {
             try {
-                val (preview, text) = webDavBackupManager.downloadForPreview(name)
-                onResult(preview, text, null)
+                val (preview, file) = webDavBackupManager.downloadForPreview(name)
+                onResult(preview, file, null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -427,14 +427,14 @@ class SettingsViewModel(
         }
     }
 
-    /** 确认恢复：走与本地导入相同的链路（contentHash 对齐既有书）。 */
+    /** 确认恢复：走与本地导入相同的链路（contentHash 对齐既有书，zip 内含文件则自动还原）。 */
     fun restoreWebDavBackup(
-        backupText: String,
+        backupFile: java.io.File,
         onResult: (BackupManager.ImportResult?, String?) -> Unit,
     ) {
         launch {
             try {
-                onResult(webDavBackupManager.restore(backupText), null)
+                onResult(webDavBackupManager.restore(backupFile), null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -600,10 +600,11 @@ class SettingsViewModel(
 
     fun deleteWordEntry(id: Long) = launch { wordEntryDao.deleteById(id) }
 
-    fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
+    fun exportBackup(uri: Uri, onResult: (BackupManager.ExportResult?, String?) -> Unit) {
         launch {
-            val error = runCatching { backupManager.exportTo(uri) }.exceptionOrNull()?.message
-            onResult(error)
+            runCatching { backupManager.exportTo(uri) }
+                .onSuccess { onResult(it, null) }
+                .onFailure { onResult(null, it.message ?: "导出失败") }
         }
     }
 

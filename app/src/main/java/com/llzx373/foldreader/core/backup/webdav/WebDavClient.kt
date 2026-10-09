@@ -9,6 +9,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
 
@@ -93,15 +94,16 @@ class WebDavClient(
             .filter { it.name.isNotEmpty() }
     }
 
-    /** 上传（覆盖式）：先确保目录在，再 PUT。远端同名冲突由调用方按时间戳命名规避。 */
-    fun upload(name: String, bytes: ByteArray) {
+    /** 上传（覆盖式，流式）：先确保目录在，再 PUT。远端同名冲突由调用方按时间戳命名规避。 */
+    fun upload(name: String, file: java.io.File) {
         ensureCollection()
-        val body = bytes.toRequestBody("application/json".toMediaType())
+        val body = file.asRequestBody("application/zip".toMediaType())
         val code = execute(Request.Builder().url(childUrl(name)).put(body).build())
         if (code !in 200..299) throw httpFailure(code)
     }
 
-    fun download(name: String): ByteArray {
+    /** 下载到本地文件（流式，不整读进内存）；404 映射为「备份不存在」。 */
+    fun downloadTo(name: String, target: java.io.File) {
         val response = executeForBody(Request.Builder().url(childUrl(name)).get().build())
         if (response.code == 404) {
             response.close()
@@ -112,7 +114,9 @@ class WebDavClient(
             response.close()
             throw httpFailure(code)
         }
-        return response.body!!.use { it.bytes() }
+        response.body!!.use { body ->
+            target.outputStream().buffered().use { out -> body.byteStream().copyTo(out) }
+        }
     }
 
     /** 删除远端备份（轮转清理用）；404 视为已不存在，不算失败。 */
