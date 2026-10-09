@@ -43,6 +43,8 @@ data class WebDavEntry(
  * - [baseUrl] 是用户配置的**备份目录**完整地址（如 `https://dav.jianguoyun.com/dav/FoldReader/`），
  *   备份文件直接放该目录下；目录不存在时 [ensureCollection] 创建。
  * - 鉴权走每次请求预置 Basic 头（UTF-8 编码，坚果云/Nextcloud 均接受）。
+ * - 重定向一律不自动跟随：OkHttp 对 301/302 的跟随不限方法，PROPFIND/PUT 会被带往新主机
+ *   （凭据头随请求发出）；统一改为抛出含 Location 的可行动提示，由用户改配置。
  * - XML 解析器由调用方注入：生产给 `android.util.Xml.newPullParser()`，JVM 单测给 kxml2——
  *   本类只依赖 org.xmlpull.v1 接口。
  * - 所有方法是阻塞式的，调用方（WebDavBackupManager）负责切到 IO 调度器。
@@ -51,9 +53,15 @@ class WebDavClient(
     baseUrl: String,
     username: String,
     password: String,
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val xmlParserFactory: () -> XmlPullParser,
 ) {
+
+    /** 派生一个关闭重定向跟随的客户端（共享连接池/调度器，新建成本低）。 */
+    private val client: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     private val root: HttpUrl = run {
         val normalized = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
@@ -79,10 +87,11 @@ class WebDavClient(
 
     /** 建目录；405（已存在）视为成功，409（父目录缺失）如实抛 HTTP。 */
     fun ensureCollection() {
-        val code = execute(Request.Builder().url(root).method("MKCOL", null).build())
-        when (code) {
-            201, 405 -> Unit
-            else -> throw httpFailure(code)
+        executeForBody(Request.Builder().url(root).method("MKCOL", null).build()).use { response ->
+            when (response.code) {
+                201, 405 -> Unit
+                else -> throw httpFailure(response.code, response.header("Location"))
+            }
         }
     }
 
@@ -98,8 +107,11 @@ class WebDavClient(
     fun upload(name: String, file: java.io.File) {
         ensureCollection()
         val body = file.asRequestBody("application/zip".toMediaType())
-        val code = execute(Request.Builder().url(childUrl(name)).put(body).build())
-        if (code !in 200..299) throw httpFailure(code)
+        executeForBody(Request.Builder().url(childUrl(name)).put(body).build()).use { response ->
+            if (response.code !in 200..299) {
+                throw httpFailure(response.code, response.header("Location"))
+            }
+        }
     }
 
     /** 下载到本地文件（流式，不整读进内存）；404 映射为「备份不存在」。 */
@@ -111,8 +123,9 @@ class WebDavClient(
         }
         if (response.code !in 200..299) {
             val code = response.code
+            val location = response.header("Location")
             response.close()
-            throw httpFailure(code)
+            throw httpFailure(code, location)
         }
         response.body!!.use { body ->
             target.outputStream().buffered().use { out -> body.byteStream().copyTo(out) }
@@ -121,8 +134,11 @@ class WebDavClient(
 
     /** 删除远端备份（轮转清理用）；404 视为已不存在，不算失败。 */
     fun delete(name: String) {
-        val code = execute(Request.Builder().url(childUrl(name)).delete().build())
-        if (code !in 200..299 && code != 404) throw httpFailure(code)
+        executeForBody(Request.Builder().url(childUrl(name)).delete().build()).use { response ->
+            if (response.code !in 200..299 && response.code != 404) {
+                throw httpFailure(response.code, response.header("Location"))
+            }
+        }
     }
 
     private fun childUrl(name: String): HttpUrl =
@@ -140,13 +156,10 @@ class WebDavClient(
             return response.body!!.use { parseMultistatus(it.string()) }
         }
         val code = response.code
+        val location = response.header("Location")
         response.close()
-        throw httpFailure(code)
+        throw httpFailure(code, location)
     }
-
-    /** 不关心响应体的请求：拿状态码即关。 */
-    private fun execute(request: Request): Int =
-        executeForBody(request).use { it.code }
 
     private fun executeForBody(request: Request): okhttp3.Response = try {
         client.newCall(request.newBuilder().header("Authorization", authHeader).build()).execute()
@@ -157,10 +170,26 @@ class WebDavClient(
         throw WebDavException(WebDavException.Kind.NETWORK, message = "网络不可达或连接中断")
     }
 
-    private fun httpFailure(code: Int): WebDavException = when (code) {
-        401, 403 -> WebDavException(WebDavException.Kind.AUTH, code, "认证失败（HTTP $code），请核对账号与密码")
-        404 -> WebDavException(WebDavException.Kind.NOT_FOUND, code, "目录或文件不存在（HTTP 404）")
+    private fun httpFailure(code: Int, location: String? = null): WebDavException = when {
+        code == 401 || code == 403 ->
+            WebDavException(WebDavException.Kind.AUTH, code, "认证失败（HTTP $code），请核对账号与密码")
+        code == 404 -> WebDavException(WebDavException.Kind.NOT_FOUND, code, "目录或文件不存在（HTTP 404）")
+        // 重定向不自动跟随（PROPFIND/PUT 跟随会带着凭据去新主机）：给出可行动提示
+        code in REDIRECT_CODES ->
+            WebDavException(WebDavException.Kind.HTTP, code, redirectMessage(code, location))
         else -> WebDavException(WebDavException.Kind.HTTP, code, "服务器返回 HTTP $code")
+    }
+
+    private fun redirectMessage(code: Int, location: String?): String {
+        val target = location?.trim()?.takeIf { it.isNotEmpty() }
+        val httpsHint = if (target != null && target.startsWith("https://") && root.isHttps.not()) {
+            "服务已迁移到 https，请把服务器地址改为 $target"
+        } else if (target != null) {
+            "请把服务器地址改为 $target"
+        } else {
+            "请联系服务商确认新地址（常见原因：http 已停用，改用 https）"
+        }
+        return "服务器要求重定向（HTTP $code），$httpsHint"
     }
 
     /**
@@ -228,5 +257,7 @@ class WebDavClient(
 <propfind xmlns="DAV:">
   <prop><displayname/><getcontentlength/><getlastmodified/><resourcetype/></prop>
 </propfind>"""
+
+        val REDIRECT_CODES = setOf(301, 302, 307, 308)
     }
 }

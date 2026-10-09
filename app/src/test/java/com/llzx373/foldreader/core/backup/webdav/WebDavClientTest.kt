@@ -312,4 +312,25 @@ class WebDavClientTest {
             assertEquals(500, e.httpCode)
         }
     }
+
+    @Test
+    fun `重定向给出含 Location 的可行动提示且不自动跟随`() {
+        // PROPFIND 收到 301（OkHttp 不跟随自定义方法），提示应含新地址
+        server.enqueue(
+            MockResponse().setResponseCode(301)
+                .setHeader("Location", "https://dav.example.com/new/FoldReader/"),
+        )
+
+        try {
+            client.list()
+            fail("301 应抛出 WebDavException")
+        } catch (e: WebDavException) {
+            assertEquals(WebDavException.Kind.HTTP, e.kind)
+            assertEquals(301, e.httpCode)
+            assertTrue(e.message!!.contains("重定向"))
+            assertTrue(e.message!!.contains("https://dav.example.com/new/FoldReader/"))
+        }
+        // 只有一发请求：没有跟随重定向
+        assertEquals(1, server.requestCount)
+    }
 }
