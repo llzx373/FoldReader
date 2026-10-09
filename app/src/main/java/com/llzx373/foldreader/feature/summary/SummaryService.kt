@@ -191,8 +191,9 @@ class SummaryService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "book_summary"
-        private const val NOTIFICATION_ID = 45
-        private const val COMPLETION_NOTIFICATION_ID = 46
+        // 全工程通知 ID 唯一性：TTS=42，文本翻译=43/44，漫画翻译=45/46，摘要=47/48
+        private const val NOTIFICATION_ID = 47
+        private const val COMPLETION_NOTIFICATION_ID = 48
         private const val ACTION_TOGGLE = "com.llzx373.foldreader.summary.TOGGLE"
         /** 进度通知最小刷新间隔：逐单位推进时最多每 2s 刷一次。 */
         private const val NOTIFY_MIN_INTERVAL_MS = 2_000L
