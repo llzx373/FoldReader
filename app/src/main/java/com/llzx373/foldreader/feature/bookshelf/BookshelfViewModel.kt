@@ -322,9 +322,13 @@ class BookshelfViewModel(
     private val _cleanPreview = MutableStateFlow<CleanPreview?>(null)
     val cleanPreview: StateFlow<CleanPreview?> = _cleanPreview.asStateFlow()
 
+    /** 在途预览 job：连续切换档位/书目时取消旧采样，避免后到先写覆盖最新预览。 */
+    private var previewJob: kotlinx.coroutines.Job? = null
+
     fun previewClean(uri: Uri, cleanLevel: CleanLevel?, convertTraditional: Boolean) {
+        previewJob?.cancel()
         _cleanPreview.value = CleanPreview(loading = true, report = null)
-        viewModelScope.launch {
+        previewJob = viewModelScope.launch {
             val report = importBook.preview(uri, buildCleanProfile(cleanLevel, convertTraditional))
             _cleanPreview.value = CleanPreview(loading = false, report = report)
         }
@@ -391,8 +395,9 @@ class BookshelfViewModel(
      * 报告与档位预览共用同一 [cleanPreview] 通道，样式不变。
      */
     fun previewReclean(bookId: Long, profile: CleanProfile) {
+        previewJob?.cancel()
         _cleanPreview.value = CleanPreview(loading = true, report = null)
-        viewModelScope.launch {
+        previewJob = viewModelScope.launch {
             val book = bookshelfRepository.getBook(bookId)
             val report = if (book == null) {
                 null
@@ -408,12 +413,13 @@ class BookshelfViewModel(
      * [cleanLevel] 为 null 表示「撤销清理」，此时没有可预览的改动。
      */
     fun previewReclean(bookId: Long, cleanLevel: CleanLevel?, convertTraditional: Boolean) {
+        previewJob?.cancel()
         if (cleanLevel == null) {
             _cleanPreview.value = CleanPreview(loading = false, report = CleanReport())
             return
         }
         _cleanPreview.value = CleanPreview(loading = true, report = null)
-        viewModelScope.launch {
+        previewJob = viewModelScope.launch {
             val book = bookshelfRepository.getBook(bookId)
             val report = if (book == null) {
                 null

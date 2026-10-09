@@ -112,12 +112,18 @@ class RecleanBookUseCase(
         book: com.llzx373.foldreader.core.data.db.BookEntity,
     ): Outcome {
         val previous = book.cleanedFilePath ?: return Outcome.Done(CleanReport(), changed = false)
-        val encoding = detectCharset(book.fileUri) ?: book.encoding
-        bookshelfRepository.updateConvertedFile(book.id, null, 0)
-        bookshelfRepository.updateEncoding(book.id, encoding)
-        invalidateCaches(book.id)
-        deleteOrphan(previous, newPath = null, bookId = book.id)
-        return Outcome.Done(CleanReport(), changed = true)
+        return runCatching {
+            val encoding = detectCharset(book.fileUri) ?: book.encoding
+            bookshelfRepository.updateConvertedFile(book.id, null, 0)
+            bookshelfRepository.updateEncoding(book.id, encoding)
+            invalidateCaches(book.id)
+            deleteOrphan(previous, newPath = null, bookId = book.id)
+            Outcome.Done(CleanReport(), changed = true)
+        }.getOrElse {
+            // 与 reclean 主路径同口径：取消上抛，其余异常上报为失败而不是崩出调用方
+            if (it is CancellationException) throw it
+            Outcome.Failure(it.message ?: "撤销清理失败")
+        }
     }
 
     private fun detectCharset(uriKey: String): String? = runCatching {
