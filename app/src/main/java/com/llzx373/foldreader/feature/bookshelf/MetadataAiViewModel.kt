@@ -151,7 +151,8 @@ class MetadataAiViewModel(
     /** 确认框「同意并生成」：落一次性确认标记后继续（单书或挂起的批量）。 */
     fun confirmAndGenerate() {
         if (_state.value !is UiState.AwaitConfirmation) return
-        viewModelScope.launch {
+        // 必须赋给 job：批量路径的取消按钮（cancelBatch）取消的是这个协程
+        job = viewModelScope.launch {
             markMetadataConfirmed()
             val batch = pendingBatch
             if (batch != null) {

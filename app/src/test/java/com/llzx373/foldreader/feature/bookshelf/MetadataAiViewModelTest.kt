@@ -317,6 +317,27 @@ class MetadataAiViewModelTest {
         assertTrue(harness.writes.isEmpty())
     }
 
+    @Test
+    fun `首次确认后起跑的批量同样可取消`() = runTest(dispatcher) {
+        val harness = Harness()
+        harness.provider.gate = CompletableDeferred()
+        harness.viewModel.startBatch(listOf(1L, 2L))
+        advanceUntilIdle()
+        assertTrue(harness.viewModel.state.value is MetadataAiViewModel.UiState.AwaitConfirmation)
+
+        harness.viewModel.confirmAndGenerate()
+        runCurrent() // 确认路径起跑，跑到第一本的 AI 调用挂起处
+        assertTrue(harness.viewModel.state.value is MetadataAiViewModel.UiState.BatchRunning)
+
+        harness.viewModel.cancelBatch()
+        advanceUntilIdle()
+
+        val done = harness.viewModel.state.value as MetadataAiViewModel.UiState.BatchDone
+        assertTrue(done.cancelled)
+        assertEquals(0, done.processed)
+        assertTrue(harness.writes.isEmpty())
+    }
+
     private companion object {
         const val HEAD_TEXT = "书名：测试之书\n作者：某人\n\n第一章 开始\n正文内容……"
     }
