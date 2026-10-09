@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import com.llzx373.foldreader.core.comic.ComicCoverWriter
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.format.CoverImage
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -53,6 +54,16 @@ data class PdfExtractedText(
     val pageStartOffsets: LongArray,
 )
 
+/**
+ * 文本抽取过程中抛了异常（坏字体表/CMap 等）——与「抽完没字的真扫描件」是两回事：
+ * 用户要看到「提取失败，可重试」，而不是被误告成扫描件后永久失去文本模式入口。
+ */
+class TextExtractionException(cause: Throwable) : Exception(MESSAGE, cause) {
+    companion object {
+        const val MESSAGE = "PDF 文本提取失败，可重试"
+    }
+}
+
 /** 扫描件判定：平均每页字符数低于这个值就不当电子书（渲染照常可用）。 */
 private const val MIN_CHARS_PER_PAGE = 50
 
@@ -66,8 +77,9 @@ private const val PAGE_MARK = "\u0000\u0001PAGE\u0001\u0000"
  * 这些都是**一次性**的解析工作，不需要渲染服务那套隔离；而且 PdfBox 能顺手把
  * 目录树这种平台 API 拿不到的东西取出来。
  *
- * 全部是 CPU 密集的本地解析，**只能在后台线程调用**。任何一步失败都返回 null，
- * 由调用方决定后续（预热保持「待解析」角标）。
+ * 全部是 CPU 密集的本地解析，**只能在后台线程调用**。除文本抽取异常
+ * （[TextExtractionException]，刻意上抛以区分「提取失败」与「扫描件」）外，
+ * 任何一步失败都返回 null，由调用方决定后续（预热保持「待解析」角标）。
  */
 object PdfBoxReader {
 
@@ -84,9 +96,26 @@ object PdfBoxReader {
      * [textTarget] 非空且文档允许提取内容时，额外把正文按页抽出来写进这个文件
      * （文本型 PDF 当电子书读用）。抽出结果不够"像文本"（扫描件）时返回的 text 为 null，
      * 但文件可能已经被写过一部分——调用方需要自己决定留不留。
+     *
+     * 抽取过程抛异常（[TextExtractionException]）**不**并入 null 路径：异常原样上抛，
+     * 调用方据此区分「提取失败，可重试」与「扫描件」。
      */
     fun read(context: Context, uriKey: String, textTarget: File? = null): PdfDocumentInfo? =
-        runCatching { withDocument(context, uriKey) { extract(it, textTarget) } }.getOrNull()
+        runCatching { withDocument(context, uriKey) { extract(it, textTarget) } }
+            .getOrElse { if (it is TextExtractionException) throw it else null }
+
+    /**
+     * 测试缝：默认实现是 PDFTextStripper 单趟全文抽取（不按坐标排序：默认的阅读顺序
+     * 更接近人读的顺序，坐标排序会把多栏排版切碎；分页哨兵见 [PAGE_MARK]）。
+     * 测试注入抛异常的实现验证「抽取失败 ≠ 扫描件」口径；用完必须复位。
+     */
+    internal var stripText: (PDDocument) -> String = { document ->
+        PDFTextStripper().apply {
+            sortByPosition = false
+            pageStart = ""
+            pageEnd = PAGE_MARK
+        }.getText(document)
+    }
 
     private fun <T> withDocument(context: Context, uriKey: String, block: (PDDocument) -> T): T {
         localPdfFile(uriKey)?.let { file ->
@@ -135,17 +164,20 @@ object PdfBoxReader {
      *
      * 扫描件（几乎抽不到字）返回 null：调用方据此不生成压平产物，界面也据此说明
      * 「这是扫描件」而不是给一个点了没反应的"提取文本"。
+     * 抽取过程抛异常则上抛 [TextExtractionException]（与扫描件刻意分开）。
      */
     private fun extractText(document: PDDocument, target: File): PdfExtractedText? {
         val pageCount = document.numberOfPages
         if (pageCount == 0) return null
-        val stripper = PDFTextStripper().apply {
-            // 不按坐标排序：默认的阅读顺序更接近人读的顺序，坐标排序会把多栏排版切碎
-            sortByPosition = false
-            pageStart = ""
-            pageEnd = PAGE_MARK
+        val raw = try {
+            stripText(document)
+        } catch (e: Exception) {
+            // 抽取抛异常（坏字体表/CMap 等）与「抽完没字的真扫描件」是两回事：
+            // 单独成异常透传到 PdfBookParser 判定处，界面报「提取失败，可重试」
+            // 而不是误告成扫描件、永久失去文本模式入口
+            DiagnosticLog.line("PDF 文本抽取异常（页数=$pageCount）：${e.stackTraceToString()}")
+            throw TextExtractionException(e)
         }
-        val raw = runCatching { stripper.getText(document) }.getOrNull() ?: return null
         val pages = raw.split(PAGE_MARK)
         val starts = LongArray(pageCount)
         var offset = 0L

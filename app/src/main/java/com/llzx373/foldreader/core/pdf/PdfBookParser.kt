@@ -129,6 +129,7 @@ class PdfBookParser(
      * 抽文本 + 生成目录与纸书页码。
      *
      * 返回 null = 扫描件（密度判定没过），调用方据此放弃压平。
+     * 抽取过程抛 [TextExtractionException]（提取失败，与扫描件分开）原样上抛给阅读器。
      */
     private fun flatten(uri: Uri, out: File): FlattenContent? {
         val info = PdfBoxReader.read(appContext, uri.toString(), textTarget = out) ?: return null
