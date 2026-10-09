@@ -13,6 +13,7 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.PushbackInputStream
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -172,23 +173,48 @@ class BackupManager(
     }
 
     private suspend fun importZip(stream: InputStream): ImportResult {
-        val extracted = BackupArchive.readZip(
-            stream,
-            filesDir = File(context.filesDir, "source"),
-            coversDir = File(context.filesDir, "covers"),
-        )
-        return codec.importJson(extracted.manifestText) { bookJson ->
-            val file = bookJson.optStringOrNull("archiveFile")?.let(extracted.files::get)
-            if (file == null) {
-                null
-            } else {
-                ResolvedBookFile(
-                    fileUri = "file://${file.absolutePath}",
-                    coverPath = bookJson.optStringOrNull("archiveCover")
-                        ?.let(extracted.covers::get)?.absolutePath,
-                )
+        // 先解到暂存区：importJson 只在「本机没有、需新建」时才消费书文件，
+        // 直接解进 filesDir 会给本机已有的书留一份永远无人引用的孤儿副本。
+        // 被消费的挪进正式目录（内容按哈希命名，同名即同内容），未消费的随暂存区清掉。
+        val staging = File(context.cacheDir, "backup-import-${UUID.randomUUID()}")
+        try {
+            val extracted = BackupArchive.readZip(
+                stream,
+                filesDir = File(staging, "source"),
+                coversDir = File(staging, "covers"),
+            )
+            return codec.importJson(extracted.manifestText) { bookJson ->
+                val file = bookJson.optStringOrNull("archiveFile")?.let(extracted.files::get)
+                if (file == null) {
+                    null
+                } else {
+                    ResolvedBookFile(
+                        fileUri = "file://${adoptExtracted(file, File(context.filesDir, "source")).absolutePath}",
+                        coverPath = bookJson.optStringOrNull("archiveCover")
+                            ?.let(extracted.covers::get)
+                            ?.let { adoptExtracted(it, File(context.filesDir, "covers")) }
+                            ?.absolutePath,
+                    )
+                }
             }
+        } finally {
+            staging.deleteRecursively()
         }
+    }
+
+    /** 暂存区文件挪进正式目录；目标已存在（同哈希同内容）则丢弃暂存份。 */
+    private fun adoptExtracted(staged: File, targetDir: File): File {
+        val target = File(targetDir, staged.name)
+        if (target.isFile) {
+            staged.delete()
+            return target
+        }
+        targetDir.mkdirs()
+        if (!staged.renameTo(target)) {
+            staged.copyTo(target, overwrite = false)
+            staged.delete()
+        }
+        return target
     }
 
     /** 读前两个字节嗅探格式（PK = zip），并把读掉的字节推回流里。 */

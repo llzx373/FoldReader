@@ -61,12 +61,14 @@ class WebDavBackupManager(
             val tmp = File(tempDir(), "webdav-restore-${UUID.randomUUID()}.zip")
             try {
                 client.downloadTo(name, tmp)
+                gate.record(FEATURE, "下载 $name（${formatSize(tmp.length())}）", 0)
+                previewFile(tmp) to tmp
             } catch (t: Throwable) {
+                // 下载或预览解析（坏 zip）任一失败都要清掉临时文件；
+                // 成功则交 restore 复用并负责删除
                 tmp.delete()
                 throw t
             }
-            gate.record(FEATURE, "下载 $name（${formatSize(tmp.length())}）", 0)
-            previewFile(tmp) to tmp
         }
 
     /** 确认恢复：走与本地导入完全相同的链路（旧 JSON / 新 zip 都可），用完删除临时文件。 */

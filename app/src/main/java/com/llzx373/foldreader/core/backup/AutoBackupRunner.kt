@@ -66,9 +66,15 @@ class AutoBackupRunner(
             "application/zip",
             name,
         ) ?: error("无法在备份目录创建文件（授权可能已失效，请重新选择目录）")
-        val result = exportTo(docUri)
-        if (result.skippedBookTitles.isNotEmpty()) {
-            DiagnosticLog.line("自动备份：${result.skippedBookTitles.size} 本书的文件未打包（${result.skippedBookTitles.joinToString("、")}）")
+        try {
+            val result = exportTo(docUri)
+            if (result.skippedBookTitles.isNotEmpty()) {
+                DiagnosticLog.line("自动备份：${result.skippedBookTitles.size} 本书的文件未打包（${result.skippedBookTitles.joinToString("、")}）")
+            }
+        } catch (t: Throwable) {
+            // 导出失败不留半截 zip：坏文件会占轮转名额，且名字看起来是份有效备份
+            runCatching { DocumentsContract.deleteDocument(context.contentResolver, docUri) }
+            throw t
         }
 
         // 轮转：删最旧的超额份（只动本应用命名的备份，同目录其他文件不碰）
