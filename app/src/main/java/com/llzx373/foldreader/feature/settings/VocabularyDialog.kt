@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +70,11 @@ fun VocabularyDialog(viewModel: SettingsViewModel, onDismiss: () -> Unit) {
                         stream.bufferedWriter(Charsets.UTF_8).use {
                             it.write(com.llzx373.foldreader.core.export.VocabularyCsv.render(snapshot))
                         }
-                    }.exceptionOrNull()?.message
+                    }.exceptionOrNull()?.let {
+                        // 组合销毁/离开导致的取消不能吞成「导出失败」提示
+                        if (it is CancellationException) throw it
+                        it.message
+                    }
                 }
                 Toast.makeText(
                     context,

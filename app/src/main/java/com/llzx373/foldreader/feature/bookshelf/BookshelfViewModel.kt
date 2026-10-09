@@ -28,6 +28,7 @@ import com.llzx373.foldreader.feature.importer.ImportBookUseCase
 import com.llzx373.foldreader.feature.importer.RecleanBookUseCase
 import java.io.File
 import java.nio.channels.Channels
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -184,7 +185,11 @@ class BookshelfViewModel(
                     com.llzx373.foldreader.core.search.searchShelfIndex(
                         searchIndex, books, query,
                     )
-                }.getOrDefault(emptyList())
+                }.getOrElse {
+                    // 输入连发会取消上一次搜索：取消必须上抛，不能被吞成「空结果」
+                    if (it is CancellationException) throw it
+                    emptyList()
+                }
             }
             _fullTextResults.value = results
             _fullTextSearching.value = false

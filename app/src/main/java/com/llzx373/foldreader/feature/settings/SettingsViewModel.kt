@@ -564,6 +564,9 @@ class SettingsViewModel(
                     }
                 } catch (e: com.llzx373.foldreader.core.dict.DictionaryStore.ImportException) {
                     e.message ?: "导入失败"
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // 离开设置页导致的取消不能吞成「导入失败」提示
+                    throw e
                 } catch (e: Exception) {
                     "导入失败：${e.message ?: "文件读取异常"}"
                 }
@@ -604,7 +607,10 @@ class SettingsViewModel(
         launch {
             runCatching { backupManager.exportTo(uri) }
                 .onSuccess { onResult(it, null) }
-                .onFailure { onResult(null, it.message ?: "导出失败") }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    onResult(null, it.message ?: "导出失败")
+                }
         }
     }
 
@@ -612,7 +618,10 @@ class SettingsViewModel(
         launch {
             runCatching { backupManager.importFrom(uri) }
                 .onSuccess { onResult(it, null) }
-                .onFailure { onResult(null, it.message ?: "导入失败") }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    onResult(null, it.message ?: "导入失败")
+                }
         }
     }
 
