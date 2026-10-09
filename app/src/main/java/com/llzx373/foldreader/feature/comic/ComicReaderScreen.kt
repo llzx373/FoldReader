@@ -443,6 +443,14 @@ fun ComicReaderScreen(
             .distinctUntilChanged()
             .collect { viewModel.onScrollAnchor(it) }
     }
+    // 程序跳转（进度条/目录/书签/批注/跳页/缩略图）统一走这里滚屏，
+    // 页号与进度由上面的滚动锚点回写
+    LaunchedEffect(scrollMode) {
+        if (!scrollMode) return@LaunchedEffect
+        viewModel.scrollRequests.collect { page ->
+            scrollListState.scrollToItem(page.coerceIn(0, uiState.pageCount - 1))
+        }
+    }
 
     // 覆盖滑动：正在滑入的页组，底下仍画当前页
     val animX = remember { Animatable(0f) }
@@ -1877,11 +1885,7 @@ fun ComicReaderScreen(
                 textSearchable = features.textLayer,
                 onSearch = viewModel::search,
                 onJump = { page ->
-                    if (scrollMode) {
-                        scope.launch { scrollListState.scrollToItem(page) }
-                    } else {
-                        viewModel.goToPage(page)
-                    }
+                    viewModel.goToPage(page)
                 },
                 onDismiss = {
                     searchVisible = false
@@ -1895,11 +1899,7 @@ fun ComicReaderScreen(
                 pageCount = uiState.pageCount,
                 currentPage = uiState.pageIndex,
                 onJump = { page ->
-                    if (scrollMode) {
-                        scope.launch { scrollListState.scrollToItem(page) }
-                    } else {
-                        viewModel.goToPage(page)
-                    }
+                    viewModel.goToPage(page)
                 },
                 onDismiss = { jumpVisible = false },
             )
@@ -1974,11 +1974,7 @@ fun ComicReaderScreen(
                 viewModel = viewModel,
                 onJump = { index ->
                     thumbnailsVisible = false
-                    if (scrollMode) {
-                        scope.launch { scrollListState.scrollToItem(index) }
-                    } else {
-                        viewModel.goToPage(index)
-                    }
+                    viewModel.goToPage(index)
                 },
                 onDismiss = { thumbnailsVisible = false },
             )

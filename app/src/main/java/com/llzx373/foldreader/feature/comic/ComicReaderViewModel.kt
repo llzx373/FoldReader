@@ -73,10 +73,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -187,6 +189,13 @@ class ComicReaderViewModel(
     private var contentHash: String? = null
     private var imageBytes = 0
     private var prefetchJob: Job? = null
+
+    /**
+     * 滚动模式的程序跳转请求（进度条/目录/书签/批注/跳页/缩略图都汇到这里）：
+     * Screen 收到后 scrollToItem，页号与进度由滚动锚点（onScrollAnchor）回写。
+     */
+    private val _scrollRequests = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    val scrollRequests: SharedFlow<Int> = _scrollRequests.asSharedFlow()
     private var sizeProbeJob: Job? = null
     private val decodeMutex = Mutex()
     private val thumbnailLoading = mutableSetOf<Int>()
@@ -1174,6 +1183,11 @@ class ComicReaderViewModel(
         val state = _uiState.value
         if (state.pageCount <= 0) return
         val clamped = index.coerceIn(0, state.pageCount - 1)
+        // 滚动模式不直写页号：发滚动请求让列表滚过去，页号/进度由滚动锚点回写
+        if (preferences.value.pageTurnMode == PageTurnMode.SCROLL) {
+            if (clamped != state.pageIndex) _scrollRequests.tryEmit(clamped)
+            return
+        }
         // 双页模式下位置一律落在跨页起点：否则「第 2 页」和「第 1–2 页」会来回打架
         val target = if (state.dual) _spreadIndex.value.startOf(clamped) else clamped
         if (target == state.pageIndex) return
