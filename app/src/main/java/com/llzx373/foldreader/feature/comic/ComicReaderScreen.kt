@@ -1701,7 +1701,7 @@ fun ComicReaderScreen(
             var infoLoaded by remember { mutableStateOf(false) }
             LaunchedEffect(uiState.pageIndex) {
                 infoLoaded = false
-                bubbleInfo = viewModel.bubbleInfoFor(viewModel.currentPages().firstOrNull() ?: 0)
+                bubbleInfo = viewModel.bubbleInfoForSpread(viewModel.currentPages())
                 infoLoaded = true
             }
             // 翻完（非失败）自动收确认页，视角已由 ViewModel 切到覆盖层
@@ -1718,6 +1718,7 @@ fun ComicReaderScreen(
                 translating = pageTranslating,
                 error = pageTranslateError,
                 colors = colors,
+                pageCount = viewModel.currentPages().size,
                 onStart = { lang, prompt ->
                     translateStarted = true
                     viewModel.setTranslationLang(lang)
@@ -1746,6 +1747,7 @@ fun ComicReaderScreen(
                 translating = pageTranslating,
                 error = pageTranslateError,
                 colors = colors,
+                pageCount = viewModel.currentPages().size,
                 onStart = {
                     visionTranslateStarted = true
                     viewModel.clearPageTranslateError()

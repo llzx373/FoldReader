@@ -74,7 +74,7 @@ fun ComicTranslateFirstSendDialog(
  *
  * [bubbleInfo] = (气泡数, 原文字数)，null = 尚未识别过（首次翻译会先离线跑气泡识别）；
  * [infoLoaded] 气泡信息是否已读取完（读取中禁用开始）。 [translating] 进行中转圈；
- * [error] 非空显示失败与重试。
+ * [error] 非空显示失败与重试。[pageCount] 本次覆盖的页数（双页模式 = 2，文案随之说明范围）。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -85,12 +85,14 @@ fun ComicPageTranslateConfirmDialog(
     translating: Boolean,
     error: String?,
     colors: ReaderColors,
+    pageCount: Int = 1,
     onStart: (AiTargetLang, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var lang by remember { mutableStateOf(initialLang) }
     var prompt by remember { mutableStateOf(defaultComicPrompt(initialLang)) }
     var promptDirty by remember { mutableStateOf(false) }
+    val scopeText = if (pageCount > 1) "当前跨页（$pageCount 页）" else "当前页"
 
     AlertDialog(
         onDismissRequest = { if (!translating) onDismiss() },
@@ -101,9 +103,9 @@ fun ComicPageTranslateConfirmDialog(
                 Text(
                     text = when {
                         !infoLoaded -> "正在读取本页气泡信息…"
-                        bubbleInfo == null -> "范围：当前页（首次翻译会先离线识别气泡，识别不上传图片）"
-                        bubbleInfo.first == 0 -> "本页未识别到文字气泡"
-                        else -> "范围：当前页 ${bubbleInfo.first} 个气泡约 ${bubbleInfo.second} 字，" +
+                        bubbleInfo == null -> "范围：$scopeText（首次翻译会先离线识别气泡，识别不上传图片）"
+                        bubbleInfo.first == 0 -> "未识别到文字气泡（$scopeText）"
+                        else -> "范围：$scopeText，共 ${bubbleInfo.first} 个气泡约 ${bubbleInfo.second} 字，" +
                             "估算 ≈${bubbleInfo.second / 2} token"
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -222,6 +224,7 @@ fun ComicVolumeTranslateConfirmDialog(
  * [firstConfirm] = 该书首次使用：显示图像外发说明（合规：页图像外发逐书明示确认），
  * 确认按钮文案变为「同意外发并翻译」；确认动作由调用方落账。
  * [translating] 进行中转圈；[error] 非空显示失败与重试。
+ * [pageCount] 本次覆盖的页数（双页模式 = 2，文案随之说明范围）。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -231,6 +234,7 @@ fun ComicVisionTranslateDialog(
     translating: Boolean,
     error: String?,
     colors: ReaderColors,
+    pageCount: Int = 1,
     onStart: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -240,8 +244,9 @@ fun ComicVisionTranslateDialog(
         title = { Text("视觉翻译本页") },
         text = {
             Column {
+                val scopeText = if (pageCount > 1) "当前跨页（$pageCount 页）" else "当前页"
                 Text(
-                    text = "范围：当前页。页图像将发送给视觉模型 $model，" +
+                    text = "范围：$scopeText。页图像将发送给视觉模型 $model，" +
                         "由它直接识别气泡并翻译（不经本地 OCR）。",
                     style = MaterialTheme.typography.bodyMedium,
                 )

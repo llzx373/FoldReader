@@ -520,35 +520,44 @@ class ComicReaderViewModel(
     }
 
     /**
-     * 翻译当前跨页的第一页：流式逐气泡更新覆盖层，成功后自动切到覆盖层视角。
-     * [force] = 重译（作废旧译文）；重复调用防抖——进行中的那一页翻完才接受下一次。
+     * 翻译当前跨页的**全部页**（双页模式下用户看到的「当前页」是两页，只翻一页另一页就裸着）。
+     * 流式逐气泡更新覆盖层，全部成功后自动切到覆盖层视角。
+     * [force] = 重译（作废旧译文）；重复调用防抖——进行中的那次翻完才接受下一次。
      */
     fun translateCurrentPage(systemOverride: String? = null, force: Boolean = false) {
         val controller = comicTranslation ?: return
-        val page = currentPages().firstOrNull() ?: return
+        val pages = currentPages()
+        if (pages.isEmpty()) return
         if (_pageTranslating.value) return
         val lang = _translationLang.value
         viewModelScope.launch(Dispatchers.IO) {
             _pageTranslating.value = true
             _pageTranslateError.value = null
             try {
-                val onBubble: (Int, String) -> Unit = { index, text ->
-                    viewModelScope.launch { onBubbleTranslated(page, index, text) }
-                }
-                val result = if (force) {
-                    controller.retranslatePage(page, lang, systemOverride, onBubble)
-                } else {
-                    controller.translatePage(page, lang, systemOverride, onBubble)
-                }
-                result.onSuccess {
-                    runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
-                        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
-                        ensureInpainted(page)
+                var anySuccess = false
+                var firstError: Throwable? = null
+                for (page in pages) {
+                    val onBubble: (Int, String) -> Unit = { index, text ->
+                        viewModelScope.launch { onBubbleTranslated(page, index, text) }
                     }
-                    _translationMode.value = ComicTranslationMode.OVERLAY
-                }.onFailure { error ->
-                    _pageTranslateError.value = error.message ?: "翻译失败"
+                    val result = if (force) {
+                        controller.retranslatePage(page, lang, systemOverride, onBubble)
+                    } else {
+                        controller.translatePage(page, lang, systemOverride, onBubble)
+                    }
+                    result.onSuccess {
+                        anySuccess = true
+                        runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
+                            Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                            ensureInpainted(page)
+                        }
+                    }.onFailure { error ->
+                        if (firstError == null) firstError = error
+                    }
                 }
+                // 有一页翻出来就切覆盖层视角；有失败页则如实报错（已翻好的页不藏着）
+                if (anySuccess) _translationMode.value = ComicTranslationMode.OVERLAY
+                firstError?.let { _pageTranslateError.value = it.message ?: "翻译失败" }
             } finally {
                 _pageTranslating.value = false
             }
@@ -578,30 +587,37 @@ class ComicReaderViewModel(
     }
 
     /**
-     * 视觉模式翻译当前跨页的第一页（M23）：气泡框与译文一次产出（无流式），
+     * 视觉模式翻译当前跨页的**全部页**（M23）：气泡框与译文一次产出（无流式），
      * 成功后自动切覆盖层视角。逐书确认在界面层完成后才调到（页图像外发）。
      */
     fun translateCurrentPageVision() {
         val controller = comicTranslation ?: return
-        val page = currentPages().firstOrNull() ?: return
+        val pages = currentPages()
+        if (pages.isEmpty()) return
         if (_pageTranslating.value) return
         val lang = _translationLang.value
         viewModelScope.launch(Dispatchers.IO) {
             _pageTranslating.value = true
             _pageTranslateError.value = null
             try {
-                val result = controller.translatePageVision(page, lang)
-                result.onSuccess {
-                    runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
-                        Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
-                        // 视觉模式会重写气泡框：旧抹除位图的坐标系已失效，作废重建
-                        invalidateInpainted(page)
-                        ensureInpainted(page)
+                var anySuccess = false
+                var firstError: Throwable? = null
+                for (page in pages) {
+                    val result = controller.translatePageVision(page, lang)
+                    result.onSuccess {
+                        anySuccess = true
+                        runCatching { controller.overlayFor(lang, page) }.getOrNull()?.let { overlay ->
+                            Snapshot.withMutableSnapshot { translationOverlays[page] = overlay }
+                            // 视觉模式会重写气泡框：旧抹除位图的坐标系已失效，作废重建
+                            invalidateInpainted(page)
+                            ensureInpainted(page)
+                        }
+                    }.onFailure { error ->
+                        if (firstError == null) firstError = error
                     }
-                    _translationMode.value = ComicTranslationMode.OVERLAY
-                }.onFailure { error ->
-                    _pageTranslateError.value = error.message ?: "翻译失败"
                 }
+                if (anySuccess) _translationMode.value = ComicTranslationMode.OVERLAY
+                firstError?.let { _pageTranslateError.value = it.message ?: "翻译失败" }
             } finally {
                 _pageTranslating.value = false
             }
@@ -700,6 +716,20 @@ class ComicReaderViewModel(
         comicTranslation?.bubblesFor(page)?.let { bubbles ->
             bubbles.size to bubbles.sumOf { it.text.length }
         }
+
+    /** 当前跨页（双页模式两页）的气泡合计：(总气泡数, 总字数)；所有页都未识别过时为 null。 */
+    suspend fun bubbleInfoForSpread(pages: List<Int>): Pair<Int, Int>? {
+        var totalBubbles = 0
+        var totalChars = 0
+        var anyKnown = false
+        for (page in pages) {
+            val info = bubbleInfoFor(page) ?: continue
+            anyKnown = true
+            totalBubbles += info.first
+            totalChars += info.second
+        }
+        return if (anyKnown) totalBubbles to totalChars else null
+    }
 
     // ---- 同系列（前后卷切换）----
 

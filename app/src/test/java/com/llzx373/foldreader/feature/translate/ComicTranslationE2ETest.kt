@@ -272,6 +272,40 @@ class ComicTranslationE2ETest {
     }
 
     @Test
+    fun `双页跨页「翻译本页」逐页连翻且互不串扰`() = runTest {
+        // C13 的 VM 循环对 currentPages() 逐页调 controller.translatePage：
+        // 这里用同一引擎连翻一个跨页的两页，断言两页译文各自落盘、台账各自 done。
+        bubbles[0] = listOf(bubble(0, "左一"), bubble(1, "左二"))
+        bubbles[1] = listOf(bubble(0, "右一"))
+        // 生产链路上 bubblesFor 会把 OCR 落进 store（覆盖层从这里读），测试注入则手动落一份
+        store.saveOcr(1, 0, bubbles.getValue(0))
+        store.saveOcr(1, 1, bubbles.getValue(1))
+        server.enqueue(sse(okJson("译左一", "译左二")))
+        server.enqueue(sse(okJson("译右一")))
+        val controller = ComicTranslationController(
+            bookId = 1,
+            bookTitleFor = { "测试漫画" },
+            store = store,
+            pageDao = db.comicPageTranslationDao(),
+            engineFor = { newEngine() },
+        )
+
+        val left = controller.translatePage(0, AiTargetLang.ZH_HANS)
+        val right = controller.translatePage(1, AiTargetLang.ZH_HANS)
+
+        assertEquals(2, left.getOrThrow())
+        assertEquals(1, right.getOrThrow())
+        assertEquals(listOf("译左一", "译左二"), store.loadTranslation(1, "ZH_HANS", 0)?.texts)
+        assertEquals(listOf("译右一"), store.loadTranslation(1, "ZH_HANS", 1)?.texts)
+        val rows = db.comicPageTranslationDao().getForBook(1, "ZH_HANS")
+        assertEquals(2, rows.size)
+        assertTrue(rows.all { it.status == ComicPageTranslationEntity.STATUS_DONE })
+        // 覆盖层各自可用（VM 成功分支逐页刷新 overlayFor）
+        assertEquals(2, controller.overlayFor(AiTargetLang.ZH_HANS, 0)?.bubbles?.size)
+        assertEquals(1, controller.overlayFor(AiTargetLang.ZH_HANS, 1)?.bubbles?.size)
+    }
+
+    @Test
     fun `数量校验失败整页重试第二次成功`() = runTest {
         bubbles[0] = listOf(bubble(0, "一"), bubble(1, "二"))
         server.enqueue(sse(okJson("只有一个")))
