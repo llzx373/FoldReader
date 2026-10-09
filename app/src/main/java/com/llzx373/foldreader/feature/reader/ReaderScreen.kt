@@ -422,6 +422,16 @@ fun ReaderScreen(
     var peelGeneration by remember { mutableLongStateOf(0L) }
     var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
 
+    // 掀页位图由本层独占（renderPageBitmap 每次新出），收尾置空前统一回收
+    fun recyclePeelBitmaps() {
+        peelCurrentBmp?.let { if (!it.isRecycled) it.recycle() }
+        peelNextBmp?.let { if (!it.isRecycled) it.recycle() }
+        peelBackBmp?.let { if (!it.isRecycled) it.recycle() }
+        peelCurrentBmp = null
+        peelNextBmp = null
+        peelBackBmp = null
+    }
+
     // M33 开书过渡（外屏 → 内屏续读）：单页翻成「双页书」的瞬间——最典型的一次就是
     // 外屏合上再展开到内屏横持——正文以书脊（页面中缝）为轴做一次短促的张开
     // （横向缩放 + 淡入），强化「打开一本书」的物理隐喻。
@@ -458,9 +468,7 @@ fun ReaderScreen(
         peelGeneration += 1
         peel.reset()
         peelTarget = null
-        peelCurrentBmp = null
-        peelNextBmp = null
-        peelBackBmp = null
+        recyclePeelBitmaps()
     }
 
     fun currentPeelLeaves() = peelLeaves(
@@ -590,9 +598,7 @@ fun ReaderScreen(
                     withFrameNanos { }
                     peel.reset()
                     peelTarget = null
-                    peelCurrentBmp = null
-                    peelNextBmp = null
-                    peelBackBmp = null
+                    recyclePeelBitmaps()
                     return@withLock
                 }
                 animSpread = target
@@ -1261,9 +1267,7 @@ fun ReaderScreen(
                                 }
                                 peel.reset()
                                 peelTarget = null
-                                peelCurrentBmp = null
-                                peelNextBmp = null
-                                peelBackBmp = null
+                                recyclePeelBitmaps()
                                 started = false
                             }
                         },
@@ -1281,9 +1285,7 @@ fun ReaderScreen(
                                 }
                                 peel.reset()
                                 peelTarget = null
-                                peelCurrentBmp = null
-                                peelNextBmp = null
-                                peelBackBmp = null
+                                recyclePeelBitmaps()
                             }
                         },
                     )
