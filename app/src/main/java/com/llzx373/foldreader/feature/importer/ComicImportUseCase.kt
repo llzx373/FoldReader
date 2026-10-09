@@ -231,6 +231,8 @@ class ComicImportUseCase(
         val book = bookshelfRepository.getBook(bookId) ?: throw IOException("书籍不存在")
         val container = book.comicContainer ?: throw IOException("缺少漫画容器信息")
         val pages = archiveFactory.copyLocal(Uri.parse(book.fileUri), container, book.contentHash)
+        // 空页容器不能算复制成功：否则会写入 null 路径却回报「已复制到本地」
+        if (pages.isEmpty()) throw IOException("容器里没有可复制的页面")
         val pagesDir = pages.firstOrNull()?.parentFile?.absolutePath
         bookshelfRepository.updateComicLocalPath(bookId, pagesDir)
         bookshelfRepository.updateComicPageCount(bookId, pages.size)

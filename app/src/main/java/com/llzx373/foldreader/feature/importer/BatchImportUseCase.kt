@@ -221,7 +221,7 @@ class BatchImportUseCase private constructor(
         }
         onProgress(imported.size + duplicates.size + failures.size, entries.size, "")
 
-        // 取消时不赋组：此刻协程上下文已取消，suspend 赋组调用会立刻抛异常
+        // 取消或零本导入成功时不赋组也不报「已加入」：组名只在真有书入组时回传
         val trimmedGroup = groupName?.trim()?.takeIf { it.isNotEmpty() }
         if (!cancelled && trimmedGroup != null && importedIds.isNotEmpty()) {
             assignGroup(importedIds, trimmedGroup)
@@ -231,7 +231,7 @@ class BatchImportUseCase private constructor(
             duplicates = duplicates,
             failures = failures,
             cancelled = cancelled,
-            groupName = if (!cancelled) trimmedGroup else null,
+            groupName = if (!cancelled && importedIds.isNotEmpty()) trimmedGroup else null,
         )
     }
 
