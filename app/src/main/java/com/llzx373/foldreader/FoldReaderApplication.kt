@@ -658,9 +658,11 @@ class AppContainer(context: Context) {
     val offsetIndexStore = RoomOffsetIndexStore(offsetIndexDao)
     val parserScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val onBookIndexed: suspend (Long, Long) -> Unit = { bookId, totalChars ->
+        // 定点 UPDATE：upsert（INSERT OR REPLACE）命中已有行会删旧插新，整书 CASCADE 子表
+        // （chapters/offset_index/translations/生词本/章节摘要…）会被静默清空
         bookshelfRepository.getBook(bookId)
             ?.takeIf { it.totalChars != totalChars }
-            ?.let { bookshelfRepository.upsertBook(it.copy(totalChars = totalChars)) }
+            ?.let { database.bookDao().updateTotalChars(bookId, totalChars) }
     }
     // 章节规则 = 按书自定义（book_prefs）+ 全局自定义，再叠内置规则（merge 内部追加 DEFAULT）。
     private val chapterRules: suspend (Long?) -> List<Regex> = { bookId ->

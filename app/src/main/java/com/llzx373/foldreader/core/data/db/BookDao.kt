@@ -106,11 +106,19 @@ interface BookDao {
     /**
      * 回填漫画页数（rar/tar/7z 首次打开才知道真实页数）。
      *
-     * 用 UPDATE 而不是 [upsert]：`INSERT OR REPLACE` 会先删旧行再插入，
-     * 而 reading_progress 的外键是 NO_ACTION，已有进度时 REPLACE 会直接抛约束错误。
+     * 用 UPDATE 而不是 [upsert]：`INSERT OR REPLACE` 命中已有行时是「删旧行 + 插新行」，
+     * 所有 CASCADE 子表（chapters/book_prefs/offset_index/translations 等）会被整书清空——
+     * 这是行为级的静默数据丢失，不抛任何错。
      */
     @Query("UPDATE books SET comicPageCount = :pageCount WHERE id = :bookId")
     suspend fun updateComicPageCount(bookId: Long, pageCount: Int)
+
+    /**
+     * 回填正文总字符数（TXT 索引完成后）。与 [updateComicPageCount] 同理必须定点 UPDATE：
+     * 该回填发生在章节/索引落库之后，走 [upsert] 会把刚落库的 CASCADE 子表整书清空。
+     */
+    @Query("UPDATE books SET totalChars = :totalChars WHERE id = :bookId")
+    suspend fun updateTotalChars(bookId: Long, totalChars: Long)
 
     /** 回填封面路径（rar/tar/7z 的封面要等后台解压完才拿得到）。 */
     @Query("UPDATE books SET coverPath = :coverPath WHERE id = :bookId")

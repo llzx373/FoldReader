@@ -24,7 +24,7 @@ import androidx.room.Transaction
 data class OffsetIndexEntity(
     val bookId: Long,
     val chunkIndex: Int,
-    /** 块起点的字节偏移（变长编码下不可推导，必须持久化）。v12 起由 `charOffset` 更名而来。 */
+    /** 块起点的字节偏移（变长编码下不可推导，必须持久化）。 */
     val byteOffset: Long,
     /**
      * 块起点的字符偏移。**不能**假设它等于 `chunkIndex * blockChars`：

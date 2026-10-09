@@ -167,6 +167,9 @@ class BookshelfRepositoryGroupTest {
         override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) {
             books.replaceAll { if (it.id == bookId) it.copy(comicPageCount = pageCount) else it }
         }
+        override suspend fun updateTotalChars(bookId: Long, totalChars: Long) {
+            books.replaceAll { if (it.id == bookId) it.copy(totalChars = totalChars) else it }
+        }
         override suspend fun updateCoverPath(bookId: Long, coverPath: String?) = Unit
         override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) = Unit
         override suspend fun updateConvertedFile(bookId: Long, cleanedFilePath: String?, totalChars: Long) = Unit
