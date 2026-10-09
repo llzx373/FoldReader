@@ -48,7 +48,19 @@ class OcrTextLayerSource(
 
     /** 页级识别串行（OcrEngine 内部还有一把全局锁，这里防同页重复识别）。 */
     private val ocrMutex = Mutex()
+
+    /**
+     * 内存缓存（普通 LinkedHashMap，selectText/search/识别落缓存可能并发进入）：
+     * 全部读写必须经 [cachedPage]/[cachePage] 的显式同步，不裸摸。
+     */
     private val memoryCache = java.util.LinkedHashMap<Int, OcrPage>()
+
+    private fun cachedPage(index: Int): OcrPage? = synchronized(memoryCache) { memoryCache[index] }
+
+    private fun cachePage(index: Int, page: OcrPage) = synchronized(memoryCache) {
+        memoryCache[index] = page
+        trimMemoryCacheLocked()
+    }
 
     override suspend fun selectText(
         index: Int,
@@ -93,31 +105,38 @@ class OcrTextLayerSource(
 
     /** 取一页的 OCR 结果：内存 → 磁盘 → 现算（渲染页位图识别后落盘）。 */
     private suspend fun ocrPage(index: Int, recSpec: OcrModelSpec? = null): OcrPage? {
-        memoryCache[index]?.let { return it }
+        cachedPage(index)?.let { return it }
         store.load(bookId, index)?.let {
-            memoryCache[index] = it
+            cachePage(index, it)
             return it
         }
         val spec = recSpec ?: recSpecProvider() ?: return null
         return ocrMutex.withLock {
             // 等锁期间可能已被另一个调用算好
-            memoryCache[index]?.let { return@withLock it }
+            cachedPage(index)?.let { return@withLock it }
             store.load(bookId, index)?.let {
-                memoryCache[index] = it
+                cachePage(index, it)
                 return@withLock it
             }
             val bitmap = (delegate.loadPage(index, OCR_RENDER_WIDTH, OCR_RENDER_HEIGHT)
                 as? PagedPageImage.Still)?.bitmap ?: return@withLock null
-            val page = runCatching { recognize(bitmap, spec) }.getOrNull() ?: return@withLock null
-            store.save(bookId, index, page)
-            memoryCache[index] = page
-            trimMemoryCache()
-            page
+            // 渲染的页位图只服务这一次识别（PdfPagedSource.loadPage 每次新渲染、
+            // 所有权独占，无人再引用）：识别完即回收——全书 OCR 时几百张 ARGB
+            // 大图堆 native 堆，不能只靠 GC 兜底
+            try {
+                val page = runCatching { recognize(bitmap, spec) }.getOrNull()
+                    ?: return@withLock null
+                store.save(bookId, index, page)
+                cachePage(index, page)
+                page
+            } finally {
+                bitmap.recycle()
+            }
         }
     }
 
-    /** 内存缓存限页数（文本层很小，但长文档全量搜索时会逐页累积）。 */
-    private fun trimMemoryCache() {
+    /** 内存缓存限页数（文本层很小，但长文档全量搜索时会逐页累积）。调用方须持有 memoryCache 锁。 */
+    private fun trimMemoryCacheLocked() {
         while (memoryCache.size > MEMORY_CACHE_PAGES) {
             val oldest = memoryCache.keys.firstOrNull { it != -1 } ?: break
             memoryCache.remove(oldest)
