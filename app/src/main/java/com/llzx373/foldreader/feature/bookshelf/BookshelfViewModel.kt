@@ -533,12 +533,17 @@ class BookshelfViewModel(
             bookshelfRepository.getReadingDayCount(bookId),
         )
 
-    fun deleteSelected(deleteLocalData: Boolean = true) {
+    fun deleteSelected(deleteLocalData: Boolean = true, onError: (String) -> Unit = {}) {
         val ids = _selectedIds.value.toList()
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            bookshelfRepository.deleteBooks(ids, deleteLocalData)
-            _selectedIds.value = emptySet()
+            try {
+                bookshelfRepository.deleteBooks(ids, deleteLocalData)
+                _selectedIds.value = emptySet()
+            } catch (e: Exception) {
+                // 删书失败（如数据库异常）时选择保持不变，让用户可以重试
+                onError("删除失败：${e.message ?: "未知错误"}")
+            }
         }
     }
 

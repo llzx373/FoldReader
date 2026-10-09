@@ -47,6 +47,11 @@ class BookshelfRepositoryImpl(
     private val pdfOcrStore: com.llzx373.foldreader.core.ocr.PdfOcrStore? = null,
     /** 漫画翻译产物（M22）：删书连带清 `<bookId>/` 目录；台账行走外键级联。 */
     private val comicTranslationStore: com.llzx373.foldreader.core.translate.ComicTranslationStore? = null,
+    /**
+     * 跨表删除的事务执行器（删书要动 progress/bookmarks/annotations 等多张表，必须原子）。
+     * 生产环境注入 `database.withTransaction`；纯文件维度的测试可直接执行。
+     */
+    private val inTransaction: suspend (suspend () -> Unit) -> Unit = { block -> block() },
 ) : BookshelfRepository {
 
     override fun observeBookshelf(): Flow<List<BookEntity>> = bookDao.observeBookshelf()
@@ -103,24 +108,7 @@ class BookshelfRepositoryImpl(
         bookDao.updateConvertedFile(bookId, cleanedFilePath, totalChars)
 
     override suspend fun deleteBooks(bookIds: List<Long>, deleteLocalData: Boolean) {
-        if (deleteLocalData) {
-            progressDao.deleteByBookIds(bookIds)
-            bookmarkDao.deleteByBookIds(bookIds)
-            annotationDao.deleteByBookIds(bookIds)
-            translationDao?.let { dao -> bookIds.forEach { dao.deleteForBook(it) } }
-            translationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
-            pdfOcrStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
-            comicTranslationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
-            glossaryTermDao?.let { dao ->
-                bookIds.forEach {
-                    dao.deleteFor(
-                        com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK,
-                        it.toString(),
-                    )
-                }
-            }
-        }
-        pageDiskCache?.let { cache -> bookIds.forEach { cache.deleteForBook(it) } }
+        if (bookIds.isEmpty()) return
         val booksById = bookDao.getByIds(bookIds).associateBy { it.id }
         // 清洗副本与源副本都是**内容寻址**的，同一个文件的原版与清洗版会共用同一份（源副本按原文
         // 哈希，清洗副本按产物哈希——两行用同一套规则重洗就落到同一个文件上）。所以文件不能随行
@@ -130,6 +118,35 @@ class BookshelfRepositoryImpl(
             val book = booksById[id] ?: return@mapNotNull null
             book.sourceCopyFile(sourceDir)?.let { file -> book.fileUri to file }
         }.distinctBy { it.second.absolutePath }
+        // 数据库侧全部删除包进一个事务：崩在中途不会留下「子表删了、书还在」的半截状态。
+        // 进度/书签/标注三张 NO_ACTION 子表**一律随书删除**——删父行必违约，且孤儿行按 bookId
+        // 锚定、书删后永远无法再访问，「保留」没有实际价值；deleteLocalData 只控制翻译/OCR/术语
+        // 等派生产物。
+        inTransaction {
+            progressDao.deleteByBookIds(bookIds)
+            bookmarkDao.deleteByBookIds(bookIds)
+            annotationDao.deleteByBookIds(bookIds)
+            if (deleteLocalData) {
+                translationDao?.let { dao -> bookIds.forEach { dao.deleteForBook(it) } }
+                glossaryTermDao?.let { dao ->
+                    bookIds.forEach {
+                        dao.deleteFor(
+                            com.llzx373.foldreader.core.data.db.GlossaryTermEntity.SCOPE_BOOK,
+                            it.toString(),
+                        )
+                    }
+                }
+            }
+            bookDao.deleteByIds(bookIds)
+        }
+        // 文件系统删除全部挪到数据库删除**成功之后**：顺序反过来会在崩溃后留下
+        // 「行还在、文件没了」的半截状态。
+        if (deleteLocalData) {
+            translationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+            pdfOcrStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+            comicTranslationStore?.let { store -> bookIds.forEach { store.deleteBook(it) } }
+        }
+        pageDiskCache?.let { cache -> bookIds.forEach { cache.deleteForBook(it) } }
         bookIds.forEach { id ->
             val book = booksById[id]
             book?.coverPath?.let { java.io.File(it).delete() }
@@ -154,7 +171,6 @@ class BookshelfRepositoryImpl(
                 comicStore.deleteAll(book.contentHash)
             }
         }
-        bookDao.deleteByIds(bookIds)
         // 行已删完，这时反查为空才说明这份文件真的没人用了
         cleanedCandidates.forEach { path ->
             if (bookDao.getByCleanedFilePath(path) == null) java.io.File(path).delete()

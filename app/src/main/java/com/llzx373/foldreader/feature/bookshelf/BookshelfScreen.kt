@@ -923,21 +923,23 @@ fun BookshelfScreen(
             title = { Text("删除书籍") },
             text = {
                 Column {
-                    Text("将删除 ${selectedIds.size} 本书，此操作不可撤销。")
+                    Text("将删除 ${selectedIds.size} 本书，此操作不可撤销；阅读进度、书签与标注随书一并删除。")
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = deleteLocalData,
                             onCheckedChange = { deleteLocalData = it },
                         )
-                        Text("同时删除本地阅读进度与标注")
+                        Text("同时删除翻译、OCR 与术语等派生数据")
                     }
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteSelected(deleteLocalData)
+                        viewModel.deleteSelected(deleteLocalData) { message ->
+                            scope.launch { snackbarHostState.showSnackbar(message) }
+                        }
                         showDeleteDialog = false
                     },
                 ) {

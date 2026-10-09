@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.room.Room
+import androidx.room.withTransaction
 import com.llzx373.foldreader.core.data.db.DATABASE_MIGRATIONS
 import com.llzx373.foldreader.core.data.db.FoldReaderDatabase
 import com.llzx373.foldreader.core.data.db.RoomOffsetIndexStore
@@ -182,6 +183,8 @@ class AppContainer(context: Context) {
         glossaryTermDao = database.glossaryTermDao(),
         pdfOcrStore = pdfOcrStore,
         comicTranslationStore = comicTranslationStore,
+        // 删书跨多张表（进度/书签/标注/台账 + 书籍行），必须原子提交
+        inTransaction = { block -> database.withTransaction { block() } },
     )
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context)
     /** AI API key 加密存储（AndroidKeyStore AES/GCM）；明文不出存储边界。 */

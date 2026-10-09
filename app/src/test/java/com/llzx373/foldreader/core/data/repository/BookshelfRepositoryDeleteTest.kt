@@ -1,117 +1,215 @@
 package com.llzx373.foldreader.core.data.repository
 
-import com.llzx373.foldreader.core.data.db.AnnotationDao
+import androidx.room.Room
+import androidx.room.withTransaction
 import com.llzx373.foldreader.core.data.db.AnnotationEntity
-import com.llzx373.foldreader.core.data.db.BookDao
 import com.llzx373.foldreader.core.data.db.BookEntity
 import com.llzx373.foldreader.core.data.db.BookFormat
-import com.llzx373.foldreader.core.data.db.BookWithProgress
-import com.llzx373.foldreader.core.data.db.BookmarkDao
+import com.llzx373.foldreader.core.data.db.FoldReaderDatabase
+import com.llzx373.foldreader.core.data.db.GlossaryTermEntity
 import com.llzx373.foldreader.core.data.db.BookmarkEntity
-import com.llzx373.foldreader.core.data.db.ChapterDao
-import com.llzx373.foldreader.core.data.db.ChapterEntity
-import com.llzx373.foldreader.core.data.db.ReadingProgressDao
 import com.llzx373.foldreader.core.data.db.ReadingProgressEntity
-import com.llzx373.foldreader.core.data.db.ReadingSessionDao
-import com.llzx373.foldreader.core.data.db.ReadingSessionEntity
+import com.llzx373.foldreader.core.data.db.TranslationEntity
+import com.llzx373.foldreader.core.translate.TranslationStore
 import java.io.File
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+/**
+ * 删书链路的真实 Room 内存库测试（A1）。
+ *
+ * reading_progress / bookmarks / annotations 三张子表的外键是 NO_ACTION：旧实现
+ * 「不删本地数据」路径跳过子表清理后 `deleteByIds` 必抛 SQLiteConstraintException——
+ * 假 DAO 测不出来，必须真库跑外键（历史教训：本测试类的前身就是假 DAO 版）。
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class BookshelfRepositoryDeleteTest {
 
-    private lateinit var bookDao: FakeBookDao
-    private lateinit var progressDao: FakeProgressDao
-    private lateinit var bookmarkDao: FakeBookmarkDao
-    private lateinit var annotationDao: FakeAnnotationDao
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
+    private lateinit var db: FoldReaderDatabase
     private lateinit var pageDiskCache: RecordingPageDiskCache
-    private lateinit var repository: BookshelfRepository
+    private lateinit var translationsDir: File
+    private lateinit var translationStore: TranslationStore
+    private lateinit var repository: BookshelfRepositoryImpl
 
     @Before
-    fun setUp() {
-        bookDao = FakeBookDao()
-        progressDao = FakeProgressDao()
-        bookmarkDao = FakeBookmarkDao()
-        annotationDao = FakeAnnotationDao()
+    fun setUp() = runBlocking {
+        db = Room.inMemoryDatabaseBuilder(
+            RuntimeEnvironment.getApplication(),
+            FoldReaderDatabase::class.java,
+        ).build()
+        translationsDir = File(tempFolder.root, "translations")
+        translationStore = TranslationStore(translationsDir)
         pageDiskCache = RecordingPageDiskCache()
-        repository = BookshelfRepositoryImpl(
-            bookDao = bookDao,
-            progressDao = progressDao,
-            chapterDao = FakeChapterDao(),
-            bookmarkDao = bookmarkDao,
-            annotationDao = annotationDao,
-            sessionDao = FakeSessionDao(),
-            pageDiskCache = pageDiskCache,
+        repository = repo()
+        db.bookDao().upsert(book(1))
+        db.bookDao().upsert(book(2))
+        seedChildren(1)
+        seedChildren(2)
+    }
+
+    @After
+    fun tearDown() {
+        db.close()
+    }
+
+    private fun repo(sourceDir: File? = null) = BookshelfRepositoryImpl(
+        bookDao = db.bookDao(),
+        progressDao = db.readingProgressDao(),
+        chapterDao = db.chapterDao(),
+        bookmarkDao = db.bookmarkDao(),
+        annotationDao = db.annotationDao(),
+        sessionDao = db.readingSessionDao(),
+        pageDiskCache = pageDiskCache,
+        sourceDir = sourceDir,
+        translationStore = translationStore,
+        translationDao = db.translationDao(),
+        glossaryTermDao = db.glossaryTermDao(),
+        inTransaction = { block -> db.withTransaction { block() } },
+    )
+
+    /** 造「有进度 + 书签 + 标注 + 翻译台账 + 术语」的书（两张 NO_ACTION 子表都挂上）。 */
+    private suspend fun seedChildren(bookId: Long) {
+        db.readingProgressDao().upsert(
+            ReadingProgressEntity(
+                bookId = bookId,
+                charOffset = 100,
+                chapterIndex = 1,
+                totalReadingMillis = 60_000,
+                updatedAt = 10,
+            ),
         )
-        bookDao.books += book(1)
-        bookDao.books += book(2)
-        progressDao.rows += progress(1)
-        progressDao.rows += progress(2)
-        bookmarkDao.rows += BookmarkEntity(id = 1, bookId = 1, charOffset = 0, chapterIndex = 0, snapshotText = "", createdAt = 0)
-        bookmarkDao.rows += BookmarkEntity(id = 2, bookId = 2, charOffset = 0, chapterIndex = 0, snapshotText = "", createdAt = 0)
-        annotationDao.rows += AnnotationEntity(id = 1, bookId = 1, startCharOffset = 0, endCharOffset = 1, selectedText = "", color = 0, note = null, createdAt = 0, updatedAt = 0)
-        annotationDao.rows += AnnotationEntity(id = 2, bookId = 2, startCharOffset = 0, endCharOffset = 1, selectedText = "", color = 0, note = null, createdAt = 0, updatedAt = 0)
+        db.bookmarkDao().insert(
+            BookmarkEntity(
+                id = bookId,
+                bookId = bookId,
+                charOffset = 0,
+                chapterIndex = 0,
+                snapshotText = "",
+                createdAt = 0,
+            ),
+        )
+        db.annotationDao().insert(
+            AnnotationEntity(
+                id = bookId,
+                bookId = bookId,
+                startCharOffset = 0,
+                endCharOffset = 1,
+                selectedText = "",
+                color = 0,
+                note = null,
+                createdAt = 0,
+                updatedAt = 0,
+            ),
+        )
+        db.translationDao().upsert(
+            TranslationEntity(
+                bookId = bookId,
+                lang = "ZH_HANS",
+                unitKind = "chapter",
+                unitIndex = 0,
+                status = TranslationEntity.STATUS_DONE,
+                model = "m",
+                paragraphCount = 3,
+                updatedAt = 10,
+            ),
+        )
+        File(translationsDir, "$bookId/ZH_HANS").mkdirs()
+        File(translationsDir, "$bookId/ZH_HANS/units.json").writeText("{}")
+        db.glossaryTermDao().upsert(
+            GlossaryTermEntity(
+                scope = GlossaryTermEntity.SCOPE_BOOK,
+                ownerKey = bookId.toString(),
+                source = "术语$bookId",
+                target = "term$bookId",
+                origin = GlossaryTermEntity.ORIGIN_USER,
+                confirmed = true,
+            ),
+        )
     }
 
     @Test
-    fun `默认删除时进度书签标注随书删除`() = runBlocking {
-        repository.deleteBooks(listOf(1L))
-
-        assertEquals(listOf(2L), bookDao.books.map { it.id })
-        assertEquals(listOf(2L), progressDao.rows.map { it.bookId })
-        assertEquals(listOf(2L), bookmarkDao.rows.map { it.bookId })
-        assertEquals(listOf(2L), annotationDao.rows.map { it.bookId })
-    }
-
-    @Test
-    fun `显式级联删除时进度书签标注随书删除`() = runBlocking {
-        repository.deleteBooks(listOf(1L), deleteLocalData = true)
-
-        assertEquals(listOf(2L), bookDao.books.map { it.id })
-        assertTrue(progressDao.rows.none { it.bookId == 1L })
-        assertTrue(bookmarkDao.rows.none { it.bookId == 1L })
-        assertTrue(annotationDao.rows.none { it.bookId == 1L })
-    }
-
-    @Test
-    fun `保留本地数据时进度书签标注保留`() = runBlocking {
+    fun `不勾派生数据时进度书签标注仍随书删除且不抛约束`() = runBlocking {
+        // 旧行为：deleteLocalData=false 跳过三张 NO_ACTION 子表，deleteByIds 必抛
+        // SQLiteConstraintException——真库下这条路径曾经根本走不通
         repository.deleteBooks(listOf(1L), deleteLocalData = false)
 
-        assertEquals(listOf(2L), bookDao.books.map { it.id })
-        assertEquals(listOf(1L, 2L), progressDao.rows.map { it.bookId }.sorted())
-        assertEquals(listOf(1L, 2L), bookmarkDao.rows.map { it.bookId }.sorted())
-        assertEquals(listOf(1L, 2L), annotationDao.rows.map { it.bookId }.sorted())
+        assertNull(db.bookDao().getById(1L))
+        assertNull(db.readingProgressDao().get(1L))
+        assertTrue(db.bookmarkDao().observeByBook(1L).first().isEmpty())
+        assertTrue(db.annotationDao().observeByBook(1L).first().isEmpty())
+        // 翻译台账行走 CASCADE，不勾也随书删
+        assertTrue(db.translationDao().getForBook(1L, "ZH_HANS").isEmpty())
+        // 但派生**文件产物**（译本副本）与单书术语是复选框管辖的：不勾就保留
+        assertTrue(File(translationsDir, "1/ZH_HANS/units.json").isFile)
+        assertEquals(
+            1,
+            db.glossaryTermDao().getAll().count {
+                it.scope == GlossaryTermEntity.SCOPE_BOOK && it.ownerKey == "1"
+            },
+        )
+        // 另一本书的行与文件一律不动
+        assertEquals(listOf(2L), db.bookDao().getByIds(listOf(1L, 2L)).map { it.id })
+        assertTrue(db.readingProgressDao().get(2L) != null)
+        assertTrue(File(translationsDir, "2/ZH_HANS/units.json").isFile)
+    }
+
+    @Test
+    fun `勾选派生数据时译本副本与单书术语一并清除`() = runBlocking {
+        db.glossaryTermDao().upsert(
+            GlossaryTermEntity(
+                scope = GlossaryTermEntity.SCOPE_GLOBAL,
+                ownerKey = "",
+                source = "全局术语",
+                target = "global",
+                origin = GlossaryTermEntity.ORIGIN_USER,
+                confirmed = true,
+            ),
+        )
+
+        repository.deleteBooks(listOf(1L), deleteLocalData = true)
+
+        assertNull(db.bookDao().getById(1L))
+        assertNull(db.readingProgressDao().get(1L))
+        assertFalse(File(translationsDir, "1").exists())
+        assertTrue(
+            db.glossaryTermDao().getAll()
+                .none { it.scope == GlossaryTermEntity.SCOPE_BOOK && it.ownerKey == "1" },
+        )
+        // 全局术语不属于任何书，不受删书影响
+        assertTrue(db.glossaryTermDao().getAll().any { it.scope == GlossaryTermEntity.SCOPE_GLOBAL })
+        assertTrue(File(translationsDir, "2/ZH_HANS/units.json").isFile)
     }
 
     @Test
     fun `批量删除多本书时仅目标书数据被清理`() = runBlocking {
+        db.bookDao().upsert(book(3))
+        seedChildren(3)
+
         repository.deleteBooks(listOf(1L, 2L))
 
-        assertTrue(bookDao.books.isEmpty())
-        assertTrue(progressDao.rows.isEmpty())
-        assertTrue(bookmarkDao.rows.isEmpty())
-        assertTrue(annotationDao.rows.isEmpty())
-    }
-
-    @Test
-    fun `删除书籍时一并清理该书的页边界缓存`() = runBlocking {
-        repository.deleteBooks(listOf(1L, 2L))
-
-        // 改一次版式就多一份 bounds 文件，不按 bookId 清理则 page_bounds/ 只增不减
+        assertEquals(listOf(3L), db.bookDao().getByIds(listOf(1L, 2L, 3L)).map { it.id })
+        assertTrue(db.readingProgressDao().get(1L) == null)
+        assertTrue(db.readingProgressDao().get(2L) == null)
+        assertTrue(db.readingProgressDao().get(3L) != null)
         assertEquals(listOf(1L, 2L), pageDiskCache.deletedBooks)
-    }
-
-    @Test
-    fun `保留本地数据时仍清理页边界缓存`() = runBlocking {
-        // 页边界只是分页加速缓存，与「保留本地进度/标注」无关，删书就该回收
-        repository.deleteBooks(listOf(1L), deleteLocalData = false)
-
-        assertEquals(listOf(1L), pageDiskCache.deletedBooks)
+        // 页边界只是分页加速缓存，与「派生数据」勾选无关，删书就该回收
     }
 
     /**
@@ -121,29 +219,24 @@ class BookshelfRepositoryDeleteTest {
      */
     @Test
     fun `共享的清洗副本与源副本只在最后一个引用者被删时才清理`() = runBlocking {
-        val dir = java.nio.file.Files.createTempDirectory("foldreader-delete").toFile()
+        val dir = File(tempFolder.root, "shared").apply { mkdirs() }
         val sourceDir = File(dir, "source").apply { mkdirs() }
         val sourceCopy = File(sourceDir, "h1.txt").apply { writeText("原文") }
         val cleanedCopy = File(dir, "cleaned-h1.txt").apply { writeText("清洗后") }
         val sharedSourceUri = "file://${sourceCopy.absolutePath}"
-
-        bookDao.books.replaceAll {
-            if (it.id == 1L || it.id == 2L) {
-                it.copy(fileUri = sharedSourceUri, cleanedFilePath = cleanedCopy.absolutePath)
-            } else {
-                it
-            }
-        }
-        val repoWithSourceDir = BookshelfRepositoryImpl(
-            bookDao = bookDao,
-            progressDao = progressDao,
-            chapterDao = FakeChapterDao(),
-            bookmarkDao = bookmarkDao,
-            annotationDao = annotationDao,
-            sessionDao = FakeSessionDao(),
-            pageDiskCache = pageDiskCache,
-            sourceDir = sourceDir,
+        db.bookDao().update(
+            db.bookDao().getById(1L)!!.copy(
+                fileUri = sharedSourceUri,
+                cleanedFilePath = cleanedCopy.absolutePath,
+            ),
         )
+        db.bookDao().update(
+            db.bookDao().getById(2L)!!.copy(
+                fileUri = sharedSourceUri,
+                cleanedFilePath = cleanedCopy.absolutePath,
+            ),
+        )
+        val repoWithSourceDir = repo(sourceDir = sourceDir)
 
         repoWithSourceDir.deleteBooks(listOf(1L))
         assertTrue("还有一行在用，两个文件都不能删", sourceCopy.isFile && cleanedCopy.isFile)
@@ -165,185 +258,6 @@ class BookshelfRepositoryDeleteTest {
         lastReadAt = null,
     )
 
-    private fun progress(bookId: Long) = ReadingProgressEntity(
-        bookId = bookId,
-        charOffset = 0,
-        chapterIndex = 0,
-        totalReadingMillis = 0,
-        updatedAt = 0,
-    )
-
-    private class FakeBookDao : BookDao {
-        val books = mutableListOf<BookEntity>()
-        override fun observeBookshelf(): Flow<List<BookEntity>> = flowOf(books)
-        override fun observeBookshelfWithProgress(): Flow<List<BookWithProgress>> = flowOf(emptyList())
-        override fun observeGroupNames(): Flow<List<String>> =
-            flowOf(books.mapNotNull { it.groupName }.distinct().sorted())
-        override fun observeBookshelfWithProgressInGroup(groupName: String?): Flow<List<BookWithProgress>> =
-            flowOf(emptyList())
-        override suspend fun updateGroup(bookIds: List<Long>, groupName: String?) {
-            books.replaceAll { if (it.id in bookIds) it.copy(groupName = groupName) else it }
-        }
-        override suspend fun updateHidden(bookIds: List<Long>, hidden: Boolean) {
-            books.replaceAll { if (it.id in bookIds) it.copy(hidden = hidden) else it }
-        }
-        override suspend fun clearGroup(groupName: String) {
-            books.replaceAll { if (it.groupName == groupName) it.copy(groupName = null) else it }
-        }
-        override suspend fun getById(bookId: Long): BookEntity? = books.find { it.id == bookId }
-        override suspend fun getByIds(bookIds: List<Long>): List<BookEntity> =
-            books.filter { it.id in bookIds }
-        override fun observeById(bookId: Long): Flow<BookEntity?> = flowOf(books.find { it.id == bookId })
-        override suspend fun updateEncoding(bookId: Long, encoding: String) {
-            books.replaceAll { if (it.id == bookId) it.copy(encoding = encoding) else it }
-        }
-        override suspend fun getByFileUri(fileUri: String): BookEntity? =
-            books.firstOrNull { it.fileUri == fileUri }
-        override suspend fun getByContentHash(contentHash: String): BookEntity? = null
-        override suspend fun getByCleanedFilePath(cleanedFilePath: String): BookEntity? =
-            books.firstOrNull { it.cleanedFilePath == cleanedFilePath }
-        override suspend fun upsert(book: BookEntity): Long = book.id
-        override suspend fun update(book: BookEntity) = Unit
-        override suspend fun touchLastRead(bookId: Long, timestamp: Long) = Unit
-        override suspend fun markContentPrepared(bookId: Long, timestamp: Long) {
-            books.replaceAll { if (it.id == bookId) it.copy(contentPreparedAt = timestamp) else it }
-        }
-        override suspend fun updateComicPageCount(bookId: Long, pageCount: Int) {
-            books.replaceAll { if (it.id == bookId) it.copy(comicPageCount = pageCount) else it }
-        }
-        override suspend fun updateCoverPath(bookId: Long, coverPath: String?) {
-            books.replaceAll { if (it.id == bookId) it.copy(coverPath = coverPath) else it }
-        }
-
-        override suspend fun backfillPdfMetadata(
-            bookId: Long,
-            title: String?,
-            author: String?,
-            description: String?,
-            subjects: String?,
-        ) {
-            books.replaceAll {
-                if (it.id != bookId) {
-                    it
-                } else {
-                    it.copy(
-                        title = title ?: it.title,
-                        author = author ?: it.author,
-                        description = description ?: it.description,
-                        subjects = subjects ?: it.subjects,
-                    )
-                }
-            }
-        }
-        override suspend fun backfillComicInfo(
-            bookId: Long,
-            author: String?,
-            seriesName: String?,
-            seriesIndex: String?,
-        ) {
-            books.replaceAll {
-                if (it.id != bookId) {
-                    it
-                } else {
-                    it.copy(
-                        author = if (author != null && it.author.isNullOrBlank()) author else it.author,
-                        seriesName = if (seriesName != null && it.seriesName.isNullOrBlank()) seriesName else it.seriesName,
-                        seriesIndex = if (seriesIndex != null && it.seriesIndex.isNullOrBlank()) seriesIndex else it.seriesIndex,
-                    )
-                }
-            }
-        }
-        override suspend fun updateComicLocalPath(bookId: Long, localPath: String?) {
-            books.replaceAll { if (it.id == bookId) it.copy(comicLocalPath = localPath) else it }
-        }
-        override suspend fun updateConvertedFile(
-            bookId: Long,
-            cleanedFilePath: String?,
-            totalChars: Long,
-        ) = Unit
-        override suspend fun deleteByIds(bookIds: List<Long>) {
-            books.removeAll { it.id in bookIds }
-        }
-
-        override suspend fun applyAiMetadata(
-            bookId: Long,
-            author: String?,
-            description: String?,
-            genreTag: String?,
-            metaSource: String,
-        ) = Unit
-
-        override suspend fun updateUserMetadata(
-            bookId: Long,
-            author: String?,
-            description: String?,
-            genreTag: String?,
-            metaSource: String,
-        ) = Unit
-
-        override suspend fun groupByGenreTag(): Int = 0
-    }
-
-    private class FakeProgressDao : ReadingProgressDao {
-        val rows = mutableListOf<ReadingProgressEntity>()
-        override suspend fun get(bookId: Long): ReadingProgressEntity? = rows.find { it.bookId == bookId }
-        override fun observe(bookId: Long): Flow<ReadingProgressEntity?> = flowOf(rows.find { it.bookId == bookId })
-        override suspend fun upsert(progress: ReadingProgressEntity) {
-            rows.removeAll { it.bookId == progress.bookId }
-            rows += progress
-        }
-        override suspend fun delete(bookId: Long) {
-            rows.removeAll { it.bookId == bookId }
-        }
-        override suspend fun deleteByBookIds(bookIds: List<Long>) {
-            rows.removeAll { it.bookId in bookIds }
-        }
-    }
-
-    private class FakeChapterDao : ChapterDao {
-        override suspend fun getForBook(bookId: Long): List<ChapterEntity> = emptyList()
-        override fun observeForBook(bookId: Long): Flow<List<ChapterEntity>> = flowOf(emptyList())
-        override suspend fun upsertAll(chapters: List<ChapterEntity>) = Unit
-        override suspend fun deleteForBook(bookId: Long) = Unit
-    }
-
-    private class FakeBookmarkDao : BookmarkDao {
-        val rows = mutableListOf<BookmarkEntity>()
-        override fun observeByBook(bookId: Long): Flow<List<BookmarkEntity>> = flowOf(rows.filter { it.bookId == bookId })
-        override fun observeAll(): Flow<List<BookmarkEntity>> = flowOf(rows)
-        override suspend fun insert(bookmark: BookmarkEntity): Long {
-            rows += bookmark
-            return bookmark.id
-        }
-        override suspend fun update(bookmark: BookmarkEntity) = Unit
-        override suspend fun deleteById(id: Long) {
-            rows.removeAll { it.id == id }
-        }
-        override suspend fun deleteByBookIds(bookIds: List<Long>) {
-            rows.removeAll { it.bookId in bookIds }
-        }
-    }
-
-    private class FakeAnnotationDao : AnnotationDao {
-        val rows = mutableListOf<AnnotationEntity>()
-        override fun observeByBook(bookId: Long): Flow<List<AnnotationEntity>> = flowOf(rows.filter { it.bookId == bookId })
-        override fun observeAll(): Flow<List<AnnotationEntity>> = flowOf(rows)
-        override suspend fun insert(annotation: AnnotationEntity): Long {
-            rows += annotation
-            return annotation.id
-        }
-        override suspend fun update(annotation: AnnotationEntity) = Unit
-        override suspend fun deleteById(id: Long) {
-            rows.removeAll { it.id == id }
-        }
-        override suspend fun deleteByBookIds(bookIds: List<Long>) {
-            rows.removeAll { it.bookId in bookIds }
-        }
-        override suspend fun deleteByBookAndNotePrefix(bookId: Long, notePrefix: String) {
-            rows.removeAll { it.bookId == bookId && it.note.orEmpty().startsWith(notePrefix) }
-        }
-    }
-
     private class RecordingPageDiskCache : com.llzx373.foldreader.core.reader.PageDiskCache {
         val deletedBooks = mutableListOf<Long>()
 
@@ -364,15 +278,5 @@ class BookshelfRepositoryDeleteTest {
         override fun deleteForBook(bookId: Long) {
             deletedBooks += bookId
         }
-    }
-
-    private class FakeSessionDao : ReadingSessionDao {
-        override suspend fun get(bookId: Long, dayStartMs: Long): ReadingSessionEntity? = null
-        override suspend fun upsert(session: ReadingSessionEntity) = Unit
-        override suspend fun getBetween(startMs: Long, endMs: Long): List<ReadingSessionEntity> = emptyList()
-        override suspend fun getAll(): List<ReadingSessionEntity> = emptyList()
-
-        override suspend fun dayStartsWithReading(): List<Long> = emptyList()
-        override suspend fun countReadingDays(bookId: Long): Int = 0
     }
 }
