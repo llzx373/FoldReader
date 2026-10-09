@@ -121,6 +121,10 @@ class BackupCodec(
                         .put("totalReadingMillis", it.totalReadingMillis)
                         .put("firstReadAt", it.firstReadAt)
                         .put("updatedAt", it.updatedAt)
+                        // v12 起：页式锚点 / 译文锚点 / 累计已读字符（可空锚点显式写 null）
+                        .put("comicPage", it.comicPage ?: JSONObject.NULL)
+                        .put("translationAnchor", it.translationAnchor ?: JSONObject.NULL)
+                        .put("charsReadTotal", it.charsReadTotal)
                 } ?: JSONObject.NULL,
             )
 
@@ -385,14 +389,29 @@ class BackupCodec(
             bookJson.optJSONObject("progress")?.let { p ->
                 val existing = bookshelfRepository.getProgress(local.id)
                 if (existing == null || p.optLong("updatedAt") >= existing.updatedAt) {
+                    // 合并而不是整行 REPLACE：缺失字段（v11 及更早的备份没有页式/译文锚点与
+                    // 累计已读字符）一律保留现值——正是 keepPagedAnchor/keepTextAnchor 防的坑
+                    val base = existing ?: ReadingProgressEntity(
+                        bookId = local.id,
+                        charOffset = 0,
+                        chapterIndex = 0,
+                        totalReadingMillis = 0,
+                        updatedAt = 0,
+                    )
                     bookshelfRepository.saveProgress(
-                        ReadingProgressEntity(
-                            bookId = local.id,
-                            charOffset = p.optLong("charOffset"),
-                            chapterIndex = p.optInt("chapterIndex"),
-                            totalReadingMillis = p.optLong("totalReadingMillis"),
-                            firstReadAt = p.optLong("firstReadAt"),
-                            updatedAt = p.optLong("updatedAt"),
+                        base.copy(
+                            charOffset = if (p.has("charOffset")) p.optLong("charOffset") else base.charOffset,
+                            chapterIndex = if (p.has("chapterIndex")) p.optInt("chapterIndex") else base.chapterIndex,
+                            totalReadingMillis =
+                                if (p.has("totalReadingMillis")) p.optLong("totalReadingMillis") else base.totalReadingMillis,
+                            firstReadAt = if (p.has("firstReadAt")) p.optLong("firstReadAt") else base.firstReadAt,
+                            updatedAt = if (p.has("updatedAt")) p.optLong("updatedAt") else base.updatedAt,
+                            comicPage =
+                                if (p.has("comicPage")) p.optIntOrNull("comicPage") else base.comicPage,
+                            translationAnchor =
+                                if (p.has("translationAnchor")) p.optLongOrNull("translationAnchor") else base.translationAnchor,
+                            charsReadTotal =
+                                if (p.has("charsReadTotal")) p.optLong("charsReadTotal") else base.charsReadTotal,
                         ),
                     )
                 }
@@ -912,6 +931,9 @@ class BackupCodec(
     /** 可空数值列（页内坐标）：键缺失或显式 null 都还原成 null，老备份天然兼容。 */
     private fun JSONObject.optLongOrNull(key: String): Long? =
         if (!has(key) || isNull(key)) null else optLong(key)
+
+    private fun JSONObject.optIntOrNull(key: String): Int? =
+        if (!has(key) || isNull(key)) null else optInt(key)
 
     private fun JSONObject.optFloatOrNull(key: String): Float? =
         if (!has(key) || isNull(key)) null else optDouble(key).toFloat()

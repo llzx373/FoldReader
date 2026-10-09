@@ -219,6 +219,151 @@ class BackupZipRoundTripTest {
     }
 
     @Test
+    fun `漫画页序与译文锚点随备份往返且恢复不覆盖本机更新值`() = runBlocking {
+        val bookFile = File(tempDir, "hashC.cbz").apply { writeBytes(byteArrayOf(9, 9, 9)) }
+        val sourceBooks = FakeBookshelfRepository(
+            mutableListOf(
+                BookEntity(
+                    id = 1,
+                    title = "测试漫画",
+                    author = null,
+                    fileUri = "file://${bookFile.absolutePath}",
+                    contentHash = "hashC",
+                    format = BookFormat.COMIC,
+                    totalChars = 0,
+                    encoding = "UTF-8",
+                    importedAt = 100,
+                    lastReadAt = null,
+                    comicPageCount = 120,
+                ),
+            ),
+        )
+        sourceBooks.progress += ReadingProgressEntity(
+            bookId = 1,
+            charOffset = 0,
+            chapterIndex = 0,
+            totalReadingMillis = 5000,
+            firstReadAt = 10,
+            updatedAt = 100,
+            comicPage = 37,
+            translationAnchor = 1234,
+            charsReadTotal = 8888,
+        )
+
+        val zipFile = File(tempDir, "backup-comic.zip")
+        managerOf(sourceBooks).exportTo(Uri.fromFile(zipFile))
+
+        // 目标机：同一本书（按 contentHash 匹配），本机进度更旧且没有页式/译文锚点
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                BookEntity(
+                    id = 7,
+                    title = "测试漫画",
+                    author = null,
+                    fileUri = "file://${bookFile.absolutePath}",
+                    contentHash = "hashC",
+                    format = BookFormat.COMIC,
+                    totalChars = 0,
+                    encoding = "UTF-8",
+                    importedAt = 90,
+                    lastReadAt = null,
+                    comicPageCount = 120,
+                ),
+            ),
+        )
+        targetBooks.progress += ReadingProgressEntity(
+            bookId = 7,
+            charOffset = 0,
+            chapterIndex = 0,
+            totalReadingMillis = 1000,
+            firstReadAt = 5,
+            updatedAt = 50, // 比备份旧 → 备份生效
+        )
+        val targetManager = managerOf(targetBooks)
+        targetManager.importFrom(Uri.fromFile(zipFile))
+
+        val restored = targetBooks.progress.single { it.bookId == 7L }
+        assertEquals(37, restored.comicPage)
+        assertEquals(1234L, restored.translationAnchor)
+        assertEquals(8888L, restored.charsReadTotal)
+        assertEquals(5000L, restored.totalReadingMillis)
+
+        // 本机进度更新（updatedAt 更大）后再恢复同一备份：一概不覆盖
+        targetBooks.progress.removeAll { it.bookId == 7L }
+        targetBooks.progress += restored.copy(updatedAt = 1000, comicPage = 5, charsReadTotal = 99999)
+        targetManager.importFrom(Uri.fromFile(zipFile))
+
+        val kept = targetBooks.progress.single { it.bookId == 7L }
+        assertEquals(5, kept.comicPage)
+        assertEquals(99999L, kept.charsReadTotal)
+        assertEquals(1000L, kept.updatedAt)
+    }
+
+    @Test
+    fun `v11 旧备份缺锚点字段时保留本机现值`() = runBlocking {
+        // v11 及更早的 progress 只有 5 个字段：缺的锚点/累计字符必须保留本机现值
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 11,
+              "books": [
+                {
+                  "title": "测试漫画",
+                  "contentHash": "hashC",
+                  "format": "COMIC",
+                  "progress": {
+                    "charOffset": 10,
+                    "chapterIndex": 1,
+                    "totalReadingMillis": 3000,
+                    "firstReadAt": 8,
+                    "updatedAt": 500
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+        val jsonFile = File(tempDir, "legacy-v11.json").apply { writeText(legacy) }
+
+        val targetBooks = FakeBookshelfRepository(
+            mutableListOf(
+                BookEntity(
+                    id = 7,
+                    title = "测试漫画",
+                    author = null,
+                    fileUri = "file:///x/hashC.cbz",
+                    contentHash = "hashC",
+                    format = BookFormat.COMIC,
+                    totalChars = 0,
+                    encoding = "UTF-8",
+                    importedAt = 90,
+                    lastReadAt = null,
+                ),
+            ),
+        )
+        targetBooks.progress += ReadingProgressEntity(
+            bookId = 7,
+            charOffset = 0,
+            chapterIndex = 0,
+            totalReadingMillis = 1000,
+            firstReadAt = 5,
+            updatedAt = 400,
+            comicPage = 37,
+            translationAnchor = 99,
+            charsReadTotal = 777,
+        )
+        managerOf(targetBooks).importFrom(Uri.fromFile(jsonFile))
+
+        val merged = targetBooks.progress.single { it.bookId == 7L }
+        // 备份里有的字段按备份恢复
+        assertEquals(10L, merged.charOffset)
+        assertEquals(500L, merged.updatedAt)
+        // 备份里缺的字段保留本机现值（旧版行为会把它们清成 null/0）
+        assertEquals(37, merged.comicPage)
+        assertEquals(99L, merged.translationAnchor)
+        assertEquals(777L, merged.charsReadTotal)
+    }
+
+    @Test
     fun `zip 预览只读 manifest`() = runBlocking {
         val bookFile = File(tempDir, "hashA.txt").apply { writeText("正文内容") }
         val sourceBooks = FakeBookshelfRepository(

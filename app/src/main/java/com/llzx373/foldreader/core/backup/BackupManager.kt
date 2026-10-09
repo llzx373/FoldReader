@@ -209,6 +209,9 @@ class BackupManager(
 
     companion object {
         /**
+         * v12：阅读进度新增 `comicPage` / `translationAnchor` / `charsReadTotal`（页式锚点、
+         * 译文锚点、累计已读字符），导入侧改为按字段合并——旧备份缺的字段保留本机现值，
+         * 不再整行 REPLACE。
          * v11：备份容器从纯 JSON 改为 zip（backup.json + files/ 书文件本体 + covers/ 封面）；
          * 书记录新增 `archiveFile`/`archiveCover` 与漫画的 `comicContainer`/`comicPageCount`，
          * 导入侧对旧版纯 JSON 备份保持兼容。
@@ -221,7 +224,7 @@ class BackupManager(
          * v5：书签/标注增加页式锚点（页序号 + 归一化页内坐标），中间点击区动作入备份。
          * 导入侧对老版本仍然兼容——新字段缺失即按 null / 默认值处理。
          */
-        const val BACKUP_VERSION = 11
+        const val BACKUP_VERSION = 12
 
         /** 解析备份元信息供恢复前预览（M25）；不碰数据库，纯函数可测。 */
         fun preview(text: String): BackupPreview {
