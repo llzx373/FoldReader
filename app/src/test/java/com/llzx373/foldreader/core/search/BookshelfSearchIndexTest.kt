@@ -105,6 +105,26 @@ class BookshelfSearchIndexTest {
     }
 
     @Test
+    fun `同签名下显式删除后不再新鲜——重洗换副本的场景`() {
+        val index = BookshelfSearchIndex(tmp.newFolder())
+        // 重洗前已有副本：签名是「哈希:copy」
+        val before = book(1, cleanedFilePath = "/x/old.txt")
+        index.write(1L, index.signatureOf(before)!!, "旧内容")
+        assertTrue(index.isFresh(before))
+
+        // 重洗后副本换路径，但 contentHash 与「有无副本」都不变——签名 identical
+        val after = book(1, cleanedFilePath = "/x/new.txt")
+        assertEquals(index.signatureOf(before), index.signatureOf(after))
+        assertTrue("签名相同，isFresh 只能靠显式失效翻转为 false", index.isFresh(after))
+
+        index.deleteBook(1L)
+        assertFalse(index.isFresh(after))
+
+        // 不可索引的书恒为新鲜（没有「应有」文件可比对）
+        assertTrue(index.isFresh(book(2, format = BookFormat.COMIC)))
+    }
+
+    @Test
     fun `解码显式编码优先且剥掉 BOM`() {
         val gbk = "汉字编码".toByteArray(charset("GBK"))
         assertEquals("汉字编码", decodeIndexText(gbk, "GBK"))

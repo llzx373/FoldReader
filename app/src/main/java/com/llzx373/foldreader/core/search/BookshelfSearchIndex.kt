@@ -19,7 +19,9 @@ import kotlinx.coroutines.ensureActive
  *   （清洗副本/压平产物就是阅读器实际读的那一份；TXT 原文件按同一编码解码）；
  * - 只索引文本可解析的书：TXT/Markdown 原文件 + 有清洗副本/压平产物的格式；
  *   漫画与无文本层扫描件 PDF 没有正文可索引，跳过；
- * - 文件名带签名（内容哈希 + 是否有副本）：重洗/回填压平产物后旧索引自然成孤儿被清掉。
+ * - 文件名带签名（内容哈希 + 是否有副本）：签名变化（首次出副本/撤销副本）时旧索引
+ *   自然成孤儿被清掉；**同签名下内容被重写**（重洗换副本、同哈希重压平）签名不变，
+ *   必须由重写方显式 [deleteBook] 失效（RecleanBookUseCase / PDF 回填都做）。
  */
 class BookshelfSearchIndex(private val dir: File) {
 
@@ -32,6 +34,12 @@ class BookshelfSearchIndex(private val dir: File) {
         }
         val sig = (book.contentHash + ":" + source).hashCode().toUInt().toString(16)
         return "${book.id}.$sig.txt"
+    }
+
+    /** 已落盘的索引就是当前签名要求的那个文件（不重读内容比对，内容变更靠显式失效）。 */
+    fun isFresh(book: BookEntity): Boolean {
+        val fileName = signatureOf(book) ?: return true
+        return currentFile(book.id)?.name == fileName
     }
 
     /** 这本书当前已落盘的索引文件（不管签名新旧）；没有为 null。 */

@@ -28,7 +28,8 @@ import kotlinx.coroutines.withContext
  * 1. 读的是**原始源文件**（`book.fileUri`），不是上一版副本——否则就是「洗副本」，
  *    规则改进后再也回不到原文上重洗。
  * 2. 内容一换，所有按字符偏移存下来的东西都会漂移：偏移索引、页边界缓存必须**显式作废**，
- *    章节要重扫。进度与书签/标注的锚点会按比例错位，这一点必须让用户事先知道。
+ *    章节要重扫，书架全文索引也要失效（它的签名不含内容，重洗换副本后签名不变）。
+ *    进度与书签/标注的锚点会按比例错位，这一点必须让用户事先知道。
  *
  * 刻意**不改 `contentHash`**：它参与备份匹配（`BackupCodec`）与封面/压平缓存命名，
  * 是这本书的稳定身份；内容变了靠显式作废缓存来兜，比改身份安全。
@@ -40,6 +41,8 @@ class RecleanBookUseCase(
     private val offsetIndexStore: OffsetIndexStore,
     private val pageDiskCache: PageDiskCache,
     private val traditionalMap: () -> Map<Char, Char> = { emptyMap() },
+    /** 书架全文索引（M34）；重洗后显式失效。null = 测试或不索引的环境。 */
+    private val searchIndex: com.llzx373.foldreader.core.search.BookshelfSearchIndex? = null,
 ) {
 
     sealed interface Outcome {
@@ -122,11 +125,14 @@ class RecleanBookUseCase(
 
     /**
      * 内容变了，按字符偏移派生的缓存全部作废：
-     * 偏移索引（按 bookId）与该书的全部页边界文件（文件名含版式指纹，一本多份）。
+     * 偏移索引（按 bookId）、该书的全部页边界文件（文件名含版式指纹，一本多份），
+     * 以及书架全文索引——它的文件名签名是「内容哈希 + 有无副本」，重洗换副本后签名不变，
+     * 不显式删掉的话后台同步会误判新鲜，全文搜索继续读旧内容。
      */
     private suspend fun invalidateCaches(bookId: Long) {
         offsetIndexStore.invalidate(bookId.toString())
         pageDiskCache.deleteForBook(bookId)
+        searchIndex?.deleteBook(bookId)
     }
 
     /** 旧副本只在没有别的书还引用它时才删——同一份清洗产物理论上可能被两本书共享。 */

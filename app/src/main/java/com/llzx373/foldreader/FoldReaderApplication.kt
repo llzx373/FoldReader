@@ -1069,6 +1069,8 @@ class AppContainer(context: Context) {
             cleanedFilePath = charCount?.let { convertedDir.resolve("${book.contentHash}.txt").absolutePath },
             totalChars = charCount ?: 0,
         )
+        // 同哈希重压平会覆盖同一份产物，索引签名不变——必须显式失效，否则全文搜索读旧内容
+        bookshelfSearchIndex.deleteBook(book.id)
     }
 
     private suspend fun applyPdfInfo(
@@ -1155,6 +1157,8 @@ class AppContainer(context: Context) {
         offsetIndexStore = offsetIndexStore,
         pageDiskCache = pageDiskCache,
         traditionalMap = { TsCharMap.load(appContext) },
+        // 重洗换副本但索引签名（内容哈希 + 有无副本）不变，必须显式失效，否则全文搜索读旧内容
+        searchIndex = bookshelfSearchIndex,
     )
     val batchImportUseCase = com.llzx373.foldreader.feature.importer.BatchImportUseCase(
         context = context,
@@ -1238,7 +1242,7 @@ class AppContainer(context: Context) {
         for (book in books) {
             val fileName = bookshelfSearchIndex.signatureOf(book) ?: continue
             wanted += fileName
-            if (bookshelfSearchIndex.currentFile(book.id)?.name == fileName) continue
+            if (bookshelfSearchIndex.isFresh(book)) continue
             val text = runCatching { readIndexText(book) }.getOrNull() ?: continue
             bookshelfSearchIndex.write(book.id, fileName, text)
         }

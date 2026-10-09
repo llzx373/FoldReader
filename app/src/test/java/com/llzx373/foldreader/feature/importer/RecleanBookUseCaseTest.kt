@@ -99,13 +99,17 @@ class RecleanBookUseCaseTest {
             return file.absolutePath
         }
 
-        fun useCase(tsMap: Map<Char, Char> = emptyMap()) = RecleanBookUseCase(
+        fun useCase(
+            tsMap: Map<Char, Char> = emptyMap(),
+            searchIndex: com.llzx373.foldreader.core.search.BookshelfSearchIndex? = null,
+        ) = RecleanBookUseCase(
             bookshelfRepository = repo,
             cleanedDir = cleanedDir,
             openChannel = { key -> RandomAccessFile(File(key), "r").channel },
             offsetIndexStore = indexStore,
             pageDiskCache = pageCache,
             traditionalMap = { tsMap },
+            searchIndex = searchIndex,
         )
 
         fun addBook(
@@ -164,6 +168,33 @@ class RecleanBookUseCaseTest {
         assertEquals(listOf(bookId), f.pageCache.deletedForBook)
         // 旧副本成孤儿，删掉
         assertFalse(stale.exists())
+    }
+
+    @Test
+    fun `重洗换副本后书架全文索引被显式失效——签名不变也必须重建`() = runBlocking {
+        val f = Fixture()
+        val searchIndex = com.llzx373.foldreader.core.search.BookshelfSearchIndex(File(f.dir, "search_index"))
+        val uriKey = f.source("书.txt", "第一章 开篇\n\n广告：本章完\n身体第二行\n")
+        val stale = File(f.cleanedDir, "stale.txt").apply { writeText("旧副本", Charsets.UTF_8) }
+        val bookId = f.addBook(uriKey, cleanedFilePath = stale.absolutePath)
+        val before = f.repo.getBook(bookId)!!
+        // 重洗前的旧索引：签名是「哈希:copy」，重洗后 contentHash 不变、副本仍在——签名 identical
+        searchIndex.write(bookId, searchIndex.signatureOf(before)!!, "旧内容")
+        assertTrue(searchIndex.isFresh(before))
+
+        val outcome = f.useCase(searchIndex = searchIndex).reclean(
+            bookId,
+            CleanProfile(
+                level = CleanLevel.STANDARD,
+                toggles = CleanProfile(level = CleanLevel.STANDARD).toggles,
+                adPatterns = listOf(Regex("广告")),
+            ),
+        )
+
+        assertTrue((outcome as RecleanBookUseCase.Outcome.Done).changed)
+        val after = f.repo.getBook(bookId)!!
+        assertEquals("签名没变，全靠显式失效", searchIndex.signatureOf(before), searchIndex.signatureOf(after))
+        assertFalse("重洗后旧索引必须被删掉，后台同步才会重建", searchIndex.isFresh(after))
     }
 
     @Test
