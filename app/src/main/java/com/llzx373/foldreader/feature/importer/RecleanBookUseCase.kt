@@ -2,7 +2,6 @@ package com.llzx373.foldreader.feature.importer
 
 import com.llzx373.foldreader.core.data.db.BookFormat
 import com.llzx373.foldreader.core.data.repository.BookshelfRepository
-import com.llzx373.foldreader.core.format.ContentHasher
 import com.llzx373.foldreader.core.format.EncodingDetection
 import com.llzx373.foldreader.core.format.EncodingDetector
 import com.llzx373.foldreader.core.format.OffsetIndexStore
@@ -13,9 +12,9 @@ import com.llzx373.foldreader.core.format.txt.UriChannels
 import com.llzx373.foldreader.core.reader.PageDiskCache
 import java.io.File
 import java.io.FilterInputStream
-import java.io.RandomAccessFile
 import java.nio.channels.Channels
 import java.nio.channels.SeekableByteChannel
+import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -181,13 +180,21 @@ class RecleanBookUseCase(
         }
     }
 
-    private fun hashOf(file: File): String =
-        RandomAccessFile(file, "r").use { raf ->
-            ContentHasher.hash(raf.length()) { offset, length ->
-                raf.seek(offset)
-                val buffer = ByteArray(length)
-                raf.readFully(buffer)
-                buffer
+    /**
+     * 改动检测用**全量** SHA-256：ContentHasher 的 3×8KB 采样是身份哈希（导入去重/备份匹配），
+     * 拿它做「有无改动」判定会漏掉采样窗口之外的等长定点修改（AI 校对就是这种），
+     * 误判 no-op 让修正静默不生效。本地文件流式全量读一遍的成本可接受。
+     */
+    private fun hashOf(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
             }
         }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 }

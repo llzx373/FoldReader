@@ -246,6 +246,53 @@ class RecleanBookUseCaseTest {
     }
 
     @Test
+    fun `采样窗口之外的等长改动也必须检出 changed`() = runBlocking {
+        val f = Fixture()
+        // 大书：采样哈希只覆盖头/中/尾三个 8KB 窗口，改动放在 1/4 处（窗口之间）
+        val filler = "这是一行普通的正文内容，用来填充篇幅，保持与采样窗口错开。\n".repeat(600)
+        val uriKey = f.source("书.txt", filler + "广告：本章完\n" + filler)
+        val bookId = f.addBook(uriKey)
+        val useCase = f.useCase()
+        val profile = CleanProfile(
+            level = CleanLevel.STANDARD,
+            toggles = CleanProfile(level = CleanLevel.STANDARD).toggles,
+            adPatterns = listOf(Regex("广告")),
+        )
+
+        val first = useCase.reclean(bookId, profile)
+        assertTrue((first as RecleanBookUseCase.Outcome.Done).changed)
+        val copy = File(f.repo.getBook(bookId)!!.cleanedFilePath!!)
+
+        // 伪造「上一版副本」：与真实副本只差 1/4 处一个字节——采样哈希完全看不见这处改动
+        val tamperedBytes = copy.readBytes()
+        tamperedBytes[tamperedBytes.size / 4] = tamperedBytes[tamperedBytes.size / 4].plus(1).toByte()
+        val tampered = File(f.cleanedDir, "tampered.txt").apply { writeBytes(tamperedBytes) }
+        assertEquals(
+            "前置条件：采样哈希确实看不见这处改动",
+            sampledHash(copy), sampledHash(tampered),
+        )
+        f.repo.updateConvertedFile(bookId, tampered.absolutePath, 0)
+
+        val second = useCase.reclean(bookId, profile)
+
+        assertTrue(
+            "等长定点改动（采样窗口之外）必须检出 changed=true",
+            (second as RecleanBookUseCase.Outcome.Done).changed,
+        )
+    }
+
+    /** 与旧实现同口径的 3×8KB 采样哈希，用来证明「这处改动采样看不见」。 */
+    private fun sampledHash(file: File): String =
+        RandomAccessFile(file, "r").use { raf ->
+            com.llzx373.foldreader.core.format.ContentHasher.hash(raf.length()) { offset, length ->
+                raf.seek(offset)
+                val buffer = ByteArray(length)
+                raf.readFully(buffer)
+                buffer
+            }
+        }
+
+    @Test
     fun `不清理等价于撤销清理并恢复原始编码`() = runBlocking {
         val f = Fixture()
         // 原文用 GBK：撤销清理必须把编码恢复成 GBK，否则原文件会被按 UTF-8 解码成乱码
