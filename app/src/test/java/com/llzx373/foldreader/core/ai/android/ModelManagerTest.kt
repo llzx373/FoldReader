@@ -1,5 +1,6 @@
 package com.llzx373.foldreader.core.ai.android
 
+import com.llzx373.foldreader.BuildConfig
 import com.llzx373.foldreader.core.ocr.ModelCatalog
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -177,11 +178,20 @@ class ModelManagerTest {
     }
 
     @Test
-    fun `lite 变体 seedBundledModels 恒为空转`() = runTest {
-        // 单测跑在 lite 变体下，BuildConfig.BUNDLED_MODELS = false：
-        // 铺底必须零成本返回 0 且不写标记文件
-        assertEquals(0, manager.seedBundledModels())
-        assertFalse(File(File(context.filesDir, "models"), ModelManager.BUNDLED_SEED_MARKER).exists())
+    fun `seedBundledModels 按变体铺底或空转`() = runTest {
+        val marker = File(File(context.filesDir, "models"), ModelManager.BUNDLED_SEED_MARKER)
+        if (!BuildConfig.BUNDLED_MODELS) {
+            // lite 变体：铺底必须零成本返回 0 且不写标记文件
+            assertEquals(0, manager.seedBundledModels())
+            assertFalse(marker.exists())
+        } else {
+            // full 变体：assets 内置 5 个钉版官方模型（inpaint 未钉版不铺），
+            // 首次铺底全量落位并写标记；铺过后再调用是零成本空转
+            val expectSeeded = ModelCatalog.ALL.count { it.sha256 != null }
+            assertEquals(expectSeeded, manager.seedBundledModels())
+            assertTrue(marker.exists())
+            assertEquals(0, manager.seedBundledModels())
+        }
     }
 
     // ---- M31：inpaint 槽位（暂不钉官方版）----
