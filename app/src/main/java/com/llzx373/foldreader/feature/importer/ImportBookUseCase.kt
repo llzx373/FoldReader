@@ -39,6 +39,12 @@ class ImportBookUseCase(
     private val sourceDir: File,
     private val openChannel: (String) -> SeekableByteChannel,
     private val displayNameOf: (String) -> String?,
+    /**
+     * 按 uriKey 取系统报告的 MIME。与书架「格式预判」（importNonTxtDirectly）同源
+     * （contentResolver.getType），避免预判靠 MIME 认出格式、正式导入却传 null 走纯
+     * 扩展名/魔数判定，两条路径口径不一。默认 null（JVM 单测无 ContentResolver）。
+     */
+    private val mimeTypeOf: (String) -> String? = { null },
     private val traditionalMap: () -> Map<Char, Char>,
     /** 非 TXT 格式（EPUB/FB2…）的解析器：导入时仅用于 parseMeta 取元数据。 */
     private val convertedParsers: Map<BookFormat, BookParser> = emptyMap(),
@@ -70,6 +76,9 @@ class ImportBookUseCase(
         sourceDir = File(context.filesDir, "source"),
         openChannel = { key -> UriChannels.open(context, Uri.parse(key)) },
         displayNameOf = { key -> UriChannels.displayName(context, Uri.parse(key)) },
+        mimeTypeOf = { key ->
+            runCatching { context.contentResolver.getType(Uri.parse(key)) }.getOrNull()
+        },
         traditionalMap = { TsCharMap.load(context) },
         convertedParsers = convertedParsers,
         comicImport = comicImport,
@@ -159,7 +168,7 @@ class ImportBookUseCase(
         openChannel(uriKey).use { channel ->
             val displayName = displayNameOf(uriKey)
             val head = UriChannels.readHead(channel, EncodingDetector.SAMPLE_SIZE)
-            val format = FormatDetector.detect(displayName, mimeType = null, head = head)
+            val format = FormatDetector.detect(displayName, mimeType = mimeTypeOf(uriKey), head = head)
             if (format == BookFormat.PDF && pdfImport != null) {
                 // PDF 走独立登记路径（复制源文件 + 写库）：页数/元数据/封面留给打开时回填与后台预热
                 return pdfImport.register(Uri.parse(uriKey), source).toImportResult()
