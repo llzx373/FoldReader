@@ -38,8 +38,9 @@ object BubbleAdjust {
 
     /** 移动：整框平移 (dx, dy)，夹取在页内（贴边即停，不出页）。 */
     fun move(rect: OcrRect, dx: Float, dy: Float): OcrRect {
-        val w = rect.width
-        val h = rect.height
+        // 超界宽高（损坏的 .adjust.json）先钳回页内：否则 1f - w < 0，coerceIn 直接抛
+        val w = rect.width.coerceAtMost(1f)
+        val h = rect.height.coerceAtMost(1f)
         val left = (rect.left + dx).coerceIn(0f, 1f - w)
         val top = (rect.top + dy).coerceIn(0f, 1f - h)
         return OcrRect(left, top, left + w, top + h)
@@ -47,9 +48,12 @@ object BubbleAdjust {
 
     /** 缩放（拖右下角）：右下角移到 (newRight, newBottom)，夹最小边长与页界。 */
     fun resize(rect: OcrRect, newRight: Float, newBottom: Float): OcrRect {
-        val right = newRight.coerceIn(rect.left + MIN_SIZE, 1f)
-        val bottom = newBottom.coerceIn(rect.top + MIN_SIZE, 1f)
-        return OcrRect(rect.left, rect.top, right, bottom)
+        // 左上角本身超界时 left+MIN_SIZE 会越过 1f，下限先钳住，coerceIn 才不构成空区间
+        val minRight = (rect.left + MIN_SIZE).coerceAtMost(1f)
+        val minBottom = (rect.top + MIN_SIZE).coerceAtMost(1f)
+        val right = newRight.coerceIn(minRight, 1f)
+        val bottom = newBottom.coerceIn(minBottom, 1f)
+        return OcrRect(rect.left.coerceIn(0f, 1f), rect.top.coerceIn(0f, 1f), right, bottom)
     }
 
     /** 套用微调：有序号覆盖的换矩形，其余原样。 */

@@ -51,6 +51,19 @@ class BubbleAdjustTest {
     }
 
     @Test
+    fun `超界宽高先钳制不再抛空区间异常`() {
+        // 宽超过整页（损坏的 .adjust.json）：钳回页内贴边，而不是 coerceIn(0, 负数) 崩掉
+        val wide = BubbleAdjust.move(OcrRect(-0.5f, 0.1f, 1.5f, 0.4f), 0.3f, 0f)
+        assertEquals(0f, wide.left, 1e-6f)
+        assertEquals(1f, wide.right, 1e-6f)
+        // 左上角本身贴底：left+MIN_SIZE 越过 1f 时下限钳住，缩放照常可用
+        val edge = BubbleAdjust.resize(OcrRect(0.99f, 0.99f, 1.2f, 1.2f), 0.5f, 0.5f)
+        assertTrue(edge.right >= edge.left)
+        assertTrue(edge.bottom >= edge.top)
+        assertTrue(edge.right <= 1f && edge.bottom <= 1f)
+    }
+
+    @Test
     fun `套用只换有序号覆盖的矩形`() {
         val bubbles = listOf(
             bubble(0, 0.1f, 0.1f, 0.2f, 0.2f),
