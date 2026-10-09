@@ -248,7 +248,7 @@ class ReaderViewModel(
     private var charsReadBase = 0L
     private val charsReadTracker = CharsReadTracker()
     private var lastSessionFlushTotalMs = 0L
-    private var paginatorLeft: Paginator? = null
+    @Volatile private var paginatorLeft: Paginator? = null
     /** 播种（临时起点）分页器激活期间，后台追赶用的精确分页器。 */
     private var exactPaginator: Paginator? = null
     private var boundsJob: kotlinx.coroutines.Job? = null
