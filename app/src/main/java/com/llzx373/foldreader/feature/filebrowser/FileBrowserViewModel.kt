@@ -136,9 +136,13 @@ class FileBrowserViewModel(
         }
     }
 
+    private var refreshJob: kotlinx.coroutines.Job? = null
+
     fun refresh() {
         val dir = _path.value.lastOrNull() ?: return
-        viewModelScope.launch {
+        // 连续进入目录/刷新时在途列表可能后到先写，取消旧 job 保证只落最新一次的结果
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             _loading.value = true
             _entries.value = withContext(Dispatchers.IO) {
                 listEntries(Uri.parse(dir.treeUri), dir.documentId)
@@ -158,8 +162,9 @@ class FileBrowserViewModel(
      */
     fun openFile(entry: BrowserEntry) {
         if (entry.isDirectory || _openingFile.value) return
+        // 防重入标志必须在 launch 前置位：连点两次时两个协程都会先读到 false
+        _openingFile.value = true
         viewModelScope.launch {
-            _openingFile.value = true
             _openingProgress.value = -1f
             // 树授权已覆盖子文档，这里尽力再取一次持久化权限，失败不影响后续读取
             runCatching {
@@ -196,8 +201,8 @@ class FileBrowserViewModel(
      */
     fun openAsComic(entry: BrowserEntry) {
         if (_openingFile.value) return
+        _openingFile.value = true
         viewModelScope.launch {
-            _openingFile.value = true
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     entry.uri,
