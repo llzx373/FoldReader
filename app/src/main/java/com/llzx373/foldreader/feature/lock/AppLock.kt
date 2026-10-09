@@ -47,33 +47,25 @@ object AppLock {
     /**
      * 弹系统验证框。BIOMETRIC_WEAK or DEVICE_CREDENTIAL 组合自带「使用密码」回退，
      * 不能再调 setNegativeButtonText（Android 10+ 会抛 IllegalArgumentException）。
+     *
+     * [onFinished] 在成功与**任何**错误/取消路径都会调到——调用方用它复位
+     * 「正在弹验证」门闩（用户取消不走 [onFailed]，没有它按钮会永久失效）。
      */
     fun prompt(
         activity: FragmentActivity,
         onSuccess: () -> Unit,
         onFailed: (String) -> Unit = {},
+        onFinished: () -> Unit = {},
     ) {
         if (!canAuthenticate(activity)) {
             onFailed("设备未设置锁屏密码或生物识别")
+            onFinished()
             return
         }
         val prompt = BiometricPrompt(
             activity,
             ContextCompat.getMainExecutor(activity),
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    onSuccess()
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    // 用户主动取消（含负按钮/手势返回）不算失败，安静收掉即可
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                    ) {
-                        onFailed(errString.toString())
-                    }
-                }
-            },
+            AuthCallback(onSuccess, onFailed, onFinished),
         )
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
@@ -81,6 +73,30 @@ object AppLock {
                 .setAllowedAuthenticators(AUTHENTICATORS)
                 .build(),
         )
+    }
+
+    /**
+     * 验证结果分发：成功与**任何**错误/取消路径都调 [onFinished]。
+     * 用户主动取消（含负按钮/手势返回）不算失败，不调 [onFailed] 安静收掉。
+     */
+    internal class AuthCallback(
+        private val onSuccess: () -> Unit,
+        private val onFailed: (String) -> Unit,
+        private val onFinished: () -> Unit,
+    ) : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+            onSuccess()
+            onFinished()
+        }
+
+        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+            if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
+            ) {
+                onFailed(errString.toString())
+            }
+            onFinished()
+        }
     }
 }
 
@@ -110,6 +126,8 @@ fun AppLockGate(enabled: Boolean, content: @Composable () -> Unit) {
                 activity,
                 onSuccess = { AppLock.unlocked = true },
                 onFailed = { prompting = false },
+                // 用户取消（返回键/负按钮）不走 onFailed，门闩必须在这里复位
+                onFinished = { prompting = false },
             )
         }
     }

@@ -894,6 +894,10 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                             "设备未设置锁屏密码或生物识别，无法开启应用锁",
                             Toast.LENGTH_LONG,
                         ).show()
+                    // 设备验证手段被移除后弹不出系统验证；此时 AppLockGate 本就放行，
+                    // 关闭开关无安全损失，直接放行关闭（否则开关关不掉）
+                    !enabled && !AppLock.canAuthenticate(activity) ->
+                        viewModel.updateAppLockEnabled(false)
                     else -> AppLock.prompt(
                         activity,
                         onSuccess = {
