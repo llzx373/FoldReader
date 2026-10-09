@@ -431,6 +431,9 @@ private class ChapterRepairSink(
     private var started = false
     private val leadingTitles = ArrayList<String>()
     private var leadingBlanks = 0
+
+    /** 切割点确立之后（保留区）的空行：不随目录块删除、不计入删除数。 */
+    private var blanksAfterCut = 0
     private var tocHeaderSeen = false
 
     /** `leadingTitles[0, tocCut)` 是目录块；-1 表示没识别出目录。 */
@@ -453,16 +456,19 @@ private class ChapterRepairSink(
         if (!started) {
             // 全书只有标题（空章）也要吐出来，不能因为「攒不够目录块」把整本丢掉
             started = true
-            for (i in firstKeptIndex() until leadingTitles.size) emit(leadingTitles[i])
+            val from = firstKeptIndex()
+            for (i in from until leadingTitles.size) emit(leadingTitles[i])
             leadingTitles.clear()
+            emitKeptBlanks(from)
         }
         next.flush()
     }
 
     private fun handleLeading(line: String) {
         if (line.isBlank()) {
-            // 空行的去留已经由上游（空行规整）定过了，这里只暂存，识别出目录块时才连它一起删
-            leadingBlanks++
+            // 空行的去留已经由上游（空行规整）定过了，这里只暂存：
+            // 切割点之前的随目录块一起删，之后的（保留区）在识别出目录块时原样吐回
+            if (tocCut >= 0) blanksAfterCut++ else leadingBlanks++
             return
         }
         if (repair && ChapterRepairRules.isTocHeader(line)) {
@@ -495,12 +501,16 @@ private class ChapterRepairSink(
         for (i in from until leadingTitles.size) emit(leadingTitles[i])
         leadingTitles.clear()
         tocHeaderSeen = false
-        if (from == 0) {
-            // 不是目录块：标题与正文之间原本的空行要原样还回去
-            repeat(leadingBlanks) { next.accept("") }
-        }
-        leadingBlanks = 0
+        emitKeptBlanks(from)
         emit(line)
+    }
+
+    /** 保留区（目录块切割点之后 / 非目录块全部）的空行原样还回下游。 */
+    private fun emitKeptBlanks(from: Int) {
+        val kept = if (from > 0) blanksAfterCut else leadingBlanks
+        repeat(kept) { next.accept("") }
+        leadingBlanks = 0
+        blanksAfterCut = 0
     }
 
     private fun firstKeptIndex(): Int = if (tocCut >= 0) tocCut else 0

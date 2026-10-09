@@ -126,6 +126,23 @@ class NovelCleanerTest {
      * 谁要是不小心把顺序搞反（历史上就是这么错的），这里会立刻红。
      */
     @Test
+    fun `目录块删除时保留区的空行原样保留`() {
+        // 目录块=三个标题串+重复标题（切割点）；切割点之后的空行属于正文侧，不能随块删除
+        val text = buildString {
+            appendLine("目录")
+            appendLine("第一章 甲")
+            appendLine("第二章 乙")
+            appendLine("第三章 丙")
+            appendLine()
+            appendLine("第一章 甲")
+            appendLine()
+            appendLine("正文第一句。")
+        }
+        val cleaned = NovelCleaner.clean(text, standard)
+        assertEquals("第一章 甲\n\n正文第一句。\n", cleaned)
+    }
+
+    @Test
     fun `各阶段的先后关系同时生效`() {
         val text = "　　他站在原地，久久没有动。第一章 风起\n他睁开眼睛。\n"
 
