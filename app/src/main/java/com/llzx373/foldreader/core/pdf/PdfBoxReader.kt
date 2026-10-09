@@ -250,6 +250,9 @@ object PdfBoxReader {
         // 既想宽度够用，又不能让海报级页面渲染出上百 MB 的位图
         val scale = min(COVER_TARGET_WIDTH / widthPt, sqrt(COVER_MAX_PIXELS / (widthPt * heightPt)))
             .coerceAtLeast(COVER_MIN_SCALE)
+        // 下限缩放可能击穿像素上限（超大页面按 COVER_MIN_SCALE 渲仍超帽）：回退占位封面
+        val pixels = widthPt.toDouble() * scale * heightPt.toDouble() * scale
+        if (pixels > COVER_MAX_PIXELS) return null
         val bitmap = runCatching { PDFRenderer(document).renderImage(0, scale) }.getOrNull()
             ?: return null
         return ComicCoverWriter.encode(bitmap)
