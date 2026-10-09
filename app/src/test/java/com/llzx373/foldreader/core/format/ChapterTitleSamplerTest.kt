@@ -77,4 +77,10 @@ class ChapterTitleSamplerTest {
         assertEquals(emptyList<String>(), ChapterTitleSampler.sample(""))
         assertEquals(emptyList<String>(), ChapterTitleSampler.sample("第一章 甲", maxLines = 0))
     }
+
+    @Test
+    fun `上限为 1 时取首行且不做除零`() {
+        val text = (1..50).joinToString("\n") { "第${it}章 标题$it" }
+        assertEquals(listOf("第1章 标题1"), ChapterTitleSampler.sample(text, maxLines = 1))
+    }
 }

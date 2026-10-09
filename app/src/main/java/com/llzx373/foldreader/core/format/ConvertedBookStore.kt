@@ -147,8 +147,20 @@ internal class ConvertedBookStore(private val convertedDir: File) {
     /** 内嵌图片目录：`<hash>.images/`。 */
     fun imagesDir(hash: String): File = File(convertedDir, "$hash.images")
 
-    /** zip 内路径打平为图片文件名（`a/b/c.png` → `a_b_c.png`）。 */
-    fun imageFileName(zipPath: String): String = zipPath.replace('/', '_')
+    /**
+     * zip 内路径打平为图片文件名（`a/b/c.png` → `a_b_c.png`）。
+     * 打平可能撞名（`a/b_c.png` 与 `a_b/c.png` 打平后相同）：附原路径 8 位短散列兜底。
+     */
+    fun imageFileName(zipPath: String): String {
+        val flat = zipPath.replace('/', '_')
+        val digest = java.security.MessageDigest.getInstance("MD5")
+            .digest(zipPath.toByteArray(Charsets.UTF_8))
+        val short = digest.joinToString("") { "%02x".format(it) }.take(8)
+        val dot = flat.lastIndexOf('.')
+        val stem = if (dot > 0) flat.substring(0, dot) else flat
+        val ext = if (dot > 0) flat.substring(dot) else ""
+        return "$stem.$short$ext"
+    }
 
     fun imageFile(hash: String, zipPath: String): File = File(imagesDir(hash), imageFileName(zipPath))
 

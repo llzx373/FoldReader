@@ -28,4 +28,10 @@ class StringBookContentTest {
         assertEquals("", content.read(99L..120L))
         assertEquals("", content.read(5L..4L))
     }
+
+    @Test
+    fun `read 读到结尾的 Long MAX 区间不溢出`() = runBlocking {
+        assertEquals("第三段", content.read(8L..Long.MAX_VALUE))
+        assertEquals("第一段\n第二段\n第三段", content.read(0L..Long.MAX_VALUE))
+    }
 }

@@ -9,8 +9,10 @@ class StringBookContent(private val text: String) : BookContent {
     override val charCount: Long get() = text.length.toLong()
 
     override suspend fun read(range: LongRange): String {
-        val start = range.first.coerceIn(0L, text.length.toLong())
-        val endExclusive = (range.last + 1).coerceIn(start, text.length.toLong())
+        val length = text.length.toLong()
+        val start = range.first.coerceIn(0L, length)
+        // range.last 可能是 Long.MAX_VALUE（「读到结尾」惯用法），+1 前必须先钳，否则溢出成负
+        val endExclusive = (minOf(range.last, length - 1) + 1).coerceIn(start, length)
         return text.substring(start.toInt(), endExclusive.toInt())
     }
 }

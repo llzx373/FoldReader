@@ -36,9 +36,11 @@ object ChapterTitleSampler {
             .map { it.trim() }
             .filter { it.isNotEmpty() && it.length <= MAX_SAMPLE_LINE_LENGTH && looksLikeTitle(it) }
         if (candidates.size <= maxLines) return candidates
-        // 均匀抽取:首行与末行必含,中间等距取样
+        if (maxLines == 1) return candidates.take(1) // maxLines-1 做除数，单独防护
+        // 均匀抽取:首行与末行必含,中间等距取样（Long 乘法防大目录溢出）
         val last = candidates.size - 1
-        return (0 until maxLines).map { candidates[it * last / (maxLines - 1)] }.distinct()
+        return (0 until maxLines).map { candidates[(it.toLong() * last / (maxLines - 1)).toInt()] }
+            .distinct()
     }
 
     private fun looksLikeTitle(line: String): Boolean {

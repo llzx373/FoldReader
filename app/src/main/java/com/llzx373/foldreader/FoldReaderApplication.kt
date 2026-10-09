@@ -713,7 +713,8 @@ class AppContainer(context: Context) {
             try {
                 val extractor = com.llzx373.foldreader.core.format.person.PersonNameExtractor()
                 chapters.filter { it.charEnd > it.charStart }.forEach { chapter ->
-                    extractor.feed(content.read(chapter.charStart..chapter.charEnd), chapter.charStart)
+                    // 章节区间是半开 [charStart, charEnd)：用 .. 会把下一章首字符也喂进来
+                    extractor.feed(content.read(chapter.charStart until chapter.charEnd), chapter.charStart)
                 }
                 val appearances = extractor.result().map { mention ->
                     com.llzx373.foldreader.core.data.db.PersonAppearanceEntity(

@@ -101,8 +101,10 @@ class MarkdownBookParser(
         override val charCount: Long get() = text.length.toLong()
 
         override suspend fun read(range: LongRange): String {
-            val start = range.first.coerceIn(0L, text.length.toLong()).toInt()
-            val endExclusive = (range.last + 1).coerceIn(0L, text.length.toLong()).toInt()
+            val length = text.length.toLong()
+            val start = range.first.coerceIn(0L, length).toInt()
+            // range.last 可能是 Long.MAX_VALUE，+1 前必须先钳（同 StringBookContent）
+            val endExclusive = (minOf(range.last, length - 1) + 1).coerceIn(0L, length).toInt()
             return if (endExclusive > start) text.substring(start, endExclusive) else ""
         }
     }
