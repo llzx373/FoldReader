@@ -38,7 +38,7 @@ pdfboxAndroid = "2.0.27.0"
 # JVM 单测里的 Android API（Paint / BitmapFactory / SQLite / Compose UI）
 robolectric = "4.17"
 # AI 底座（M14）：OkHttp 传输与 SSE 流式；MockWebServer 仅为 test 依赖
-okhttp = "4.12.0"
+okhttp = "5.5.0"
 # OCR 引擎（M21，依赖评审见 docs/AI功能需求与实施.md §2.4）：钉 mobile 版而非 android 版——
 # mobile 全 ABI AAR 约 7MB（android 版 1.30 已涨到 53MB），符合 ~10MB 评审预算。
 # 上游 mobile 线停在 1.18.0（后续只维护 onnxruntime-android），首版只用 CPU 后端的
