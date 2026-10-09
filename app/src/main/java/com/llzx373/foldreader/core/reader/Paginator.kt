@@ -198,9 +198,12 @@ class Paginator(
 
     private fun ensureDiskBounds() {
         if (diskBoundsLoaded) return
-        diskBoundsLoaded = true
         val key = diskKey ?: return
-        val stored = runCatching { diskCache?.load(key, content.charCount) }.getOrNull() ?: return
+        val result = runCatching { diskCache?.load(key, content.charCount) }
+        // 加载抛异常时不置位，留给下次调用重试；成功（含无缓存返回 null）才算「已加载」
+        if (result.isFailure) return
+        diskBoundsLoaded = true
+        val stored = result.getOrNull() ?: return
         if (stored.size < 2) return
         val adopted = synchronized(boundsLock) {
             // 只有在内存边界还没长出来时才能采纳磁盘快照；采纳后内存前缀即等于磁盘内容，
@@ -229,8 +232,7 @@ class Paginator(
         if (isSeeded) return
         val key = diskKey ?: return
         val cache = diskCache ?: return
-        val snapshot = synchronized(boundsLock) { bounds.toLongArray() }
-        val already = persistedCount
+        val (snapshot, already) = synchronized(boundsLock) { bounds.toLongArray() to persistedCount }
         if (snapshot.size <= already) return
         val appended = already > 0 &&
             runCatching { cache.append(key, content.charCount, snapshot, already) }.getOrDefault(false)
