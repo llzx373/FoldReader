@@ -60,7 +60,8 @@ class WidgetRecentBooksTest {
         val comic = book(
             id = 2, lastReadAt = 1, format = BookFormat.COMIC, pageCount = 40,
         ).copy(comicPage = 10)
-        assertEquals(25, widgetProgressPercent(comic))
+        // 0 基页序号：读到第 10 页 = 已读 11/40
+        assertEquals(27, widgetProgressPercent(comic))
 
         // 无进度 / 页数未解析：0（进度条为空），而不是编一个数
         assertEquals(0, widgetProgressPercent(book(id = 3, lastReadAt = 1)))

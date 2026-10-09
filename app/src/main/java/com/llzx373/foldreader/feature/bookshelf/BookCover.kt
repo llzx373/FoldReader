@@ -63,14 +63,15 @@ fun formatReadingProgress(charOffset: Long?, totalChars: Long): String =
     }
 
 /**
- * 漫画进度按页序号算（与文本的字符偏移语义分开）。
+ * 漫画进度按页序号算（与文本的字符偏移语义分开）。comicPage 是 0 基页序号，
+ * 进度按「已读完的页数」计：读到第 N 页即 (N+1)/pageCount，读到末页即 100%。
  * 页数为 null 表示还没解析出来（rar/tar/7z 待预热），此时只能显示「未开始」。
  */
 fun formatComicProgress(comicPage: Int?, pageCount: Int?): String =
     if (comicPage == null || pageCount == null || pageCount <= 0) {
         "未开始"
     } else {
-        "已读 ${(comicPage * 100 / pageCount).coerceIn(0, 100)}%"
+        "已读 ${(((comicPage + 1) * 100) / pageCount).coerceIn(0, 100)}%"
     }
 
 /** 页式格式（漫画 / PDF）：进度按页序号算，详情页不展示文本类字段。 */

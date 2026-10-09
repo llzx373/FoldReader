@@ -59,6 +59,18 @@ class ReadingProgressFormatTest {
     }
 
     @Test
+    fun `漫画进度按已读页数计`() {
+        assertEquals("未开始", formatComicProgress(null, 40))
+        assertEquals("未开始", formatComicProgress(3, null))
+        assertEquals("未开始", formatComicProgress(3, 0))
+        // 0 基页序号：读到第 0 页 = 已读 1 页，读到末页 = 100%
+        assertEquals("已读 2%", formatComicProgress(0, 40))
+        assertEquals("已读 27%", formatComicProgress(10, 40))
+        assertEquals("已读 100%", formatComicProgress(39, 40))
+        assertEquals("已读 100%", formatComicProgress(99, 40))
+    }
+
+    @Test
     fun `最近阅读时间为空返回 null`() {
         assertNull(formatLastRead(null, Locale.US))
     }
@@ -113,6 +125,24 @@ class BookshelfSortTest {
         )
         val sorted = sortBookshelf(books, BookshelfSort.RECENT_READ)
         assertEquals(listOf(2L, 3L, 1L), sorted.map { it.book.id })
+    }
+
+    @Test
+    fun `进度排序页式按已读页数与文本按字符比例同口径`() {
+        val text50 = book(id = 1, importedAt = 100, lastReadAt = 1).copy(
+            book = book(id = 1, importedAt = 100, lastReadAt = 1).book.copy(totalChars = 1000),
+            charOffset = 500,
+        )
+        val comic90 = book(id = 2, importedAt = 200, lastReadAt = 1).copy(
+            book = book(id = 2, importedAt = 200, lastReadAt = 1).book.copy(
+                format = BookFormat.COMIC,
+                comicPageCount = 40,
+            ),
+            comicPage = 35, // 已读 36/40 = 90%
+        )
+        val unread = book(id = 3, importedAt = 300, lastReadAt = null)
+        val sorted = sortBookshelf(listOf(text50, comic90, unread), BookshelfSort.PROGRESS)
+        assertEquals(listOf(2L, 1L, 3L), sorted.map { it.book.id })
     }
 }
 

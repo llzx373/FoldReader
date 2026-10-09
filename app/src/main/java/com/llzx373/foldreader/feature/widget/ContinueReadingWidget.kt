@@ -28,13 +28,13 @@ internal fun pickWidgetRecent(books: List<BookWithProgress>, limit: Int): List<B
         .sortedByDescending { it.book.lastReadAt }
         .take(limit)
 
-/** 行内进度百分比（0-100）；文本按字符偏移、页式（漫画/PDF）按页序号，算不出给 0。 */
+/** 行内进度百分比（0-100）；文本按字符偏移、页式（漫画/PDF）按已读页数（0 基页序号 +1），算不出给 0。 */
 internal fun widgetProgressPercent(item: BookWithProgress): Int {
     val book = item.book
     return if (book.format == BookFormat.COMIC || book.format == BookFormat.PDF) {
         val page = item.comicPage ?: return 0
         val count = book.comicPageCount ?: return 0
-        if (count <= 0) 0 else (page * 100 / count).coerceIn(0, 100)
+        if (count <= 0) 0 else (((page + 1) * 100) / count).coerceIn(0, 100)
     } else {
         val offset = item.charOffset ?: return 0
         if (book.totalChars <= 0) 0 else (offset * 100 / book.totalChars).toInt().coerceIn(0, 100)

@@ -55,8 +55,14 @@ internal fun sortBookshelf(books: List<BookWithProgress>, sort: BookshelfSort): 
         BookshelfSort.IMPORT_TIME -> books.sortedByDescending { it.book.importedAt }
         BookshelfSort.TITLE -> books.sortedBy { it.book.title }
         BookshelfSort.PROGRESS -> books.sortedByDescending { item ->
-            val total = item.book.totalChars
-            if (total > 0L) (item.charOffset ?: 0L).toDouble() / total else 0.0
+            if (isPagedFormat(item.book.format)) {
+                // 页式按页序号（0 基）折算成已读比例，与文本的字符比例同口径排序
+                val count = item.book.comicPageCount
+                if (count != null && count > 0) ((item.comicPage ?: -1) + 1).toDouble() / count else 0.0
+            } else {
+                val total = item.book.totalChars
+                if (total > 0L) (item.charOffset ?: 0L).toDouble() / total else 0.0
+            }
         }
     }
 
