@@ -40,8 +40,9 @@ data class BookEntity(
     /** 导入时提取的封面图片本地路径（filesDir/covers/<contentHash>.<ext>）。 */
     val coverPath: String? = null,
     /**
-     * 内容就绪时间：EPUB/FB2 的整本压平已完成（或打开时顺带完成）。
-     * null = 尚未压平，书架角标据此提示"待解析"。TXT 无压平步骤，也写这个字段以保持一致。
+     * 内容就绪时间：EPUB/FB2 的整本压平已完成（或打开时顺带完成）；漫画在后台预热完成或
+     * 首次打开成功时也会写（顺序容器的「待解析」角标据它撤下）。
+     * null = 尚未就绪，书架角标据此提示"待解析"。TXT 无压平步骤，也写这个字段以保持一致。
      *
      * 记在库里而不是每次去 stat converted/ 目录：一方面角标要能随预热完成**自动消失**，
      * 另一方面书架 Flow 在阅读期间会被进度更新反复触发，逐本查文件不划算。
@@ -84,13 +85,16 @@ private val EXTRACT_REQUIRED_CONTAINERS =
 /**
  * 内容是否还需要后台准备：
  * - TXT / Markdown 没有压平步骤（TXT 的偏移索引边读边建，Markdown 直接渲染源文件），恒为 false；
- * - 漫画 = 页数未知，或需要解压的容器还没解压过；
+ * - 漫画 = 页数未知，或需要解压的容器还没解压过——「已解压」按三个信号判定：已复制到本地
+ *   （comicLocalPath）、后台预热完成或首次打开成功（都会写 contentPreparedAt）。预热/首开都会
+ *   把顺序容器解进缓存并回填页数，此时角标必须撤下，不能等用户显式「复制到本地」；
  * - EPUB/FB2 = 整本压平尚未完成。
  */
 fun BookEntity.needsContentPreparation(): Boolean = when (format) {
     BookFormat.TXT, BookFormat.MARKDOWN -> false
     BookFormat.COMIC ->
         comicPageCount == null ||
-            (comicLocalPath == null && comicContainer in EXTRACT_REQUIRED_CONTAINERS)
+            (comicContainer in EXTRACT_REQUIRED_CONTAINERS &&
+                comicLocalPath == null && contentPreparedAt == null)
     else -> contentPreparedAt == null
 }

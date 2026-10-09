@@ -150,6 +150,81 @@ class ContentPreparationTest {
         assertEquals(false, book(BookFormat.TXT, null).needsContentPreparation())
         assertEquals(false, book(BookFormat.TXT, 1L).needsContentPreparation())
     }
+
+    private fun comic(
+        container: com.llzx373.foldreader.core.comic.ComicContainer,
+        pageCount: Int?,
+        preparedAt: Long? = null,
+        localPath: String? = null,
+    ) = book(BookFormat.COMIC, preparedAt).copy(
+        comicContainer = container,
+        comicPageCount = pageCount,
+        comicLocalPath = localPath,
+    )
+
+    @Test
+    fun `zip 与目录漫画导入即知页数不提示`() {
+        assertEquals(
+            false,
+            comic(com.llzx373.foldreader.core.comic.ComicContainer.ZIP, pageCount = 120)
+                .needsContentPreparation(),
+        )
+        assertEquals(
+            false,
+            comic(com.llzx373.foldreader.core.comic.ComicContainer.FOLDER, pageCount = 3)
+                .needsContentPreparation(),
+        )
+    }
+
+    @Test
+    fun `rar 未预热时提示待解析`() {
+        assertTrue(
+            comic(com.llzx373.foldreader.core.comic.ComicContainer.RAR, pageCount = null)
+                .needsContentPreparation(),
+        )
+    }
+
+    @Test
+    fun `rar 预热完成后撤下角标`() {
+        // 预热/首开：页数回填 + contentPreparedAt 落库
+        assertEquals(
+            false,
+            comic(
+                com.llzx373.foldreader.core.comic.ComicContainer.RAR,
+                pageCount = 120,
+                preparedAt = 1_700_000_000_000L,
+            ).needsContentPreparation(),
+        )
+        assertEquals(
+            false,
+            comic(
+                com.llzx373.foldreader.core.comic.ComicContainer.SEVEN_ZIP,
+                pageCount = 30,
+                preparedAt = 1L,
+            ).needsContentPreparation(),
+        )
+    }
+
+    @Test
+    fun `rar 已复制到本地视为就绪`() {
+        assertEquals(
+            false,
+            comic(
+                com.llzx373.foldreader.core.comic.ComicContainer.TAR,
+                pageCount = 12,
+                localPath = "/data/comics/local/hash/pages",
+            ).needsContentPreparation(),
+        )
+    }
+
+    @Test
+    fun `顺序容器页数已知但未预热也未本地化仍提示`() {
+        // 备份恢复的场景：页数随备份回来了，但解压缓存与本地副本都没跟过来
+        assertTrue(
+            comic(com.llzx373.foldreader.core.comic.ComicContainer.RAR, pageCount = 120)
+                .needsContentPreparation(),
+        )
+    }
 }
 
 /** M34：批量导出正文的默认文件名规则（非法字符清洗 + 截断）。 */
