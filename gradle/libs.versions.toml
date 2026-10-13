@@ -51,7 +51,7 @@ kotlinxSerializationJson = "1.8.1"
 # 用上游 org.zwobble.mammoth 同基线 1.12.x 补丁版，包名一致、API 兼容）；
 # commonmark 负责 Markdown 解析，渲染层遍历 AST 直出 Compose（不经 HTML/WebView）。
 jsoup = "1.23.2"
-javaMammoth = "1.12.2"
+javaMammoth = "1.13.0"
 commonmark = "0.30.0"
 # 桌面清理工具（tools/cleaner）用的 Compose Multiplatform；与 kotlin 版本需配套
 composeMultiplatform = "1.12.0"
