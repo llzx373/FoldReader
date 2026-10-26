@@ -427,6 +427,11 @@ internal class FakeBookPrefsDao : BookPrefsDao {
             it.copy(comicDirection = direction)
         }
     }
+    override suspend fun resetDeletedFont(fontKey: String) {
+        rows.replaceAll {
+            if (it.fontKey == fontKey) it.copy(fontKey = "default") else it
+        }
+    }
     override suspend fun delete(bookId: Long) {
         rows.removeAll { it.bookId == bookId }
     }

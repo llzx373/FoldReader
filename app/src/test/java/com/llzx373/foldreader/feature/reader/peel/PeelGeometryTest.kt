@@ -38,15 +38,27 @@ class PeelGeometryTest {
     @Test
     fun `说明书自动轨迹半程主帧`() {
         val a = autoPlayTouch(0.5f, br, w, h)
-        near(Offset(544f, 1801f), a)
+        near(Offset(598.2857f, 1854.8571f), a)
         val frame = peelFrame(a, br, w, h, bindingOnly = false)!!
-        near(Offset(544f, 1801f), frame.touch)
-        near(Offset(272f, 2340f), frame.bezierStart1, eps = 3f)
-        near(Offset(1080f, 1536f), frame.bezierStart2, eps = 3f)
-        near(Offset(812f, 2071f), frame.mid, eps = 3f)
+        near(Offset(598.2857f, 1854.8571f), frame.touch)
+        near(Offset(352.2674f, 2340f), frame.bezierStart1, eps = 3f)
+        near(Offset(1080f, 1617.4104f), frame.bezierStart2, eps = 3f)
+        near(Offset(839.1429f, 2097.4286f), frame.mid, eps = 3f)
         val backPct = peelBackArea(frame) / (w * h)
         assertTrue("back area should be a sheet not a strip, was $backPct", backPct in 0.03f..0.08f)
-        assertTrue(frame.touchToCorner in 740f..780f)
+        assertTrue(frame.touchToCorner in 670f..710f)
+    }
+
+    @Test
+    fun `P1 接点前后不重复减速到零`() {
+        val (p0, p1, p2) = autoPlayPathPoints(br, w, h)
+        near(lerpOffset(p0, p1, 0.5f), autoPlayTouch(0.35f, br, w, h))
+        near(lerpOffset(p1, p2, 0.5f), autoPlayTouch(0.85f, br, w, h))
+        val epsilon = 0.0001f
+        val before = autoPlayTouch(PEEL_ATTACHED_UNTIL - epsilon, br, w, h)
+        val after = autoPlayTouch(PEEL_ATTACHED_UNTIL + epsilon, br, w, h)
+        assertTrue(hypot(before.x - p1.x, before.y - p1.y) > 0.05f)
+        assertTrue(hypot(after.x - p1.x, after.y - p1.y) > 0.05f)
     }
 
     @Test

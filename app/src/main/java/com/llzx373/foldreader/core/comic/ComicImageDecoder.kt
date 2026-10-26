@@ -45,6 +45,7 @@ object ComicImageDecoder {
      * JPEG 按 EXIF 方向旋转/镜像（手机扫描件常见），封面提取走同一入口故一并生效。
      */
     fun decodeSampled(bytes: ByteArray, targetW: Int, targetH: Int): Bitmap? {
+        if (targetW <= 0 || targetH <= 0) return null
         val size = ComicImageSizing.probe(bytes) ?: probeWithFactory(bytes) ?: return null
         val options = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(size[0], size[1], targetW, targetH)
@@ -86,19 +87,19 @@ object ComicImageDecoder {
 
     /**
      * 动画 GIF / 动态 WebP 解成 Drawable（`ImageDecoder` 是唯一能出动画帧的路径）。
-     * 认不出动画时返回 null，调用方退回 [decodeSampled]。
-     * [targetW]/[targetH] 为 0 表示不降采样（自适应模式下按屏宽传即可）。
+     * 认不出动画或目标尺寸无效时返回 null，调用方退回 [decodeSampled]。
      */
-    fun decodeAnimated(bytes: ByteArray, targetW: Int, targetH: Int): Drawable? = runCatching {
-        ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            if (targetW > 0 && targetH > 0) {
+    fun decodeAnimated(bytes: ByteArray, targetW: Int, targetH: Int): Drawable? {
+        if (targetW <= 0 || targetH <= 0) return null
+        return runCatching {
+            ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.setTargetSampleSize(
                     sampleSizeFor(info.size.width, info.size.height, targetW, targetH),
                 )
             }
-        }
-    }.getOrNull()
+        }.getOrNull()
+    }
 
     private fun probeWithFactory(bytes: ByteArray): IntArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

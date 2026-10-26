@@ -97,6 +97,39 @@ class ComicExtractionStoreTest {
     }
 
     @Test
+    fun `解压中途失败清掉已写入的页且下次可重试`() {
+        val store = store()
+
+        assertThrows(IOException::class.java) {
+            store.ensureExtracted("h1") { dir ->
+                write(dir, "partial", page1)
+                throw IOException("disk full")
+            }
+        }
+        assertFalse(store.cachePagesDir("h1").parentFile?.exists() == true)
+
+        val pages = store.ensureExtracted("h1") { dir ->
+            listOf("1.png" to write(dir, "p", page1))
+        }
+        assertEquals(1, pages.size)
+    }
+
+    @Test
+    fun `sweep 清掉书架书籍的半成品但保留有效缓存和本地副本`() {
+        val store = store()
+        store.ensureExtracted("live") { dir -> listOf("1.png" to write(dir, "p", page1)) }
+        store.ensureLocalCopy("live") { dir -> listOf("1.png" to write(dir, "p", page1)) }
+        write(store.cachePagesDir("broken").apply { mkdirs() }, "partial", page1)
+
+        val deleted = store.sweep(setOf("live", "broken"))
+
+        assertEquals(1, deleted)
+        assertNotNull(store.cachedPages("live"))
+        assertFalse(store.cachePagesDir("broken").parentFile?.exists() == true)
+        assertNotNull(store.localPages("live"))
+    }
+
+    @Test
     fun `sweep 清掉不在书架上的缓存但保留本地副本`() {
         val store = store()
         store.ensureExtracted("live") { dir -> listOf("1.png" to write(dir, "p", page1)) }
@@ -108,6 +141,19 @@ class ComicExtractionStoreTest {
         assertEquals(1, deleted)
         assertNotNull(store.cachedPages("live"))
         assertNull(store.cachedPages("dead"))
+        assertNotNull(store.localPages("live"))
+    }
+
+    @Test
+    fun `sweep 清掉中断留下的临时归档但保留本地副本`() {
+        val store = store()
+        store.ensureLocalCopy("live") { dir -> listOf("1.png" to write(dir, "p", page1)) }
+        val interrupted = store.createTempArchive().also { it.writeBytes(page2) }
+
+        val deleted = store.sweep(setOf("live"))
+
+        assertEquals(1, deleted)
+        assertFalse(interrupted.exists())
         assertNotNull(store.localPages("live"))
     }
 

@@ -456,7 +456,7 @@
 
 - [x] `PeelGeometry`：圆约束（装订圆始终、对边圆前半段）、贝塞尔、反射矩阵、四角镜像、P0→P1→P2 自动轨迹（t>0.7 只钉装订边）
 - [x] `PeelRenderer` / `PeelShadows` / `PeelOverlay`：纸背 = 反射页 ∩ A 侧半平面；双页后半段伸到对页
-- [x] `PeelController`：跟手 / 完成 / 取消 / 自动 400ms
+- [x] `PeelController`：跟手 / 完成 / 取消 / 自动 340ms（二维弹簧继承抬手速度）
 - [x] 电子书 `ReaderScreen` + 菜单/设置 `PageTurnMode.SIMULATION`
 - [x] 漫画 / 页式 PDF `ComicReaderScreen` 同一套 overlay；`comicPeelForward` 与 RTL 同口径
 - [x] 说明书 5.1 / 5.2 / 附录 v2.4、README、CHANGELOG

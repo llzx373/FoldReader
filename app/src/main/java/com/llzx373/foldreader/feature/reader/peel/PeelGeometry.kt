@@ -69,7 +69,7 @@ const val PEEL_COMPLETE_RATIO = 0.15f
 /** 离开页角方向的甩速（px·s⁻¹）过线也翻。 */
 const val PEEL_FLING_PX_PER_SEC = 800f
 
-const val PEEL_AUTO_MS = 400
+const val PEEL_AUTO_MS = 340
 const val PEEL_CANCEL_MS = 250
 
 /** 小于此距离视为还没卷起来，避免除零。 */
@@ -193,7 +193,7 @@ fun peelBindingRadius(
     return maxOf(width, oppositeWidth)
 }
 
-/** 自动播放触点。t∈[0,1]；与说明书第 3 节同一条 smoothstep 折线。 */
+/** 自动播放触点。段内不再重复缓动，避免经过 P1 时速度归零。 */
 fun autoPlayTouch(
     progress: Float,
     corner: PeelCorner,
@@ -204,11 +204,9 @@ fun autoPlayTouch(
     val t = progress.coerceIn(0f, 1f)
     val (p0, p1, p2) = autoPlayPathPoints(corner, width, height, oppositeWidth)
     return if (t <= PEEL_ATTACHED_UNTIL) {
-        val u = smoothstep((t / PEEL_ATTACHED_UNTIL).coerceIn(0f, 1f))
-        lerpOffset(p0, p1, u)
+        lerpOffset(p0, p1, t / PEEL_ATTACHED_UNTIL)
     } else {
-        val u = smoothstep(((t - PEEL_ATTACHED_UNTIL) / (1f - PEEL_ATTACHED_UNTIL)).coerceIn(0f, 1f))
-        lerpOffset(p1, p2, u)
+        lerpOffset(p1, p2, (t - PEEL_ATTACHED_UNTIL) / (1f - PEEL_ATTACHED_UNTIL))
     }
 }
 

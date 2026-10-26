@@ -121,7 +121,7 @@ class SettingsRepositoryImpl(
                 paragraphSpacingEm = prefs[Keys.PARAGRAPH_SPACING_EM]
                     ?: defaults.paragraphSpacingEm,
                 letterSpacingEm = prefs[Keys.LETTER_SPACING_EM] ?: defaults.letterSpacingEm,
-                themeId = enumOrDefault(prefs[Keys.THEME_ID], defaults.themeId),
+                themeId = readingThemeOrDefault(prefs[Keys.THEME_ID], defaults.themeId),
                 customBackgroundArgb = prefs[Keys.CUSTOM_BACKGROUND_ARGB],
                 customTextArgb = prefs[Keys.CUSTOM_TEXT_ARGB],
                 darkThemeOption = enumOrDefault(prefs[Keys.DARK_THEME_OPTION], defaults.darkThemeOption),

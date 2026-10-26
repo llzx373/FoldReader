@@ -151,6 +151,29 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `旧备份中的纯黑主题恢复为纸张`() = runBlocking {
+        val legacy = """
+            {
+              "app": "FoldReader",
+              "version": 1,
+              "preferences": { "themeId": "AMOLED" },
+              "books": []
+            }
+        """.trimIndent()
+        val targetSettings = FakeSettingsRepository()
+        val target = BackupCodec(
+            FakeBookshelfRepository(),
+            targetSettings,
+            FakeBookPrefsDao(),
+            FakeSessionDao(),
+        )
+
+        target.importJson(legacy)
+
+        assertEquals(ReadingTheme.PAPER, targetSettings.snapshot().themeId)
+    }
+
+    @Test
     fun `阅读会话与每书偏好随书籍匹配恢复`() = runBlocking {
         val sourceBooks = FakeBookshelfRepository(mutableListOf(book(id = 1, hash = "hashA")))
         sourceBooks.progress += ReadingProgressEntity(

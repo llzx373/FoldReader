@@ -116,4 +116,8 @@ class BookPrefsRepository(
     suspend fun applyGlobalComicDirection(direction: ComicDirection) {
         bookPrefsDao.applyGlobalComicDirection(direction.name)
     }
+
+    suspend fun resetDeletedFont(fontKey: String) {
+        bookPrefsDao.resetDeletedFont(fontKey)
+    }
 }

@@ -47,6 +47,13 @@ class FontManager(private val context: Context) {
             ?.map { it.name }
             .orEmpty()
 
+    suspend fun delete(fontKey: String): Boolean = withContext(Dispatchers.IO) {
+        if (!fontKey.startsWith(FILE_PREFIX)) return@withContext false
+        val fileName = fontKey.removePrefix(FILE_PREFIX)
+        if (fileName !in listImported()) return@withContext false
+        File(fontsDir, fileName).delete()
+    }
+
     companion object {
         const val FILE_PREFIX = "file:"
 

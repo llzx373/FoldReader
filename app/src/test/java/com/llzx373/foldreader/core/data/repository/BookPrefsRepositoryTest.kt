@@ -225,6 +225,32 @@ class BookPrefsRepositoryTest {
     }
 
     @Test
+    fun `旧纯黑每书偏好读取为纸张`() = runBlocking {
+        val dao = FakeBookPrefsDao()
+        dao.upsert(BookPrefsEntity(bookId = 1, themeId = "AMOLED"))
+        val repository = BookPrefsRepository(dao, FakeSettingsRepository(global))
+
+        repository.ensureInitialized(bookId = 1)
+
+        assertEquals(ReadingTheme.PAPER, repository.observe(1).first().themeId)
+    }
+
+    @Test
+    fun `删除字体只重置匹配的书籍字体引用`() = runBlocking {
+        val dao = FakeBookPrefsDao()
+        dao.upsert(BookPrefsEntity(bookId = 1, fontKey = "file:paper.ttf"))
+        dao.upsert(BookPrefsEntity(bookId = 2, fontKey = "file:other.ttf"))
+        dao.upsert(BookPrefsEntity(bookId = 3, fontKey = "serif"))
+        val repository = BookPrefsRepository(dao, FakeSettingsRepository(global))
+
+        repository.resetDeletedFont("file:paper.ttf")
+
+        assertEquals("default", dao.get(1)!!.fontKey)
+        assertEquals("file:other.ttf", dao.get(2)!!.fontKey)
+        assertEquals("serif", dao.get(3)!!.fontKey)
+    }
+
+    @Test
     fun `全局漫画适应模式与方向批量应用覆盖所有书`() = runBlocking {
         val dao = FakeBookPrefsDao()
         dao.upsert(BookPrefsEntity(bookId = 1, comicFitMode = "FIT_PAGE", comicDirection = "LTR"))
@@ -263,6 +289,11 @@ class BookPrefsRepositoryTest {
         override suspend fun applyGlobalComicDirection(direction: String) {
             rows.replaceAll {
                 it.copy(comicDirection = direction)
+            }
+        }
+        override suspend fun resetDeletedFont(fontKey: String) {
+            rows.replaceAll {
+                if (it.fontKey == fontKey) it.copy(fontKey = "default") else it
             }
         }
         override suspend fun delete(bookId: Long) {

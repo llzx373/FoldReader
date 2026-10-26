@@ -8,6 +8,7 @@ import com.llzx373.foldreader.core.data.settings.PdfReadingMode
 import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
+import com.llzx373.foldreader.core.data.settings.readingThemeOrDefault
 
 fun ReadingPreferences.toBookPrefsEntity(bookId: Long) = BookPrefsEntity(
     bookId = bookId,
@@ -49,7 +50,7 @@ fun BookPrefsEntity.toReadingPreferences(global: ReadingPreferences): ReadingPre
         maxLineChars = maxLineChars,
         paragraphSpacingEm = paragraphSpacingEm,
         letterSpacingEm = letterSpacingEm,
-        themeId = enumOrDefault(themeId, ReadingTheme.GREEN),
+        themeId = readingThemeOrDefault(themeId, ReadingTheme.GREEN),
         customBackgroundArgb = customBackgroundArgb,
         customTextArgb = customTextArgb,
         fontKey = fontKey,

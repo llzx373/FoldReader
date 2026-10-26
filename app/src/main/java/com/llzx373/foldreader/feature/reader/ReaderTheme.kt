@@ -36,10 +36,10 @@ fun readerColors(
         text = Color(0xFFB0B0B0),
         accent = Color(0xFF90CAF9),
     )
-    ReadingTheme.AMOLED -> ReaderColors(
-        background = Color(0xFF000000),
-        text = Color(0xFFB0B0B0),
-        accent = Color(0xFF90CAF9),
+    ReadingTheme.PAPER -> ReaderColors(
+        background = Color(0xFFF5F4ED),
+        text = Color(0xFF2D2C28),
+        accent = Color(0xFF1B365D),
     )
     ReadingTheme.CUSTOM -> ReaderColors(
         background = customBackgroundArgb?.let { Color(it) } ?: Color(0xFFF5F5F5),

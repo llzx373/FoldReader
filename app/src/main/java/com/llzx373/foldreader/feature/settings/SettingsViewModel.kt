@@ -26,6 +26,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.ReadingTheme
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
+import com.llzx373.foldreader.core.debug.DiagnosticLog
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.reader.FontManager
 import kotlinx.coroutines.CancellationException
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -71,7 +73,9 @@ class SettingsViewModel(
     val preferences: StateFlow<ReadingPreferences> = settingsRepository.preferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingPreferences())
 
-    private val _importedFonts = MutableStateFlow(fontManager.listImported())
+    private val _importedFonts = MutableStateFlow(
+        initialValue("导入字体", emptyList()) { fontManager.listImported() },
+    )
     val importedFonts: StateFlow<List<String>> = _importedFonts.asStateFlow()
 
     data class ReadingStatsUi(
@@ -83,6 +87,7 @@ class SettingsViewModel(
         val goalMinutes: Int = 0,
         /** M34：连续打卡天数（有阅读记录的日期从今天/昨天往回逐日连续计数）。 */
         val streakDays: Int = 0,
+        val available: Boolean = true,
     )
 
     private val _readingStats = MutableStateFlow(ReadingStatsUi())
@@ -101,26 +106,8 @@ class SettingsViewModel(
     }
 
     fun refreshReadingStats() = launch {
-        val zone = java.time.ZoneId.systemDefault()
-        val now = System.currentTimeMillis()
-        val monthStart = com.llzx373.foldreader.core.reader.monthStartMs(now, zone)
-        val sessions = bookshelfRepository.getReadingSessionsBetween(monthStart, now)
-            .map { it.dayStartMs to it.durationMs }
-        // 连续打卡要跨月回溯，本月的区间查询覆盖不了月初断点，另取全量日桶起点
-        val dayStarts = bookshelfRepository.getReadingDayStarts()
-        _readingStats.value = ReadingStatsUi(
-            weekMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
-                sessions, com.llzx373.foldreader.core.reader.weekStartMs(now, zone), now,
-            ),
-            monthMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
-                sessions, monthStart, now,
-            ),
-            last7Days = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 7, zone),
-            todayMillis = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 1, zone)
-                .firstOrNull()?.second ?: 0L,
-            goalMinutes = preferences.value.dailyReadingGoalMinutes,
-            streakDays = com.llzx373.foldreader.core.reader.readingStreakDays(dayStarts, now, zone),
-        )
+        val stats = readReadingStats(bookshelfRepository, preferences.value.dailyReadingGoalMinutes)
+        _readingStats.value = stats ?: _readingStats.value.copy(available = false)
     }
 
     fun updateDailyReadingGoalMinutes(minutes: Int) =
@@ -257,7 +244,9 @@ class SettingsViewModel(
     fun updateAiPricePerMillion(price: Double) =
         launch { settingsRepository.setAiPricePerMillion(price) }
 
-    private val _apiKeyConfigured = MutableStateFlow(credentialStore.readKey() != null)
+    private val _apiKeyConfigured = MutableStateFlow(
+        initialValue("AI 凭据", false) { credentialStore.readKey() != null },
+    )
     val apiKeyConfigured: StateFlow<Boolean> = _apiKeyConfigured.asStateFlow()
 
     fun saveApiKey(key: String) {
@@ -321,7 +310,9 @@ class SettingsViewModel(
     /** 首次连接的一次性明示确认落账（幂等）。 */
     fun confirmWebDav() = launch { settingsRepository.setWebDavConfirmed(true) }
 
-    private val _webDavPasswordConfigured = MutableStateFlow(webDavCredentialStore.readPassword() != null)
+    private val _webDavPasswordConfigured = MutableStateFlow(
+        initialValue("WebDAV 凭据", false) { webDavCredentialStore.readPassword() != null },
+    )
     val webDavPasswordConfigured: StateFlow<Boolean> = _webDavPasswordConfigured.asStateFlow()
 
     /** 密码只交给 WebDavCredentialStore，不落任何状态与日志。 */
@@ -484,9 +475,25 @@ class SettingsViewModel(
         }
     }
 
+    fun deleteFont(fontKey: String, onResult: (Boolean) -> Unit) {
+        launch {
+            val deleted = fontManager.delete(fontKey)
+            if (deleted) {
+                if (settingsRepository.preferences.first().fontKey == fontKey) {
+                    settingsRepository.setFontKey("default")
+                }
+                bookPrefsRepository.resetDeletedFont(fontKey)
+                _importedFonts.value = fontManager.listImported()
+            }
+            onResult(deleted)
+        }
+    }
+
     // ---- OCR 模型（M21/M24）----
 
-    private val _modelStatus = MutableStateFlow(modelManager.slots())
+    private val _modelStatus = MutableStateFlow(
+        initialValue("OCR 模型", emptyList()) { modelManager.slots() },
+    )
     val modelStatus: StateFlow<List<com.llzx373.foldreader.core.ai.android.ModelManager.ModelSlot>> =
         _modelStatus.asStateFlow()
 
@@ -540,8 +547,15 @@ class SettingsViewModel(
     val dictionariesLoaded: StateFlow<Boolean> = _dictionariesLoaded.asStateFlow()
 
     private fun refreshDictionaries() = launch {
-        _dictionaries.value = withContext(kotlinx.coroutines.Dispatchers.IO) { dictionaryStore.list() }
-        _dictionariesLoaded.value = true
+        try {
+            _dictionaries.value = withContext(kotlinx.coroutines.Dispatchers.IO) { dictionaryStore.list() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DiagnosticLog.line("设置页词典加载失败：${e.stackTraceToString()}")
+        } finally {
+            _dictionariesLoaded.value = true
+        }
     }
 
     /** 导入词典目录（SAF 树）：逐词干导入，汇总成功/失败；查词缓存随之失效。 */
@@ -627,6 +641,13 @@ class SettingsViewModel(
 
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch { block() }
 
+    private fun <T> initialValue(label: String, defaultValue: T, read: () -> T): T = try {
+        read()
+    } catch (e: Exception) {
+        DiagnosticLog.line("设置页${label}初始化失败：${e.stackTraceToString()}")
+        defaultValue
+    }
+
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -654,4 +675,35 @@ class SettingsViewModel(
         }
         private const val AI_TEST_TIMEOUT_MS = 90_000L
     }
+}
+
+internal suspend fun readReadingStats(
+    bookshelfRepository: com.llzx373.foldreader.core.data.repository.BookshelfRepository,
+    goalMinutes: Int,
+    now: Long = System.currentTimeMillis(),
+): SettingsViewModel.ReadingStatsUi? = try {
+    val zone = java.time.ZoneId.systemDefault()
+    val monthStart = com.llzx373.foldreader.core.reader.monthStartMs(now, zone)
+    val sessions = bookshelfRepository.getReadingSessionsBetween(monthStart, now)
+        .map { it.dayStartMs to it.durationMs }
+    // 连续打卡要跨月回溯，本月的区间查询覆盖不了月初断点，另取全量日桶起点
+    val dayStarts = bookshelfRepository.getReadingDayStarts()
+    SettingsViewModel.ReadingStatsUi(
+        weekMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
+            sessions, com.llzx373.foldreader.core.reader.weekStartMs(now, zone), now,
+        ),
+        monthMillis = com.llzx373.foldreader.core.reader.sumSessionsBetween(
+            sessions, monthStart, now,
+        ),
+        last7Days = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 7, zone),
+        todayMillis = com.llzx373.foldreader.core.reader.dailyBuckets(sessions, now, 1, zone)
+            .firstOrNull()?.second ?: 0L,
+        goalMinutes = goalMinutes,
+        streakDays = com.llzx373.foldreader.core.reader.readingStreakDays(dayStarts, now, zone),
+    )
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    DiagnosticLog.line("设置页阅读统计加载失败：${e.stackTraceToString()}")
+    null
 }

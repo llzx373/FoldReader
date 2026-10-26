@@ -4,6 +4,7 @@ import android.net.Uri
 import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor
 import com.llzx373.foldreader.core.comic.archive.ComicDirChild
 import com.llzx373.foldreader.core.comic.archive.ComicFolderScan
+import com.llzx373.foldreader.core.comic.archive.SpaceCheckedOutputStream
 import com.llzx373.foldreader.core.comic.archive.openDocumentComicArchive
 import com.llzx373.foldreader.core.comic.archive.openLocalComicArchive
 import com.llzx373.foldreader.core.comic.archive.openZipComicArchive
@@ -30,6 +31,7 @@ class ComicArchiveFactory(
     private val openChannel: (Uri) -> SeekableByteChannel,
     private val openDocumentStream: (String) -> InputStream?,
     private val listDocumentChildren: (Uri) -> List<ComicDirChild>,
+    private val createTempArchive: () -> File = extractionStore::createTempArchive,
 ) {
 
     suspend fun open(
@@ -78,9 +80,7 @@ class ComicArchiveFactory(
                 ComicContainer.SEVEN_ZIP -> openChannel(uri).use { channel ->
                     ComicArchiveExtractor.readComicInfoSevenZip(channel)
                 }
-                ComicContainer.RAR -> openChannel(uri).use { channel ->
-                    ComicArchiveExtractor.readComicInfoRar(Channels.newInputStream(channel))
-                }
+                ComicContainer.RAR -> withRarFile(uri, ComicArchiveExtractor::readComicInfoRar)
             }
         }.getOrNull()
     }
@@ -166,34 +166,65 @@ class ComicArchiveFactory(
             ComicContainer.SEVEN_ZIP -> openChannel(uri).use { channel ->
                 ComicArchiveExtractor.extractSevenZip(channel, dir)
             }
-            ComicContainer.RAR -> openChannel(uri).use { channel ->
-                ComicArchiveExtractor.extractRar(Channels.newInputStream(channel), dir)
+            ComicContainer.RAR -> withRarFile(uri) { file ->
+                ComicArchiveExtractor.extractRar(file, dir)
             }
             else -> throw IOException("容器 $container 不需要解压")
         }
 
-    /** zip 复制到本地：解压中央目录指到的每个页条目。 */
+    private fun <T> withRarFile(uri: Uri, block: (File) -> T): T {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: throw IOException("无效的本地漫画路径")
+            return block(File(path))
+        }
+        val file = createTempArchive()
+        try {
+            openChannel(uri).use { channel ->
+                copyToFile(Channels.newInputStream(channel), file)
+            }
+            return block(file)
+        } finally {
+            file.delete()
+        }
+    }
+
+    /** zip 复制到本地：按中央目录页序逐条流式解压。 */
     private fun extractZipInto(uri: Uri, dir: File) =
         openChannel(uri).use { channel ->
-            val archive = openZipComicArchive(channel)
-            try {
-                archive.pages.map { page ->
-                    val target = File(dir, ComicArchiveExtractor.pageTempName(page.index))
-                    target.writeBytes(archive.readPage(page.index))
-                    page.name to target
+            ZipFile.Builder().setSeekableByteChannel(channel).get().use { zip ->
+                val entries = LinkedHashMap<String, org.apache.commons.compress.archivers.zip.ZipArchiveEntry>()
+                for (entry in zip.entries) {
+                    if (!entry.isDirectory) entries[entry.name] = entry
                 }
-            } finally {
-                archive.close()
+                ComicPageOrdering.orderPaths(entries.keys).mapIndexed { index, key ->
+                    val target = File(dir, ComicArchiveExtractor.pageTempName(index))
+                    zip.getInputStream(entries.getValue(key)).use { input -> copyToFile(input, target) }
+                    key.substringAfterLast('/') to target
+                }
             }
         }
 
-    /** 目录漫画复制到本地：逐页读文档流写文件。 */
+    /** 目录漫画复制到本地：按扫描页序逐页流式写文件。 */
     private fun extractFolderInto(uri: Uri, dir: File) =
-        openSafFolder(uri).use { archive ->
-            archive.pages.map { page ->
-                val target = File(dir, ComicArchiveExtractor.pageTempName(page.index))
-                target.writeBytes(archive.readPage(page.index))
-                page.name to target
+        scanFolderChildren(uri).mapIndexed { index, child ->
+            val target = File(dir, ComicArchiveExtractor.pageTempName(index))
+            val input = openDocumentStream(child.key) ?: throw IOException("无法读取漫画页: ${child.name}")
+            input.use { copyToFile(it, target) }
+            child.name to target
+        }
+
+    private fun copyToFile(input: InputStream, target: File) {
+        SpaceCheckedOutputStream(target).use { output ->
+            val buffer = ByteArray(COPY_BUFFER)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                output.write(buffer, 0, count)
             }
         }
+    }
+
+    private companion object {
+        const val COPY_BUFFER = 64 * 1024
+    }
 }

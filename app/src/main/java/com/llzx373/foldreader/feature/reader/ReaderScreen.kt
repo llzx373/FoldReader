@@ -135,11 +135,10 @@ import com.llzx373.foldreader.core.reader.LinkHit
 import com.llzx373.foldreader.core.reader.PageAvoidance
 import com.llzx373.foldreader.feature.bookshelf.BookCover
 import androidx.compose.ui.graphics.asComposePath
+import com.llzx373.foldreader.feature.reader.peel.PeelAnimationLayer
 import com.llzx373.foldreader.feature.reader.peel.PeelController
 import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
-import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
 import com.llzx373.foldreader.feature.reader.peel.PeelPhase
-import com.llzx373.foldreader.feature.reader.peel.PeelRenderer
 import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
 import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
@@ -421,6 +420,7 @@ fun ReaderScreen(
     var peelBackBmp by remember { mutableStateOf<Bitmap?>(null) }
     var peelGeneration by remember { mutableLongStateOf(0L) }
     var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
+    val pendingPeelTouch = remember { arrayOf<Offset?>(null) }
 
     // 掀页位图由本层独占（renderPageBitmap 每次新出），收尾置空前统一回收
     fun recyclePeelBitmaps() {
@@ -641,7 +641,12 @@ fun ReaderScreen(
                 return@launch
             }
             if (peelGeneration != gen) return@launch
-            peel.beginDrag(dragForward, corner, leaf, local, opposite)
+            val latest = pendingPeelTouch[0] ?: pos
+            val latestLocal = screenToLeafLocal(
+                Offset(latest.x - contentRect.left, latest.y - contentRect.top),
+                leaf,
+            )
+            peel.beginDrag(dragForward, corner, leaf, latestLocal, opposite)
         }
     }
     val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
@@ -1230,10 +1235,12 @@ fun ReaderScreen(
                             tracker = VelocityTracker()
                             started = false
                             beginJob = null
+                            pendingPeelTouch[0] = null
                         },
                         onHorizontalDrag = { change, delta ->
                             dragged += delta
                             tracker?.addPosition(change.uptimeMillis, change.position)
+                            pendingPeelTouch[0] = change.position
                             if (!started) {
                                 started = true
                                 dragForward = dragged < 0f
@@ -1514,75 +1521,64 @@ fun ReaderScreen(
                                     .graphicsLayer { translationX = animX.value },
                             )
                         }
-                        val peelTick = peel.progress.value + peel.touchX.value + peel.touchY.value
-                        val peelFrameNow = if (peel.busy) {
-                            peelTick
-                            peel.frame()
-                        } else {
-                            null
-                        }
+                        val spineCenter = (splitLeftPx + splitRightPx) / 2f
+                        val spineLeft = (spineCenter - spineOverlayPx / 2f).roundToInt()
                         val curBmp = peelCurrentBmp
                         val nxtBmp = peelNextBmp
-                        val backBmp = peelBackBmp
-                        if (peelFrameNow != null &&
-                            curBmp != null && nxtBmp != null &&
-                            !curBmp.isRecycled && !nxtBmp.isRecycled
-                        ) {
-                            val (leftLeaf, rightLeaf) = currentPeelLeaves()
-                            val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
-                            PeelOverlay(
-                                frame = peelFrameNow,
-                                leaf = peel.leaf,
-                                current = curBmp,
-                                next = nxtBmp,
-                                background = colors.background,
-                                back = backBmp?.takeUnless { it.isRecycled },
-                                extendLeft = extL,
-                                extendRight = extR,
-                            )
-                        }
-                        if (spreadDual) {
-                            val spineCenter = (splitLeftPx + splitRightPx) / 2f
-                            val spineLeft = (spineCenter - spineOverlayPx / 2f).roundToInt()
-                            val spineClip = peelFrameNow?.takeIf {
-                                curBmp != null && nxtBmp != null &&
-                                    !curBmp.isRecycled && !nxtBmp.isRecycled
-                            }?.let { frame ->
-                                PeelRenderer.flapPathInContent(frame, peel.leaf).also { path ->
-                                    path.offset(-spineLeft.toFloat(), 0f)
-                                }.asComposePath()
-                            }
+                        if (spreadDual && (curBmp == null || nxtBmp == null)) {
                             SpineOverlay(
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .width(SPINE_OVERLAY_WIDTH)
                                     .offset { IntOffset(spineLeft, 0) },
-                                clipOut = spineClip,
                             )
-                            val frameNow = peelFrameNow
-                            if (spineClip != null && frameNow != null) {
-                                // 被纸背盖住的那截阴影随尾段渐升画回纸背上，
-                                // 撤层前后两帧一致，阴影不再突兀蹦出
-                                val (leftLeaf, rightLeaf) = currentPeelLeaves()
-                                val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
-                                val ramp = 1f - peelShadowFade(
-                                    touchLocal = frameNow.touch,
-                                    corner = peel.corner,
-                                    width = peel.leaf.width,
-                                    height = peel.leaf.height,
-                                    oppositeWidth = if (peel.corner.isRight) extL else extR,
-                                )
-                                if (ramp > 0f) {
-                                    SpineOverlay(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .width(SPINE_OVERLAY_WIDTH)
-                                            .offset { IntOffset(spineLeft, 0) },
-                                        clipIn = spineClip,
-                                        alpha = ramp,
-                                    )
-                                }
-                            }
+                        }
+                        if (curBmp != null && nxtBmp != null) {
+                            val (leftLeaf, rightLeaf) = currentPeelLeaves()
+                            val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
+                            PeelAnimationLayer(
+                                controller = peel,
+                                leftLeaf = leftLeaf,
+                                rightLeaf = rightLeaf,
+                                current = curBmp,
+                                next = nxtBmp,
+                                background = colors.background,
+                                back = peelBackBmp,
+                                spineOverlay = if (spreadDual) {
+                                    { frame, flap ->
+                                        flap?.offset(-spineLeft.toFloat(), 0f)
+                                        val spineClip = flap?.asComposePath()
+                                        SpineOverlay(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .width(SPINE_OVERLAY_WIDTH)
+                                                .offset { IntOffset(spineLeft, 0) },
+                                            clipOut = spineClip,
+                                        )
+                                        if (frame != null && spineClip != null) {
+                                            val ramp = 1f - peelShadowFade(
+                                                touchLocal = frame.touch,
+                                                corner = peel.corner,
+                                                width = peel.leaf.width,
+                                                height = peel.leaf.height,
+                                                oppositeWidth = if (peel.corner.isRight) extL else extR,
+                                            )
+                                            if (ramp > 0f) {
+                                                SpineOverlay(
+                                                    modifier = Modifier
+                                                        .fillMaxHeight()
+                                                        .width(SPINE_OVERLAY_WIDTH)
+                                                        .offset { IntOffset(spineLeft, 0) },
+                                                    clipIn = spineClip,
+                                                    alpha = ramp,
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
+                            )
                         }
                     }
                 }

@@ -6,6 +6,7 @@ import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractRa
 import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractSevenZip
 import com.llzx373.foldreader.core.comic.archive.ComicArchiveExtractor.extractTar
 import java.io.File
+import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.StandardOpenOption
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
@@ -14,6 +15,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -131,7 +133,7 @@ class ComicArchiveExtractorTest {
         val store = ComicExtractionStore(temp.newFolder("comics"))
 
         val ordered = store.ensureExtracted("rar-hash") { dir ->
-            comicRar().inputStream().use { extractRar(it, dir) }
+            extractRar(comicRar(), dir)
         }
 
         assertEquals(
@@ -148,11 +150,22 @@ class ComicArchiveExtractorTest {
     fun `rar 跳过不取的条目后仍能正确推进`() {
         val target = temp.newFolder("rar-skip")
 
-        val extracted = comicRar().inputStream().use { extractRar(it, target) }
+        val extracted = extractRar(comicRar(), target)
 
         // readme.txt / Thumbs.db / __MACOSX/._1.png 与 __MACOSX 目录条目都在被跳过之列，
         // 跳过顺序错位的话后面的页内容会对不上
         assertEquals(listOf("1.png", "10.png", "2.png"), extracted.map { it.first })
         assertEquals("10.png", extracted[1].second.readText())
+    }
+
+    @Test
+    fun `写页时空间不足会明确失败`() {
+        val target = File(temp.newFolder("space"), "page")
+
+        assertThrows(IOException::class.java) {
+            SpaceCheckedOutputStream(target, reserveBytes = 100, usableSpace = { 105 }).use {
+                it.write(ByteArray(6))
+            }
+        }
     }
 }

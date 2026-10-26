@@ -33,7 +33,7 @@ val themePresets: List<Pair<ReadingTheme, String>> = listOf(
     ReadingTheme.PARCHMENT to "羊皮纸",
     ReadingTheme.GRAY_WHITE to "灰白",
     ReadingTheme.NIGHT to "夜间",
-    ReadingTheme.AMOLED to "纯黑",
+    ReadingTheme.PAPER to "纸张",
     ReadingTheme.CUSTOM to "自定义",
 )
 

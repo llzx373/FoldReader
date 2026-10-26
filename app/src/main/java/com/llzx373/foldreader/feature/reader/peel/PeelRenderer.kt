@@ -30,7 +30,40 @@ data class PeelBitmapFit(
  * 纸背轮廓 = 页矩形经 Householder 反射后与折痕 A 侧的交集，
  * 因此镜像页边、自由边、折痕交在同一条几何边上。
  */
+class PeelRenderGeometry internal constructor(
+    val aSide: Path,
+    val fSide: Path,
+    val reflected: Path,
+    val flap: Path,
+    val reflection: Matrix,
+    val shadowFade: Float,
+)
+
 object PeelRenderer {
+
+    fun renderGeometry(
+        frame: PeelFrame,
+        width: Float,
+        height: Float,
+        extendLeft: Float = 0f,
+        extendRight: Float = 0f,
+    ): PeelRenderGeometry {
+        val extent = hypot(width, height) * 4f + width + extendLeft + extendRight
+        val n = creaseNormal(frame)
+        val aSide = halfPlanePath(frame.mid, n.x, n.y, extent)
+        val fSide = halfPlanePath(frame.mid, -n.x, -n.y, extent)
+        val reflection = Matrix().apply { setValues(peelReflectionMatrixValues(frame)) }
+        val reflected = reflectedPagePath(frame, width, height, reflection)
+        val flap = intersectOrFallback(reflected, aSide, frame)
+        val shadowFade = peelShadowFade(
+            touchLocal = frame.touch,
+            corner = frame.corner,
+            width = width,
+            height = height,
+            oppositeWidth = if (frame.corner.isRight) extendLeft else extendRight,
+        )
+        return PeelRenderGeometry(aSide, fSide, reflected, flap, reflection, shadowFade)
+    }
 
     fun draw(
         canvas: Canvas,
@@ -47,40 +80,31 @@ object PeelRenderer {
         currentFit: PeelBitmapFit? = null,
         nextFit: PeelBitmapFit? = null,
         backFit: PeelBitmapFit? = null,
+        geometry: PeelRenderGeometry? = null,
     ) {
         val w = leafWidth
         val h = leafHeight
         if (w <= 0f || h <= 0f) return
+        val geo = geometry ?: renderGeometry(frame, w, h, extendLeft, extendRight)
         canvas.save()
         canvas.clipRect(-extendLeft, 0f, w + extendRight, h)
-
-        val extent = hypot(w, h) * 4f + w + extendLeft + extendRight
-        val n = creaseNormal(frame)
-        val aSide = halfPlanePath(frame.mid, n.x, n.y, extent)
-        val fSide = halfPlanePath(frame.mid, -n.x, -n.y, extent)
-        val reflected = reflectedPagePath(frame, w, h)
-        val flap = intersectOrFallback(reflected, aSide, frame)
-        val shadowFade = peelShadowFade(
-            touchLocal = frame.touch,
-            corner = frame.corner,
-            width = w,
-            height = h,
-            oppositeWidth = if (frame.corner.isRight) extendLeft else extendRight,
-        )
-
-        drawUnder(canvas, next, w, h, fSide, flap, backgroundArgb, nextFit)
-        drawFront(canvas, current, w, h, aSide, flap, backgroundArgb, currentFit)
-        drawBack(canvas, back, frame, w, h, reflected, aSide, backgroundArgb, backFit, shadowFade)
-        drawShadows(canvas, frame, w, h, fSide, flap, density, shadowFade)
-
+        drawUnder(canvas, next, w, h, geo.fSide, geo.flap, backgroundArgb, nextFit)
+        drawFront(canvas, current, w, h, geo.aSide, geo.flap, backgroundArgb, currentFit)
+        drawBack(canvas, back, frame, w, h, geo, backgroundArgb, backFit)
+        drawShadows(canvas, frame, w, h, geo.fSide, geo.flap, density, geo.shadowFade)
         canvas.restore()
     }
 
-    fun reflectedPagePath(frame: PeelFrame, width: Float, height: Float): Path {
+    fun reflectedPagePath(frame: PeelFrame, width: Float, height: Float): Path =
+        reflectedPagePath(frame, width, height, Matrix().apply {
+            setValues(peelReflectionMatrixValues(frame))
+        })
+
+    private fun reflectedPagePath(frame: PeelFrame, width: Float, height: Float, matrix: Matrix): Path {
         val path = Path().apply {
             addRect(0f, 0f, width, height, Path.Direction.CW)
         }
-        path.transform(Matrix().apply { setValues(peelReflectionMatrixValues(frame)) })
+        path.transform(matrix)
         return path
     }
 
@@ -147,32 +171,24 @@ object PeelRenderer {
         frame: PeelFrame,
         w: Float,
         h: Float,
-        reflected: Path,
-        aSide: Path,
+        geometry: PeelRenderGeometry,
         backgroundArgb: Int,
         fit: PeelBitmapFit?,
-        fade: Float,
     ) {
         canvas.save()
-        canvas.clipPath(reflected)
-        canvas.clipPath(aSide)
+        canvas.clipPath(geometry.reflected)
+        canvas.clipPath(geometry.aSide)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = backgroundArgb }
         canvas.drawRect(-w, -h, w * 2f, h * 2f, fill)
         if (back != null && !back.isRecycled) {
             canvas.save()
-            canvas.concat(Matrix().apply { setValues(peelReflectionMatrixValues(frame)) })
+            canvas.concat(geometry.reflection)
             canvas.scale(-1f, 1f, w / 2f, 0f)
-            drawBitmapAt(
-                canvas,
-                back,
-                w,
-                h,
-                fit,
-                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
-            )
+            drawBitmapAt(canvas, back, w, h, fit)
             canvas.restore()
         }
-        if (fade > 0f) {
+        if (geometry.shadowFade > 0f) {
+            val fade = geometry.shadowFade
             val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 shader = LinearGradient(
                     frame.mid.x,
@@ -213,15 +229,21 @@ object PeelRenderer {
         canvas.clipRect(0f, 0f, w, h)
         canvas.clipPath(fSide)
         canvas.clipOutPath(flap)
+        val castDx = frame.cornerPoint.x - frame.mid.x
+        val castDy = frame.cornerPoint.y - frame.mid.y
+        val castLength = hypot(castDx, castDy).coerceAtLeast(1f)
+        val castWidth = peelCastShadowWidth(frame.touchToCorner, density)
+        val lift = (peelProgressRatio(frame.touchToCorner, w, h) / 0.45f).coerceIn(0f, 1f)
+        val castStrength = 1f - lift * 0.25f
         val cast = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 frame.mid.x,
                 frame.mid.y,
-                frame.cornerPoint.x,
-                frame.cornerPoint.y,
+                frame.mid.x + castDx / castLength * castWidth,
+                frame.mid.y + castDy / castLength * castWidth,
                 intArrayOf(
-                    shadowAlpha(PEEL_CAST_SHADOW_ALPHA, fade),
-                    shadowAlpha(0x12, fade),
+                    shadowAlpha((PEEL_CAST_SHADOW_ALPHA * castStrength).toInt(), fade),
+                    shadowAlpha((0x12 * castStrength).toInt(), fade),
                     0x00000000,
                 ),
                 floatArrayOf(0f, 0.5f, 1f),

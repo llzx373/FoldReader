@@ -1,9 +1,12 @@
 package com.llzx373.foldreader.feature.reader.peel
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector2D
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.TwoWayConverter
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Stable
@@ -11,25 +14,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
+
+private val peelAutoEasing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+
+private val offsetConverter = TwoWayConverter<Offset, AnimationVector2D>(
+    convertToVector = { AnimationVector2D(it.x, it.y) },
+    convertFromVector = { Offset(it.v1, it.v2) },
+)
 
 enum class PeelPhase { Drag, Complete, Cancel, AutoPlay }
 
 /**
  * 甩出后的收敛：临界阻尼弹簧（不回弹），初始速度由抬手速度提供。
- *
- * 为什么必须用弹簧而不是 tween：Compose 的 [tween] 是固定时长，会**忽略**
- * `animateTo` 的 initialVelocity——只有弹簧会消费它。用它才能把手指离手那一刻的
- * 速度接上，让"轻甩"和"慢拖"的尾段真的不同，且离手瞬间不出现速度突变（"缝"）。
+ * 二维触点共用一条动画，避免 X/Y 分别收敛造成尾段轨迹不一致。
  */
-private val peelSettleSpring = spring<Float>(
+private val peelSettleSpring = spring<Offset>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = Spring.StiffnessMediumLow,
 )
 
 /** 取消回缩：固定 [PEEL_CANCEL_MS] 快速复位，不继承速度（系统纠正用户的动作应当干脆）。 */
-private val peelCancelSpec: FiniteAnimationSpec<Float> =
+private val peelCancelSpec: FiniteAnimationSpec<Offset> =
     tween(PEEL_CANCEL_MS, easing = FastOutSlowInEasing)
 
 /**
@@ -37,7 +42,7 @@ private val peelCancelSpec: FiniteAnimationSpec<Float> =
  *
  * 触点一律是叶内局部坐标。自动播放用 [progress] 驱动 P0→P1→P2；
  * 后半段只钉装订边，页角翻到对页而不是从书上撕下来。
- * 拖动写 [dragTouch]（同步，好跟手）；完成/取消再动画 [touchX]/[touchY]。
+ * 拖动写 [dragTouch]（同步，好跟手）；完成/取消再动画二维 [touch]。
  */
 @Stable
 class PeelController {
@@ -56,8 +61,8 @@ class PeelController {
         private set
 
     val progress = Animatable(0f)
-    val touchX = Animatable(0f)
-    val touchY = Animatable(0f)
+    val touch = Animatable(Offset.Zero, offsetConverter)
+    private var completeOrigin: Offset? = null
 
     val busy: Boolean get() = phase != null
 
@@ -70,11 +75,15 @@ class PeelController {
             }
             PeelPhase.Drag -> {
                 val local = dragTouch ?: return null
-                val crossed = (corner.isRight && local.x < 0f) || (!corner.isRight && local.x > leaf.width)
-                local to crossed
+                local to peelCrossedBinding(local, corner, leaf.width)
             }
-            PeelPhase.Complete -> Offset(touchX.value, touchY.value) to true
-            PeelPhase.Cancel -> Offset(touchX.value, touchY.value) to false
+            PeelPhase.Complete -> {
+                val origin = completeOrigin ?: return null
+                val (_, _, target) = autoPlayPathPoints(corner, leaf.width, leaf.height, oppositeWidth)
+                val local = peelClampCompleteTouch(touch.value, origin, target)
+                local to peelCrossedBinding(local, corner, leaf.width)
+            }
+            PeelPhase.Cancel -> touch.value to peelCrossedBinding(touch.value, corner, leaf.width)
         }
         return peelFrame(
             touchLocal = touch,
@@ -89,6 +98,7 @@ class PeelController {
     fun reset() {
         phase = null
         dragTouch = null
+        completeOrigin = null
         oppositeWidth = 0f
     }
 
@@ -129,12 +139,13 @@ class PeelController {
             reset()
             return false
         }
+        val crossed = peelCrossedBinding(current, corner, leaf.width)
         val frame = peelFrame(
             touchLocal = current,
             corner = corner,
             width = leaf.width,
             height = leaf.height,
-            bindingOnly = false,
+            bindingOnly = crossed,
             oppositeWidth = oppositeWidth,
         )
         val complete = frame != null && shouldCompletePeel(
@@ -146,17 +157,15 @@ class PeelController {
             completeDistancePx = completeDistancePx,
         )
         val (p0, _, p2) = autoPlayPathPoints(corner, leaf.width, leaf.height, oppositeWidth)
-        touchX.snapTo(current.x)
-        touchY.snapTo(current.y)
+        touch.snapTo(current)
         dragTouch = null
         return if (complete) {
+            completeOrigin = current
             phase = PeelPhase.Complete
-            // 完成：把抬手速度交给弹簧，让这一甩继续"飞"出去，而不是从零速重新起步
             animateTouch(p2, peelSettleSpring, Offset(velocityX, velocityY))
             true
         } else {
             phase = PeelPhase.Cancel
-            // 取消：快速回缩，不继承速度。取消时速度通常指向外侧，继承会让纸角先外窜再回弹
             animateTouch(p0, peelCancelSpec, Offset.Zero)
             reset()
             false
@@ -176,25 +185,27 @@ class PeelController {
         this.oppositeWidth = oppositeWidth.coerceAtLeast(0f)
         this.phase = PeelPhase.AutoPlay
         progress.snapTo(0f)
-        progress.animateTo(1f, tween(PEEL_AUTO_MS, easing = FastOutSlowInEasing))
+        progress.animateTo(1f, tween(PEEL_AUTO_MS, easing = peelAutoEasing))
         // 停在 t=1，等调用方 showSpread 后再 reset，避免中间闪回旧页
     }
 
-    /**
-     * 抬手后驱动触点。[velocity] 为叶内局部坐标的抬手速度（px/s），与 [touchX]/[touchY]
-     * 同一坐标系，直接交给 `animateTo` 作为初始速度——只有弹簧 spec 会真正消费它。
-     */
     private suspend fun animateTouch(
         target: Offset,
-        spec: FiniteAnimationSpec<Float>,
+        spec: FiniteAnimationSpec<Offset>,
         velocity: Offset = Offset.Zero,
     ) {
-        coroutineScope {
-            launch { touchX.animateTo(target.x, spec, velocity.x) }
-            launch { touchY.animateTo(target.y, spec, velocity.y) }
-        }
+        touch.animateTo(target, spec, velocity)
     }
 }
+
+fun peelCrossedBinding(touch: Offset, corner: PeelCorner, width: Float): Boolean =
+    (corner.isRight && touch.x < 0f) || (!corner.isRight && touch.x > width)
+
+/** 弹簧可以过冲，但呈现给纸张的触点停在起点到终点的包围盒内。 */
+fun peelClampCompleteTouch(value: Offset, origin: Offset, target: Offset): Offset = Offset(
+    value.x.coerceIn(minOf(origin.x, target.x), maxOf(origin.x, target.x)),
+    value.y.coerceIn(minOf(origin.y, target.y), maxOf(origin.y, target.y)),
+)
 
 /** 纯函数：跟手抬手是否应该翻页。供单测，不依赖 [PeelController]。 */
 fun peelEndShouldComplete(

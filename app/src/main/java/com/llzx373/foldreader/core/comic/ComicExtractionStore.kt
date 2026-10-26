@@ -22,10 +22,19 @@ class ComicExtractionStore(private val comicsDir: File) {
 
     private val cacheRoot = File(comicsDir, "cache")
     private val localRoot = File(comicsDir, "local")
+    private val tempRoot = File(comicsDir, "tmp")
     private val locks = ConcurrentHashMap<String, Any>()
 
     private fun cacheDir(hash: String) = File(cacheRoot, hash)
     private fun localDir(hash: String) = File(localRoot, hash)
+
+    /** 为需要文件通道的归档创建独立临时文件；调用方用后必须删除。 */
+    fun createTempArchive(): File {
+        if (!tempRoot.mkdirs() && !tempRoot.isDirectory) {
+            throw IOException("无法创建漫画临时目录")
+        }
+        return File.createTempFile("archive-", ".tmp", tempRoot)
+    }
 
     /** 解压缓存的页目录。 */
     fun cachePagesDir(hash: String): File = File(cacheDir(hash), "pages")
@@ -58,9 +67,14 @@ class ComicExtractionStore(private val comicsDir: File) {
             val dir = cachePagesDir(hash)
             dir.deleteRecursively()
             dir.mkdirs()
-            val pages = finalizePages(dir, extract(dir))
-            File(cacheDir(hash), MARKER).writeText(VERSION.toString(), Charsets.UTF_8)
-            pages
+            try {
+                val pages = finalizePages(dir, extract(dir))
+                File(cacheDir(hash), MARKER).writeText(VERSION.toString(), Charsets.UTF_8)
+                pages
+            } catch (t: Throwable) {
+                cacheDir(hash).deleteRecursively()
+                throw t
+            }
         }
 
     /**
@@ -102,14 +116,17 @@ class ComicExtractionStore(private val comicsDir: File) {
     }
 
     /**
-     * 回收解压缓存：不在书架上的 hash 直接删。本地副本（`local/`）不动——
-     * 那是用户显式选择的持久数据，只由「删除本地副本」或删书清理。
+     * 回收解压缓存与中断留下的临时归档：不在书架上或没有有效完成标记的 hash 直接删。
+     * 本地副本（`local/`）不动——那是用户显式选择的持久数据，只由「删除本地副本」或删书清理。
      */
     fun sweep(liveHashes: Set<String>): Int {
-        val dirs = cacheRoot.listFiles { f -> f.isDirectory } ?: return 0
         var deleted = 0
+        tempRoot.listFiles()?.forEach { file ->
+            if (file.deleteRecursively()) deleted++
+        }
+        val dirs = cacheRoot.listFiles { f -> f.isDirectory }.orEmpty()
         for (dir in dirs) {
-            if (dir.name in liveHashes) continue
+            if (dir.name in liveHashes && cachedPages(dir.name) != null) continue
             if (dir.deleteRecursively()) deleted++
         }
         return deleted

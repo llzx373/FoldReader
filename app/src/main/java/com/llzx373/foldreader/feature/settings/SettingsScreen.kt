@@ -99,6 +99,7 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
     var showCleanLevelDialog by remember { mutableStateOf(false) }
     var showCleanTogglesDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
+    var fontPendingDelete by remember { mutableStateOf<String?>(null) }
     val apiKeyConfigured by viewModel.apiKeyConfigured.collectAsState()
     val aiTestState by viewModel.aiTestState.collectAsState()
     var showAiPresetDialog by remember { mutableStateOf(false) }
@@ -321,16 +322,52 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionHeader("字体")
+            Text(
+                text = "系统字体",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
             val systemFonts = listOf("default", "serif", "sans_serif", "monospace")
-            (systemFonts + importedFonts.map { "${FontManager.FILE_PREFIX}$it" }).forEach { key ->
+            systemFonts.forEach { key ->
                 ListItem(
                     headlineContent = { Text(FontManager.displayNameOf(key)) },
-                    trailingContent = {
-                        Switch(
-                            checked = prefs.fontKey == key,
-                            onCheckedChange = { if (it) viewModel.updateFontKey(key) },
+                    leadingContent = {
+                        RadioButton(
+                            selected = prefs.fontKey == key,
+                            onClick = { viewModel.updateFontKey(key) },
                         )
                     },
+                    modifier = Modifier.clickable { viewModel.updateFontKey(key) },
+                )
+            }
+            Text(
+                text = "已导入字体",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            if (importedFonts.isEmpty()) {
+                ListItem(headlineContent = { Text("尚未导入字体") })
+            }
+            importedFonts.forEach { fileName ->
+                val key = "${FontManager.FILE_PREFIX}$fileName"
+                val displayName = FontManager.displayNameOf(key)
+                ListItem(
+                    headlineContent = { Text(displayName) },
+                    leadingContent = {
+                        RadioButton(
+                            selected = prefs.fontKey == key,
+                            onClick = { viewModel.updateFontKey(key) },
+                        )
+                    },
+                    trailingContent = {
+                        IconButton(onClick = { fontPendingDelete = key }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "删除字体 $displayName",
+                            )
+                        }
+                    },
+                    modifier = Modifier.clickable { viewModel.updateFontKey(key) },
                 )
             }
             ListItem(
@@ -1143,6 +1180,32 @@ fun SettingsScreen(foldableUiState: FoldableUiState) {
                 supportingContent = { Text("为折叠屏而生的本地阅读器：展开双页如书，折起单手从容") },
             )
         }
+    }
+
+    fontPendingDelete?.let { key ->
+        val displayName = FontManager.displayNameOf(key)
+        AlertDialog(
+            onDismissRequest = { fontPendingDelete = null },
+            title = { Text("删除字体") },
+            text = { Text("删除“$displayName”后，使用该字体的书籍将恢复默认字体。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        fontPendingDelete = null
+                        viewModel.deleteFont(key) { deleted ->
+                            Toast.makeText(
+                                context,
+                                if (deleted) "字体已删除" else "字体删除失败",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { fontPendingDelete = null }) { Text("取消") }
+            },
+        )
     }
 
     if (showChapterRulesDialog) {

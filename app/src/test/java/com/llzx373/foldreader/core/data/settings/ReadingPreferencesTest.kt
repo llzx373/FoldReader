@@ -15,6 +15,13 @@ class ReadingPreferencesTest {
     }
 
     @Test
+    fun `旧纯黑主题映射为纸张且非法值仍回落默认`() {
+        assertEquals(ReadingTheme.PAPER, readingThemeOrDefault("PAPER", ReadingTheme.GREEN))
+        assertEquals(ReadingTheme.PAPER, readingThemeOrDefault("AMOLED", ReadingTheme.GREEN))
+        assertEquals(ReadingTheme.NIGHT, readingThemeOrDefault("NOT_A_THEME", ReadingTheme.NIGHT))
+    }
+
+    @Test
     fun `枚举名非法时回落默认值`() {
         assertEquals(ReadingTheme.GREEN, enumOrDefault("NOT_A_THEME", ReadingTheme.GREEN))
     }

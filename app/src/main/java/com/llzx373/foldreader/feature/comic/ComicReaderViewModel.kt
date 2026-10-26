@@ -93,7 +93,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 @Immutable
 data class ComicUiState(
@@ -198,6 +200,7 @@ class ComicReaderViewModel(
     val scrollRequests: SharedFlow<Int> = _scrollRequests.asSharedFlow()
     private var sizeProbeJob: Job? = null
     private val decodeMutex = Mutex()
+    private val decodePermits = Semaphore(MAX_CONCURRENT_DECODES)
     private val thumbnailLoading = mutableSetOf<Int>()
     private val thumbnailOrder = ArrayDeque<Int>()
 
@@ -1089,6 +1092,7 @@ class ComicReaderViewModel(
      * 因为滚动时条目是逐个进入视口的，互相取消只会让每一页都白解一遍。
      */
     fun ensurePage(index: Int) {
+        if (targetWidthPx <= 0 || targetHeightPx <= 0) return
         if (index !in 0 until _uiState.value.pageCount) return
         if (images.containsKey(index)) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -1172,13 +1176,13 @@ class ComicReaderViewModel(
         }
     }
 
-    private suspend fun loadThumbnail(index: Int): ImageBitmap? {
+    private suspend fun loadThumbnail(index: Int): ImageBitmap? = decodePermits.withPermit {
         val file = thumbnailFile(index)
         if (file != null && file.isFile && file.length() > 0L) {
-            BitmapFactory.decodeFile(file.absolutePath)?.let { return it.asImageBitmap() }
+            BitmapFactory.decodeFile(file.absolutePath)?.let { return@withPermit it.asImageBitmap() }
         }
-        val opened = source ?: return null
-        val bitmap = opened.loadThumbnail(index, THUMB_W, THUMB_H) ?: return null
+        val opened = source ?: return@withPermit null
+        val bitmap = opened.loadThumbnail(index, THUMB_W, THUMB_H) ?: return@withPermit null
         // 落盘：编成 JPEG 体积小、解码快，网格滚动时基本是纯 IO
         if (file != null) {
             runCatching {
@@ -1188,7 +1192,7 @@ class ComicReaderViewModel(
                 }
             }
         }
-        return bitmap.asImageBitmap()
+        bitmap.asImageBitmap()
     }
 
     private fun thumbnailFile(index: Int): File? {
@@ -1455,6 +1459,7 @@ class ComicReaderViewModel(
     }
 
     private fun decodeVisiblePages() {
+        if (targetWidthPx <= 0 || targetHeightPx <= 0) return
         val wanted = visiblePages()
         if (wanted.isEmpty()) return
         // 正在解码的批次直接作废：新位置优先级更高，避免快速翻页时排队解码旧页
@@ -1473,8 +1478,8 @@ class ComicReaderViewModel(
         }
     }
 
-    private suspend fun decode(index: Int): PagedPageImage? {
-        val opened = source ?: return null
+    private suspend fun decode(index: Int): PagedPageImage? = decodePermits.withPermit {
+        val opened = source ?: return@withPermit null
         // PDF 裁边（M32）：裁框是渲染参数——支持裁框渲染的来源（PdfPagedSource 经
         // OcrTextLayerSource 转发）直接出裁后内容，裁后区域按槽位分辨率光栅化；
         // 不支持的来源（漫画容器）或裁剪路径失败时回退整页出图 + 位图裁剪（M31 行为）
@@ -1482,11 +1487,11 @@ class ComicReaderViewModel(
         if (cropEnabled && box != null) {
             (opened as? com.llzx373.foldreader.core.paged.CroppedRenderSource)
                 ?.loadPageCropped(index, targetWidthPx, targetHeightPx, box)
-                ?.let { return it }
+                ?.let { return@withPermit it }
         }
         // 目标尺寸只在这里给：漫画据此降采样解码，PDF 据此渲染成对应大小的位图
-        val image = opened.loadPage(index, targetWidthPx, targetHeightPx) ?: return null
-        return applyCrop(image)
+        val image = opened.loadPage(index, targetWidthPx, targetHeightPx) ?: return@withPermit null
+        applyCrop(image)
     }
 
     private suspend fun putImage(index: Int, image: PagedPageImage) {
@@ -1495,26 +1500,19 @@ class ComicReaderViewModel(
             // 从 IO 线程改 SnapshotStateMap：走可变快照，界面侧才会被正确通知
             Snapshot.withMutableSnapshot {
                 images[index] = image
-                imageBytes += image.byteCount
-                evictFarImages()
+                imageBytes = trimImageCacheByBytes(
+                    images,
+                    byteCount = { it.byteCount },
+                    visiblePages = currentPages().toSet(),
+                    currentPage = _uiState.value.pageIndex,
+                    maxBytes = MAX_IMAGE_BYTES,
+                )
             }
         }
         // 页位图晚于覆盖层到达时补生成抹除位图（只限当前跨页）
         if (index in currentPages() && translationOverlays.containsKey(index)) {
             ensureInpainted(index)
         }
-    }
-
-    /**
-     * 按字节预算淘汰离当前页最远的已解码页。
-     * 双页 + 预取窗口本来就只有几页，这里防的是长时间浏览后整本都被解出来。
-     */
-    private fun evictFarImages() {
-        if (imageBytes <= MAX_IMAGE_BYTES || images.size <= KEEP_NEAREST_PAGES) return
-        val current = _uiState.value.pageIndex
-        val victim = images.keys.maxByOrNull { abs(it - current) } ?: return
-        if (victim == current) return
-        images.remove(victim)?.let { imageBytes -= it.byteCount }
     }
 
     /**
@@ -1713,8 +1711,8 @@ class ComicReaderViewModel(
         /** 已解码页的内存预算上限。 */
         const val MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
-        /** 无论预算如何，至少保留当前可见跨页再前后各两页（最多 6 张）加一点余量。 */
-        const val KEEP_NEAREST_PAGES = 8
+        /** 正文与缩略图同时进行的位图解码数，限制 native 分配峰值。 */
+        private const val MAX_CONCURRENT_DECODES = 2
 
         /** 白边检测的采样页数上限（均匀分布全书；白边是大尺度特征，小图就够）。 */
         private const val CROP_SAMPLE_PAGES = 8
@@ -1767,4 +1765,22 @@ class ComicReaderViewModel(
             }
         }
     }
+}
+
+internal fun <T> trimImageCacheByBytes(
+    images: MutableMap<Int, T>,
+    byteCount: (T) -> Int,
+    visiblePages: Set<Int>,
+    currentPage: Int,
+    maxBytes: Int,
+): Int {
+    var totalBytes = images.values.sumOf { byteCount(it).coerceAtLeast(0) }
+    while (totalBytes > maxBytes) {
+        val victim = images.keys
+            .filterNot { it in visiblePages }
+            .maxByOrNull { abs(it - currentPage) } ?: break
+        val removed = images.remove(victim) ?: break
+        totalBytes -= byteCount(removed).coerceAtLeast(0)
+    }
+    return totalBytes
 }

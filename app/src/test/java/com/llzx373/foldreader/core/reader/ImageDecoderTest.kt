@@ -70,6 +70,31 @@ class ImageDecoderTest {
     }
 
     @Test
+    fun `无效目标不会触发解码且倍率计算可安全返回`() {
+        val file = writePng(400, 300)
+
+        assertEquals(1, sampleSizeFor(400, 300, 0, 0))
+        assertNull(decodeSampledImage(file, targetW = 0, targetH = 0))
+    }
+
+    @Test
+    fun `极端长图继续降采样到单页字节上限内`() {
+        val sample = sampleSizeFor(1200, 100_000, 1080, 1920)
+
+        assertEquals(4, sample)
+        assertEquals(true, decodedByteCount(1200, 100_000, sample) <= MAX_DECODED_IMAGE_BYTES)
+    }
+
+    @Test
+    fun `最大整型尺寸不会发生乘法或倍率溢出`() {
+        val sample = sampleSizeFor(Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
+
+        assertEquals(true, sample > 0)
+        assertEquals(true, decodedByteCount(Int.MAX_VALUE, Int.MAX_VALUE, sample) <= MAX_DECODED_IMAGE_BYTES)
+        assertEquals(Long.MAX_VALUE, decodedByteCount(Int.MAX_VALUE, Int.MAX_VALUE, 1))
+    }
+
+    @Test
     fun `不可解码的文件返回 null`() {
         val file = File.createTempFile("decode-broken", ".png").apply { deleteOnExit() }
         file.writeBytes(byteArrayOf(1, 2, 3, 4, 5))

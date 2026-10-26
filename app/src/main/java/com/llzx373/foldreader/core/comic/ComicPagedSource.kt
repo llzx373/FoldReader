@@ -27,6 +27,7 @@ class ComicPagedSource(private val archive: ComicArchive) : PagedImageSource {
         targetWidth: Int,
         targetHeight: Int,
     ): PagedPageImage? {
+        if (targetWidth <= 0 || targetHeight <= 0) return null
         val bytes = archive.readPage(index)
         if (ComicImageDecoder.isAnimated(bytes)) {
             ComicImageDecoder.decodeAnimated(bytes, targetWidth, targetHeight)?.let { drawable ->

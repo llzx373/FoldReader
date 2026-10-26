@@ -3,7 +3,9 @@ package com.llzx373.foldreader.core.comic.archive
 import com.llzx373.foldreader.core.comic.ComicPageOrdering
 import com.llzx373.foldreader.core.comic.ExtractedPage
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.nio.channels.SeekableByteChannel
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
@@ -39,7 +41,10 @@ internal object ComicArchiveExtractor {
     fun extractSevenZip(channel: SeekableByteChannel, targetDir: File): List<ExtractedPage> {
         val extracted = ArrayList<ExtractedPage>()
         var counter = 0
-        SevenZFile.builder().setSeekableByteChannel(channel).get().use { sevenZ ->
+        SevenZFile.builder()
+            .setSeekableByteChannel(channel)
+            .setMaxMemoryLimitKiB(128 * 1024)
+            .get().use { sevenZ ->
             val buffer = ByteArray(COPY_BUFFER)
             while (true) {
                 val entry = sevenZ.nextEntry ?: break
@@ -50,7 +55,7 @@ internal object ComicArchiveExtractor {
                     continue
                 }
                 val target = File(targetDir, pageTempName(counter++))
-                target.outputStream().use { out ->
+                SpaceCheckedOutputStream(target).use { out ->
                     while (true) {
                         val n = sevenZ.read(buffer)
                         if (n < 0) break
@@ -63,10 +68,10 @@ internal object ComicArchiveExtractor {
         return extracted
     }
 
-    fun extractRar(input: InputStream, targetDir: File): List<ExtractedPage> {
+    fun extractRar(file: File, targetDir: File): List<ExtractedPage> {
         val extracted = ArrayList<ExtractedPage>()
         var counter = 0
-        Archive(input).use { archive ->
+        Archive(file).use { archive ->
             while (true) {
                 val header = archive.nextFileHeader() ?: break
                 val name = header.fileName
@@ -101,7 +106,10 @@ internal object ComicArchiveExtractor {
     }
 
     fun readComicInfoSevenZip(channel: SeekableByteChannel): ByteArray? {
-        SevenZFile.builder().setSeekableByteChannel(channel).get().use { sevenZ ->
+        SevenZFile.builder()
+            .setSeekableByteChannel(channel)
+            .setMaxMemoryLimitKiB(128 * 1024)
+            .get().use { sevenZ ->
             val buffer = ByteArray(COPY_BUFFER)
             while (true) {
                 val entry = sevenZ.nextEntry ?: break
@@ -129,8 +137,8 @@ internal object ComicArchiveExtractor {
         return null
     }
 
-    fun readComicInfoRar(input: InputStream): ByteArray? {
-        Archive(input).use { archive ->
+    fun readComicInfoRar(file: File): ByteArray? {
+        Archive(file).use { archive ->
             while (true) {
                 val header = archive.nextFileHeader() ?: break
                 val name = header.fileName
@@ -162,9 +170,37 @@ internal object ComicArchiveExtractor {
 
     private fun copyToPage(targetDir: File, counter: Int, input: InputStream): File {
         val target = File(targetDir, pageTempName(counter))
-        target.outputStream().use { out -> input.copyTo(out) }
+        SpaceCheckedOutputStream(target).use { out -> input.copyTo(out) }
         return target
     }
 
     private const val COPY_BUFFER = 64 * 1024
 }
+
+internal class SpaceCheckedOutputStream(
+    private val target: File,
+    private val reserveBytes: Long = EXTRACTION_RESERVE_BYTES,
+    private val usableSpace: () -> Long = { target.usableSpace },
+) : OutputStream() {
+    private val output = target.outputStream()
+
+    override fun write(value: Int) {
+        ensureSpace(1)
+        output.write(value)
+    }
+
+    override fun write(buffer: ByteArray, offset: Int, length: Int) {
+        ensureSpace(length)
+        output.write(buffer, offset, length)
+    }
+
+    override fun close() = output.close()
+
+    private fun ensureSpace(byteCount: Int) {
+        if (usableSpace() < reserveBytes + byteCount) {
+            throw IOException("可用存储空间不足，已停止解压漫画")
+        }
+    }
+}
+
+private const val EXTRACTION_RESERVE_BYTES = 64L * 1024 * 1024

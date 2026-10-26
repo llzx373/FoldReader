@@ -129,14 +129,13 @@ import com.llzx373.foldreader.feature.reader.resolveTabletopLayout
 import com.llzx373.foldreader.feature.reader.supportsTapAction
 import com.llzx373.foldreader.feature.reader.tapZoneOf
 import com.llzx373.foldreader.feature.reader.volumeKeyDispatch
+import com.llzx373.foldreader.feature.reader.peel.PeelAnimationLayer
 import com.llzx373.foldreader.feature.reader.peel.PeelBitmapFit
 import com.llzx373.foldreader.feature.reader.peel.PeelController
 import com.llzx373.foldreader.feature.reader.peel.PeelLeaf
-import com.llzx373.foldreader.feature.reader.peel.PeelOverlay
 import com.llzx373.foldreader.feature.reader.peel.PeelPhase
 import com.llzx373.foldreader.feature.reader.peel.activePeelLeaf
 import com.llzx373.foldreader.feature.reader.peel.peelCornerFor
-import com.llzx373.foldreader.feature.reader.peel.peelFlapExtend
 import com.llzx373.foldreader.feature.reader.peel.peelOppositeWidth
 import com.llzx373.foldreader.feature.reader.peel.screenToLeafLocal
 import com.llzx373.foldreader.ui.EmptyState
@@ -467,6 +466,7 @@ fun ComicReaderScreen(
     var peelOwnsBitmaps by remember { mutableStateOf(false) }
     var peelGeneration by remember { mutableLongStateOf(0L) }
     var lastTapOffset by remember { mutableStateOf<Offset?>(null) }
+    val pendingPeelTouch = remember { arrayOf<Offset?>(null) }
     val lastPeelCancelGeom = remember { intArrayOf(-1, -1, -1, -1, -1) }
     /** 掀页开始时锁死的左右叶。覆盖层只用这份，避免配对在动画中途翻转。 */
     var peelLeafSession by remember { mutableStateOf<Pair<PeelLeaf, PeelLeaf?>?>(null) }
@@ -808,7 +808,12 @@ fun ComicReaderScreen(
                 return@launch
             }
             if (peelGeneration != gen) return@launch
-            peel.beginDrag(peelFwd, corner, leaf, local, opposite)
+            val latest = pendingPeelTouch[0] ?: pos
+            val latestLocal = screenToLeafLocal(
+                Offset(latest.x - contentRect.left, latest.y - contentRect.top),
+                leaf,
+            )
+            peel.beginDrag(peelFwd, corner, leaf, latestLocal, opposite)
         }
     }
     val latestPeelDragLocal by rememberUpdatedState<(Offset) -> Offset> { pos ->
@@ -1059,10 +1064,12 @@ fun ComicReaderScreen(
                             tracker = VelocityTracker()
                             started = false
                             beginJob = null
+                            pendingPeelTouch[0] = null
                         },
                         onHorizontalDrag = { change, delta ->
                             dragged += delta
                             tracker?.addPosition(change.uptimeMillis, change.position)
+                            pendingPeelTouch[0] = change.position
                             if (!started) {
                                 started = true
                                 peelFwd = dragged < 0f
@@ -1309,32 +1316,17 @@ fun ComicReaderScreen(
                             )
                         }
                     }
-                    val peelTick = peel.progress.value + peel.touchX.value + peel.touchY.value
-                    val peelFrameNow = if (peel.busy) {
-                        peelTick
-                        peel.frame()
-                    } else {
-                        null
-                    }
                     val curBmp = peelCurrentBmp
-                    val nxtBmp = peelNextBmp
-                    val backBmp = peelBackBmp
-                    if (peelFrameNow != null &&
-                        curBmp != null &&
-                        !curBmp.isRecycled &&
-                        (nxtBmp == null || !nxtBmp.isRecycled)
-                    ) {
+                    if (curBmp != null) {
                         val (leftLeaf, rightLeaf) = peelLeafSession ?: (peel.leaf to null)
-                        val (extL, extR) = peelFlapExtend(peel.corner, peel.leaf, leftLeaf, rightLeaf)
-                        PeelOverlay(
-                            frame = peelFrameNow,
-                            leaf = peel.leaf,
+                        PeelAnimationLayer(
+                            controller = peel,
+                            leftLeaf = leftLeaf,
+                            rightLeaf = rightLeaf,
                             current = curBmp,
-                            next = nxtBmp,
+                            next = peelNextBmp,
                             background = colors.background,
-                            back = backBmp?.takeUnless { it.isRecycled },
-                            extendLeft = extL,
-                            extendRight = extR,
+                            back = peelBackBmp,
                             currentFit = peelCurrentFit,
                             nextFit = peelNextFit,
                             backFit = peelBackFit,

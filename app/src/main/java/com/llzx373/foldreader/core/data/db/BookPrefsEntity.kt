@@ -93,6 +93,9 @@ interface BookPrefsDao {
     @Query("UPDATE book_prefs SET comicDirection = :direction")
     suspend fun applyGlobalComicDirection(direction: String)
 
+    @Query("UPDATE book_prefs SET fontKey = 'default' WHERE fontKey = :fontKey")
+    suspend fun resetDeletedFont(fontKey: String)
+
     @Query("DELETE FROM book_prefs WHERE bookId = :bookId")
     suspend fun delete(bookId: Long)
 }

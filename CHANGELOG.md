@@ -8,6 +8,8 @@
 
 ### Added
 
+- **纸张阅读主题与字体管理**：新增 Kami 风格的「纸张」主题（暖纸底、深暖灰正文、油墨蓝强调色），替换原「纯黑」内置主题；旧设置和旧备份中的 `AMOLED` 自动映射为纸张，无需数据库迁移。设置页字体区分组展示系统字体和已导入字体名称，导入后可单选应用，也可确认后删除；删除字体时全局及每书引用统一恢复默认字体。
+
 - **备份包含书籍文件本体**：备份格式从纯 JSON 升级为 zip 容器——`backup.json`（书架数据/进度/书签/标注/统计/偏好，BACKUP_VERSION 升 11，每书新增 `archiveFile`/`archiveCover` 引用）+ `files/<内容哈希>.<扩展名>`（书文件本体）+ `covers/`（封面），全链路流式读写不整读内存。恢复时 zip 内书文件解压回 `filesDir/source/`（哈希命名天然幂等，重复恢复命中既有副本），本机没有的书按备份元数据**自动新建入架**后再走既有匹配合并链路——不再需要"先手动导入原书再恢复"。外部 `content://` 漫画容器尝试读源打包，读不到的（授权失效）与目录漫画跳过并在导出结果中记名；派生物（压平/清洗副本、分页缓存、搜索索引、翻译产物）不进备份，打开书时自动重建。三条链路同步切换：本地导出/导入（导入嗅探 PK 魔数分流，**旧版纯 JSON 备份完全兼容**、行为不变）、本地自动备份（文件名改 `.zip`，轮转同步）、WebDAV 备份（上传/下载改流式经临时文件，不再整字节数组进内存）。设置页文案同步为"含书籍文件本体、恢复自动还原"语义，导出结果提示 skipped 清单、恢复结果提示新建入架本数。AI 密钥与 WebDAV 密码不进备份的既有排除不变。新增 zip 往返单测（新书落盘/幂等重复导入/skipped 与 missing/旧 JSON 兼容/预览不解压），备份相关 61 个单测全绿。
 
 - **工程质量**（M35）：①OCR 硬件加速（NNAPI，可选）——onnxruntime-mobile 1.18.0 内置 NNAPI EP 评审核实后接入：`OcrEngine` / `InpaintEngine` 会话开启时优先注册 NNAPI（不支持的算子自动拆回 CPU，注册失败记诊断日志回落纯 CPU）；设置页新增「OCR 硬件加速（NNAPI）」开关**默认关**（驱动质量因设备而异，建议配合整卷翻译实测后再开），改动即时作废会话重建生效；GPU EP 评审结论排除（需换 53MB 全量包，与钉 mobile 线冲突），评审文档 `docs/OCR推理后端评审.md`。②Baseline Profile + Macrobenchmark——新增 `:baselineprofile` 模块与 app 的 `benchmark` 构建类型（同 release 的 R8 产物 + profileable）：生成器覆盖冷启动到书架 / 开书 / 翻页三条旅程，种子书经 benchmark 变体特有广播生成（30 章 × 60 段，正式包不含）；Macrobenchmark 三基准（冷启动 StartupTiming、开书与翻页 FrameTiming，COLD×8 / CompilationMode.Partial）同机前后对比防回归，不设绝对阈值；生成与跑测步骤写入 `docs/构建与打包.md`。③TalkBack 无障碍——文本阅读器跨页容器挂整页正文 contentDescription + liveRegion 翻页自动播报 + 「上一页/下一页」自定义动作，滚动模式逐页语义，选区手柄补标签与落定播报；漫画阅读器页式容器页码/译文状态描述 + 翻页动作、滚动条漫逐条目语义；书架网格项合并子语义并播报选中态。本里程碑新增 10 个单测；顺带修复 3 个早于本里程碑就存在的 lint error（NonObservableLocale ×2、FlowOperatorInvokedInComposition ×1），CI 三门禁恢复全绿。

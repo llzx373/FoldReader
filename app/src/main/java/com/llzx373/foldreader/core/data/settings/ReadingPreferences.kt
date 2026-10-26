@@ -5,7 +5,7 @@ import com.llzx373.foldreader.core.ai.AiTargetLang
 import com.llzx373.foldreader.core.format.clean.CleanLevel
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 
-enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, AMOLED, CUSTOM }
+enum class ReadingTheme { GREEN, PARCHMENT, GRAY_WHITE, NIGHT, PAPER, CUSTOM }
 
 enum class PageTurnMode { COVER, SIMULATION, NONE, SCROLL }
 
@@ -226,6 +226,11 @@ internal fun decodeCustomChapterRules(raw: String?): List<String> = decodeRuleLi
 
 internal inline fun <reified T : Enum<T>> enumOrDefault(name: String?, default: T): T =
     name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: default
+
+fun readingThemeOrDefault(name: String?, default: ReadingTheme): ReadingTheme = when (name) {
+    "AMOLED" -> ReadingTheme.PAPER
+    else -> enumOrDefault(name, default)
+}
 
 /** M23：漫画视觉翻译（页图像外发）是否已对该书明示确认。 */
 fun ReadingPreferences.aiComicVisionConfirmedFor(bookId: Long): Boolean =

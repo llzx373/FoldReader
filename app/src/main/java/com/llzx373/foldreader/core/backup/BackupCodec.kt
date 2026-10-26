@@ -19,6 +19,7 @@ import com.llzx373.foldreader.core.data.settings.ReadingPreferences
 import com.llzx373.foldreader.core.data.settings.SettingsRepository
 import com.llzx373.foldreader.core.data.settings.TapAction
 import com.llzx373.foldreader.core.data.settings.enumOrDefault
+import com.llzx373.foldreader.core.data.settings.readingThemeOrDefault
 import com.llzx373.foldreader.core.format.clean.CleanToggles
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
@@ -761,7 +762,7 @@ class BackupCodec(
             settingsRepository.setLetterSpacingEm(json.optDouble("letterSpacingEm").toFloat())
         }
         if (json.has("themeId")) {
-            settingsRepository.setTheme(enumOrDefault(json.optString("themeId"), current.themeId))
+            settingsRepository.setTheme(readingThemeOrDefault(json.optString("themeId"), current.themeId))
         }
         if (json.has("customBackgroundArgb") || json.has("customTextArgb")) {
             val background = when {

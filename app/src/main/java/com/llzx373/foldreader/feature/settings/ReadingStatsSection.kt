@@ -30,6 +30,15 @@ fun ReadingStatsSection(stats: SettingsViewModel.ReadingStatsUi) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
     )
+    if (!stats.available) {
+        Text(
+            text = "阅读统计暂不可用，其他设置仍可正常使用",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        return
+    }
     // M34：今日目标进度 + 连续打卡（数据全部复用 reading_sessions 日桶，零新采集）
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
         Row {

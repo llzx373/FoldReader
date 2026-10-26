@@ -1,6 +1,7 @@
 package com.llzx373.foldreader.feature.reader.peel
 
 import android.graphics.Bitmap
+import android.graphics.Path
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -13,6 +14,55 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
+
+@Composable
+fun PeelAnimationLayer(
+    controller: PeelController,
+    leftLeaf: PeelLeaf,
+    rightLeaf: PeelLeaf?,
+    current: Bitmap,
+    next: Bitmap?,
+    background: Color,
+    back: Bitmap? = null,
+    currentFit: PeelBitmapFit? = null,
+    nextFit: PeelBitmapFit? = null,
+    backFit: PeelBitmapFit? = null,
+    spineOverlay: (@Composable (PeelFrame?, Path?) -> Unit)? = null,
+) {
+    val frame = controller.frame()
+    val leaf = controller.leaf
+    val geometry = if (frame != null && !current.isRecycled && next?.isRecycled != true) {
+        val (extendLeft, extendRight) = peelFlapExtend(controller.corner, leaf, leftLeaf, rightLeaf)
+        val geometry = PeelRenderer.renderGeometry(
+            frame = frame,
+            width = leaf.width,
+            height = leaf.height,
+            extendLeft = extendLeft,
+            extendRight = extendRight,
+        )
+        PeelOverlay(
+            frame = frame,
+            leaf = leaf,
+            current = current,
+            next = next,
+            background = background,
+            back = back?.takeUnless { it.isRecycled },
+            extendLeft = extendLeft,
+            extendRight = extendRight,
+            currentFit = currentFit,
+            nextFit = nextFit,
+            backFit = backFit,
+            geometry = geometry,
+        )
+        geometry
+    } else {
+        null
+    }
+    if (spineOverlay != null) {
+        val flap = geometry?.flap?.let { Path(it).apply { offset(leaf.originX, leaf.originY) } }
+        spineOverlay(frame, flap)
+    }
+}
 
 /**
  * 盖在被掀那一叶上。后半段画布向对页伸出，纸背可以盖住另一叶。
@@ -33,6 +83,7 @@ fun PeelOverlay(
     currentFit: PeelBitmapFit? = null,
     nextFit: PeelBitmapFit? = null,
     backFit: PeelBitmapFit? = null,
+    geometry: PeelRenderGeometry? = null,
 ) {
     val density = LocalDensity.current
     val totalW = (extendLeft + leaf.width + extendRight).coerceAtLeast(1f)
@@ -68,6 +119,7 @@ fun PeelOverlay(
                 currentFit = currentFit,
                 nextFit = nextFit,
                 backFit = backFit,
+                geometry = geometry,
             )
             native.restore()
         }

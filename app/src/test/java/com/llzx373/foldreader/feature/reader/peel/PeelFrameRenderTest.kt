@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * 用说明书公式把单页、横向双页各 9 帧画成 PNG，供观感审查。
@@ -257,6 +258,75 @@ class PeelFrameRenderTest {
     }
 
     @Test
+    fun `写出轨迹接点与四角检查帧`() {
+        val outDir = framesDir().apply { mkdirs() }
+        val current = fakePage(singleW, singleH, "当前页", currentBody, currentBg, currentText, "— 7 —")
+        val next = fakePage(singleW, singleH, "下一页", nextBody, nextBg, nextText, "— 8 —")
+        for (step in 0..6) {
+            val t = 0.65f + step * 0.025f
+            val bmp = renderSingleFrame(t, singleW, singleH, current, next, currentBg, 3f)
+            File(outDir, "joint-t${(t * 1000).roundToInt()}.png").outputStream().use {
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bmp.recycle()
+        }
+        for (corner in PeelCorner.entries) {
+            val bmp = renderSingleFrame(0.5f, singleW, singleH, current, next, currentBg, 3f, corner)
+            File(outDir, "corner-${corner.name.lowercase()}.png").outputStream().use {
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bmp.recycle()
+        }
+        current.recycle()
+        next.recycle()
+    }
+
+    @Test
+    fun `写出双页书脊阴影合成方案对比示例`() {
+        val outDir = File(framesDir().parentFile, "peel-spine-example").apply { mkdirs() }
+        val (leftLeaf, rightLeaf) = peelLeaves(
+            dual = true,
+            contentWidth = dualW.toFloat(),
+            contentHeight = dualH.toFloat(),
+            pageWidth = dualPageW.toFloat(),
+            splitLeft = dualPageW.toFloat(),
+            splitRight = (dualPageW + dualHinge).toFloat(),
+        )
+        checkNotNull(rightLeaf)
+        val leftPage = fakePage(dualPageW, dualH, "左页 · 第 12 页", leftBody, currentBg, currentText, "— 12 —")
+        val rightCurrent = fakePage(dualPageW, dualH, "右页 · 第 13 页", currentBody, currentRightBg, currentText, "— 13 —")
+        val rightNext = fakePage(dualPageW, dualH, "右页 · 第 15 页", nextBody, nextBg, nextText, "— 15 —")
+        val leftNext = fakePage(dualPageW, dualH, "左页 · 第 14 页", nextLeftBody, nextBg, nextText, "— 14 —")
+        var currentMidPixel = 0
+        var proposedMidPixel = 0
+        for (step in 0..20) {
+            val t = step / 20f
+            for (proposed in listOf(false, true)) {
+                val bmp = renderDualFrame(
+                    t, leftLeaf, rightLeaf, leftPage, rightCurrent, rightNext, leftNext,
+                    spineOnTop = proposed,
+                )
+                if (step == 10) {
+                    val pixel = bmp.getPixel(rightLeaf.originX.toInt() + 8, (dualH * 0.35f).toInt())
+                    if (proposed) proposedMidPixel = pixel else currentMidPixel = pixel
+                }
+                val prefix = if (proposed) "proposed" else "current"
+                File(outDir, "$prefix-%02d.png".format(step)).outputStream().use {
+                    bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+                bmp.recycle()
+            }
+        }
+        fun brightness(color: Int) =
+            ((color ushr 16) and 0xFF) + ((color ushr 8) and 0xFF) + (color and 0xFF)
+        assertTrue(
+            "书脊阴影应画在纸张上层，而不是翻页时被纸张盖住",
+            brightness(proposedMidPixel) < brightness(currentMidPixel),
+        )
+        listOf(leftPage, rightCurrent, rightNext, leftNext).forEach(Bitmap::recycle)
+    }
+
+    @Test
     fun `letterbox dest 露出纸色而不是把图拉满`() {
         val page = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888)
         page.eraseColor(0xFF00AA00.toInt())
@@ -368,14 +438,15 @@ class PeelFrameRenderTest {
         next: Bitmap,
         backgroundArgb: Int,
         density: Float,
+        corner: PeelCorner = PeelCorner.BOTTOM_RIGHT,
     ): Bitmap {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawBitmap(current, 0f, 0f, null)
-        val touch = autoPlayTouch(t, PeelCorner.BOTTOM_RIGHT, width.toFloat(), height.toFloat())
+        val touch = autoPlayTouch(t, corner, width.toFloat(), height.toFloat())
         val frame = peelFrame(
             touchLocal = touch,
-            corner = PeelCorner.BOTTOM_RIGHT,
+            corner = corner,
             width = width.toFloat(),
             height = height.toFloat(),
             bindingOnly = autoPlayBindingOnly(t),
@@ -499,11 +570,12 @@ class PeelFrameRenderTest {
         rightCurrent: Bitmap,
         rightNext: Bitmap,
         leftNext: Bitmap,
+        spineOnTop: Boolean = false,
     ): Bitmap {
         val bmp = Bitmap.createBitmap(dualW, dualH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         drawDualBase(canvas, leftLeaf, rightLeaf, leftPage, rightCurrent)
-        drawSpine(canvas, leftLeaf, rightLeaf)
+        if (!spineOnTop) drawSpine(canvas, leftLeaf, rightLeaf)
         val opposite = peelOppositeWidth(PeelCorner.BOTTOM_RIGHT, rightLeaf, leftLeaf, rightLeaf)
         val touch = autoPlayTouch(
             t,
@@ -537,6 +609,13 @@ class PeelFrameRenderTest {
             )
             canvas.restore()
         }
+        if (spineOnTop) {
+            if (frame == null) {
+                drawSpine(canvas, leftLeaf, rightLeaf)
+            } else {
+                drawAnimatedSpineExample(canvas, frame, leftLeaf, rightLeaf, opposite)
+            }
+        }
         return bmp
     }
 
@@ -563,22 +642,62 @@ class PeelFrameRenderTest {
         )
     }
 
-    private fun drawSpine(canvas: Canvas, leftLeaf: PeelLeaf, rightLeaf: PeelLeaf) {
-        val left = leftLeaf.right
-        val right = rightLeaf.originX
-        if (right <= left) return
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                left,
-                0f,
-                right,
-                0f,
-                intArrayOf(0x66000000.toInt(), 0x99000000.toInt(), 0x44000000.toInt()),
-                floatArrayOf(0f, 0.5f, 1f),
-                Shader.TileMode.CLAMP,
-            )
+    private fun drawAnimatedSpineExample(
+        canvas: Canvas,
+        frame: PeelFrame,
+        leftLeaf: PeelLeaf,
+        rightLeaf: PeelLeaf,
+        oppositeWidth: Float,
+    ) {
+        val flap = PeelRenderer.flapPathInContent(frame, rightLeaf)
+        canvas.save()
+        canvas.clipOutPath(flap)
+        drawSpine(canvas, leftLeaf, rightLeaf)
+        canvas.restore()
+        val ramp = 1f - peelShadowFade(
+            frame.touch,
+            frame.corner,
+            rightLeaf.width,
+            rightLeaf.height,
+            oppositeWidth,
+        )
+        if (ramp > 0f) {
+            canvas.save()
+            canvas.clipPath(flap)
+            drawSpine(canvas, leftLeaf, rightLeaf, ramp)
+            canvas.restore()
         }
-        canvas.drawRect(left, 0f, right, dualH.toFloat(), paint)
+    }
+
+    private fun drawSpine(canvas: Canvas, leftLeaf: PeelLeaf, rightLeaf: PeelLeaf, alpha: Float = 1f) {
+        val center = (leftLeaf.right + rightLeaf.originX) / 2f
+        val shadowWidth = 16f * 2.5f
+        fun faded(alphaByte: Int): Int = (alphaByte * alpha).toInt() shl 24
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = LinearGradient(
+            center - shadowWidth,
+            0f,
+            center,
+            0f,
+            intArrayOf(0x00000000, faded(0x1A)),
+            floatArrayOf(0f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(center - shadowWidth, 0f, center, dualH.toFloat(), paint)
+        paint.shader = LinearGradient(
+            center,
+            0f,
+            center + shadowWidth,
+            0f,
+            intArrayOf(faded(0x1A), 0x00000000),
+            floatArrayOf(0f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(center, 0f, center + shadowWidth, dualH.toFloat(), paint)
+        paint.shader = null
+        paint.color = faded(0x2E)
+        paint.strokeWidth = 2.5f
+        canvas.drawLine(center, 0f, center, dualH.toFloat(), paint)
     }
 
     private fun fakePage(
