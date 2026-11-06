@@ -2025,6 +2025,7 @@ fun ReaderScreen(
                         if (scrollMode) viewModel.enterScrollMode()
                     }
                 },
+                onCloseMenu = { menuVisible = false },
                 onOpenCatalog = { catalogVisible = true },
                 onSwitchToPagedMode = onSwitchToPagedMode,
                 onOpenAnnotations = { annotationsVisible = true },

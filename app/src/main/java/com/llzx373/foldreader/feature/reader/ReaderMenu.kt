@@ -1,5 +1,15 @@
 package com.llzx373.foldreader.feature.reader
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,8 +21,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -220,11 +233,9 @@ fun ReaderMenuPanel(
     displayPageTurnMode: PageTurnMode = prefs.pageTurnMode,
     colors: ReaderColors,
     onSeekFraction: (Float) -> Unit,
+    onCloseMenu: () -> Unit,
     onOpenCatalog: () -> Unit,
-    /**
-     * PDF 文本模式下的「切到页式」出口；null = 不给这个入口（其它格式没有这个问题）。
-     * 与 [onOpenCatalog] 并列放在操作区，因为它同样属于"换一种方式看这本书"。
-     */
+    /** PDF 文本模式下的「切到页式」出口；null = 不给这个入口（其它格式没有这个问题）。 */
     onSwitchToPagedMode: (() -> Unit)? = null,
     onOpenAnnotations: () -> Unit,
     onCyclePageTurnMode: () -> Unit,
@@ -264,7 +275,7 @@ fun ReaderMenuPanel(
     onStopSpeaking: () -> Unit,
     /** M19 翻译组：AI 已配置且当前为文本内容时显示整组。 */
     translateAvailable: Boolean = false,
-    /** 译文视角下隐藏 TTS 组，翻译组只留视角切换。 */
+    /** 译文视角下隐藏翻译写入与对照入口，只保留原文/译文切换。 */
     viewModeTranslated: Boolean = false,
     /** 目标语言已有可用译文（决定原文模式下是否显示视角切换）。 */
     translationReady: Boolean = false,
@@ -286,9 +297,7 @@ fun ReaderMenuPanel(
     onOpenBookQa: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    var showBrightness by remember { mutableStateOf(false) }
-    var showLayout by remember { mutableStateOf(false) }
-    var showTheme by remember { mutableStateOf(false) }
+    var section by remember { mutableStateOf(ReaderMenuSection.HOME) }
     var sliderFraction by remember { mutableStateOf(progressFraction) }
     var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
     var lineSpacingDraft by remember { mutableStateOf<Float?>(null) }
@@ -297,382 +306,511 @@ fun ReaderMenuPanel(
     var letterSpacingDraft by remember { mutableStateOf<Float?>(null) }
     var ttsRateDraft by remember { mutableStateOf<Float?>(null) }
     var ttsPitchDraft by remember { mutableStateOf<Float?>(null) }
+
+    BackHandler {
+        if (section == ReaderMenuSection.HOME) onCloseMenu() else section = ReaderMenuSection.HOME
+    }
+    LaunchedEffect(translateAvailable) {
+        if (!translateAvailable && section == ReaderMenuSection.TRANSLATION) {
+            section = ReaderMenuSection.HOME
+        }
+    }
+
+    val maxPanelHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.55f
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(max = maxPanelHeight),
         color = colors.background,
         contentColor = colors.text,
         tonalElevation = 4.dp,
         shadowElevation = 8.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Slider(
-                value = sliderFraction,
-                onValueChange = { sliderFraction = it },
-                onValueChangeFinished = { onSeekFraction(sliderFraction) },
-            )
-            Text(
-                text = formatPercent(sliderFraction),
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.End),
-            )
-            if (chapterProgress != null) {
-                Text(
-                    text = chapterProgress,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.End),
+        AnimatedContent(
+            targetState = section,
+            transitionSpec = {
+                val forward = targetState != ReaderMenuSection.HOME
+                val enter = fadeIn(tween(180, delayMillis = 40)) +
+                    slideInVertically(tween(220, easing = FastOutSlowInEasing)) { height ->
+                        if (forward) height / 24 else -height / 24
+                    }
+                val exit = fadeOut(tween(100)) +
+                    slideOutVertically(tween(180, easing = FastOutSlowInEasing)) { height ->
+                        if (forward) -height / 24 else height / 24
+                    }
+                enter.togetherWith(exit).using(
+                    SizeTransform(clip = false) { _, _ ->
+                        tween(220, easing = FastOutSlowInEasing)
+                    },
                 )
-            }
-            if (showLayout) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("字号", style = MaterialTheme.typography.labelMedium)
+            },
+            label = "readerMenuSection",
+            modifier = Modifier.fillMaxWidth(),
+        ) { current ->
+            if (current == ReaderMenuSection.HOME) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Slider(
-                        value = fontSizeDraft ?: prefs.fontSizeSp,
-                        onValueChange = { fontSizeDraft = it },
-                        onValueChangeFinished = {
-                            fontSizeDraft?.let(onSetFontSize)
-                            fontSizeDraft = null
-                        },
-                        valueRange = 12f..32f,
-                        steps = 9,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
+                        value = sliderFraction,
+                        onValueChange = { sliderFraction = it },
+                        onValueChangeFinished = { onSeekFraction(sliderFraction) },
                     )
                     Text(
-                        text = "%.0f".format(fontSizeDraft ?: prefs.fontSizeSp),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("行距", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = lineSpacingDraft ?: prefs.lineSpacingMultiplier,
-                        onValueChange = { lineSpacingDraft = it },
-                        onValueChangeFinished = {
-                            lineSpacingDraft?.let(onSetLineSpacing)
-                            lineSpacingDraft = null
-                        },
-                        valueRange = 1.0f..2.2f,
-                        steps = 11,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = "%.1f".format(lineSpacingDraft ?: prefs.lineSpacingMultiplier),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("行长", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = maxLineCharsDraft ?: prefs.maxLineChars.toFloat(),
-                        onValueChange = { maxLineCharsDraft = it },
-                        onValueChangeFinished = {
-                            maxLineCharsDraft?.let { onSetMaxLineChars(it.toInt()) }
-                            maxLineCharsDraft = null
-                        },
-                        valueRange = 18f..40f,
-                        steps = 21,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = "%.0f".format(maxLineCharsDraft ?: prefs.maxLineChars.toFloat()),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("段距", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = paragraphSpacingDraft ?: prefs.paragraphSpacingEm,
-                        onValueChange = { paragraphSpacingDraft = it },
-                        onValueChangeFinished = {
-                            paragraphSpacingDraft?.let(onSetParagraphSpacing)
-                            paragraphSpacingDraft = null
-                        },
-                        valueRange = 0f..1.0f,
-                        steps = 9,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = "%.1f".format(paragraphSpacingDraft ?: prefs.paragraphSpacingEm),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("字距", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = letterSpacingDraft ?: prefs.letterSpacingEm,
-                        onValueChange = { letterSpacingDraft = it },
-                        onValueChangeFinished = {
-                            letterSpacingDraft?.let(onSetLetterSpacing)
-                            letterSpacingDraft = null
-                        },
-                        valueRange = 0f..0.2f,
-                        steps = 9,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = "%.2f".format(letterSpacingDraft ?: prefs.letterSpacingEm),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("边距", style = MaterialTheme.typography.labelMedium)
-                    ButtonGroup(
-                        overflowIndicator = {},
-                        modifier = Modifier.padding(start = 12.dp),
-                    ) {
-                        listOf("小", "中", "大").forEachIndexed { level, label ->
-                            toggleableItem(
-                                checked = prefs.marginLevel == level,
-                                label = label,
-                                onCheckedChange = { onSetMarginLevel(level) },
-                                weight = 1f)
-                        }
-                    }
-                }
-            }
-            if (showTheme) {
-                ThemePicker(
-                    prefs = prefs,
-                    onSelectTheme = onSelectTheme,
-                    onPickCustomBackground = onPickCustomBackground,
-                    onPickCustomText = onPickCustomText,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-            }
-            if (showBrightness) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("亮度", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = if (prefs.readerBrightness < 0f) 0.5f else prefs.readerBrightness,
-                        onValueChange = onSetBrightness,
-                        valueRange = 0.05f..1f,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    TextButton(onClick = { onSetBrightness(-1f) }) { Text("跟随系统") }
-                }
-            }
-            ButtonGroup(
-                overflowIndicator = {},
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                clickableItem(onClick = onOpenCatalog, label = "目录", weight = 1f)
-                if (onSwitchToPagedMode != null) {
-                    clickableItem(onClick = onSwitchToPagedMode, label = "页式", weight = 1f)
-                }
-                toggleableItem(
-                    checked = showLayout,
-                    label = "版式",
-                    onCheckedChange = { on ->
-                        showLayout = on
-                        if (on) {
-                            showBrightness = false
-                            showTheme = false
-                        }
-                    },
-                    weight = 1f)
-                toggleableItem(
-                    checked = showTheme,
-                    label = "主题",
-                    onCheckedChange = { on ->
-                        showTheme = on
-                        if (on) {
-                            showBrightness = false
-                            showLayout = false
-                        }
-                    },
-                    weight = 1f)
-                toggleableItem(
-                    checked = showBrightness,
-                    label = "亮度",
-                    onCheckedChange = { on ->
-                        showBrightness = on
-                        if (on) {
-                            showLayout = false
-                            showTheme = false
-                        }
-                    },
-                    weight = 1f)
-            }
-            PageTurnModeSplitButton(
-                current = displayPageTurnMode,
-                onCycle = onCyclePageTurnMode,
-                onSelect = onSelectPageTurnMode,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            ButtonGroup(
-                overflowIndicator = {},
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                clickableItem(
-                    onClick = onCycleDualPageMode,
-                    label = "双页：${dualPageModeLabel(prefs.dualPageMode)}",
-                    weight = 1f)
-                clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
-                clickableItem(onClick = onOpenSettings, label = "设置", weight = 1f)
-            }
-            // M26：TTS 在译文视角同样可用（译本坐标系天然兼容，语言跟随译本）
-            ButtonGroup(
-                overflowIndicator = {},
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (ttsPlaying) {
-                    clickableItem(
-                        onClick = onToggleSpeakPause,
-                        label = if (ttsPaused) "继续朗读" else "暂停朗读",
-                        weight = 1f)
-                    clickableItem(
-                        onClick = onSleepTimer,
-                        label = "定时：${ttsSleepText ?: "关"}",
-                        weight = 1f)
-                    clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
-                } else {
-                    clickableItem(onClick = onSpeakFromHere, label = "从当前位置朗读", weight = 1f)
-                    clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
-                }
-            }
-            // 朗读中的语速/音调：当次临时调整，不写回全局设置
-            if (ttsPlaying) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("语速", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = ttsRateDraft ?: ttsSpeechRate,
-                        onValueChange = { ttsRateDraft = it },
-                        onValueChangeFinished = {
-                            ttsRateDraft?.let(onTtsSpeechRate)
-                            ttsRateDraft = null
-                        },
-                        valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
-                        steps = 14,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = TtsSpeech.formatRate(ttsRateDraft ?: ttsSpeechRate),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("音调", style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = ttsPitchDraft ?: ttsPitch,
-                        onValueChange = { ttsPitchDraft = it },
-                        onValueChangeFinished = {
-                            ttsPitchDraft?.let(onTtsPitch)
-                            ttsPitchDraft = null
-                        },
-                        valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
-                        steps = 14,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                    )
-                    Text(
-                        text = TtsSpeech.formatPitch(ttsPitchDraft ?: ttsPitch),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-            if (translateAvailable) {
-                ButtonGroup(
-                    overflowIndicator = {},
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (!viewModeTranslated) {
-                        clickableItem(onClick = onTranslatePage, label = "翻译本页", weight = 1f)
-                        clickableItem(
-                            onClick = onTranslateUnit,
-                            label = when {
-                                unitTranslateRunning -> "翻译中…"
-                                hasChapters -> "翻译本章"
-                                else -> "翻译本节"
-                            },
-                            weight = 1f)
-                    }
-                    if (viewModeTranslated || translationReady) {
-                        clickableItem(
-                            onClick = onToggleViewMode,
-                            label = if (viewModeTranslated) "视角：译文" else "视角：原文",
-                            weight = 1f)
-                    }
-                }
-                // M29 问书：与翻译组同区（AI 配置即出现），译文视角不给
-                if (onOpenBookQa != null && !viewModeTranslated) {
-                    ButtonGroup(
-                        overflowIndicator = {},
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        clickableItem(onClick = onOpenBookQa, label = "问书", weight = 1f)
-                    }
-                }
-                // 视角 2/3：与当前版式互斥的两个对照入口（双页对照只在双页翻页布局，
-                // 段落对照只在滚动模式），译文视角下隐藏
-                if (!viewModeTranslated && (bilingualCompareAvailable || paragraphCompareAvailable)) {
-                    ButtonGroup(
-                        overflowIndicator = {},
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (bilingualCompareAvailable) {
-                            clickableItem(
-                                onClick = onToggleBilingualCompare,
-                                label = "双页对照：${if (bilingualCompareActive) "开" else "关"}",
-                                weight = 1f)
-                        }
-                        if (paragraphCompareAvailable) {
-                            clickableItem(
-                                onClick = onToggleParagraphCompare,
-                                label = "段落对照：${if (paragraphCompareActive) "开" else "关"}",
-                                weight = 1f)
-                        }
-                    }
-                }
-            }
-            // 开关都是中文长标签，窄屏下横排会容不下被逐字竖排：改用 FlowRow 自动换行，
-            // 每个标签本身强制单行，换不下就整块挪到下一行。
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-                itemVerticalAlignment = Alignment.CenterVertically,
-            ) {
-                EncodingMenuEntry()
-                MenuToggle("自动缩进：${if (prefs.autoIndentEnabled) "开" else "关"}") {
-                    onToggleAutoIndent(!prefs.autoIndentEnabled)
-                }
-                MenuToggle("空白归一化：${if (prefs.normalizeWhitespaceEnabled) "开" else "关"}") {
-                    onToggleNormalizeWhitespace(!prefs.normalizeWhitespaceEnabled)
-                }
-                MenuToggle("自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}") {
-                    onToggleAutoPage(!prefs.autoPageEnabled)
-                }
-                if (prefs.autoPageEnabled) {
-                    MenuToggle(autoPageModeLabel(prefs.autoPageMode), onCycleAutoPageMode)
-                    MenuToggle(autoPageSpeedLabel(prefs), onCycleAutoPageSpeed)
-                }
-                if (autoPageStatus.enabled && autoPageStatus.paused) {
-                    Text(
-                        text = "已暂停",
+                        text = formatPercent(sliderFraction),
                         style = MaterialTheme.typography.labelSmall,
-                        color = colors.accent,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier.align(Alignment.End),
                     )
+                    if (chapterProgress != null) {
+                        Text(
+                            text = chapterProgress,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
+                    ButtonGroup(
+                        overflowIndicator = {},
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        clickableItem(onClick = onOpenCatalog, label = "目录", weight = 1f)
+                        clickableItem(onClick = onOpenAnnotations, label = "标注", weight = 1f)
+                        clickableItem(
+                            onClick = { section = ReaderMenuSection.TTS },
+                            label = "听书",
+                            weight = 1f,
+                        )
+                        if (translateAvailable) {
+                            clickableItem(
+                                onClick = { section = ReaderMenuSection.TRANSLATION },
+                                label = "翻译",
+                                weight = 1f,
+                            )
+                        }
+                    }
+                    ButtonGroup(
+                        overflowIndicator = {},
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        clickableItem(
+                            onClick = { section = ReaderMenuSection.LAYOUT },
+                            label = "版式",
+                            weight = 1f,
+                        )
+                        clickableItem(
+                            onClick = { section = ReaderMenuSection.THEME },
+                            label = "主题",
+                            weight = 1f,
+                        )
+                        clickableItem(
+                            onClick = { section = ReaderMenuSection.BRIGHTNESS },
+                            label = "亮度",
+                            weight = 1f,
+                        )
+                        clickableItem(
+                            onClick = { section = ReaderMenuSection.MORE },
+                            label = "更多",
+                            weight = 1f,
+                        )
+                    }
+                }
+            } else {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        IconButton(onClick = { section = ReaderMenuSection.HOME }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "返回阅读菜单",
+                            )
+                        }
+                        Text(
+                            text = current.title,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        when (current) {
+                            ReaderMenuSection.LAYOUT -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("字号", style = MaterialTheme.typography.labelMedium)
+                                    Slider(
+                                        value = fontSizeDraft ?: prefs.fontSizeSp,
+                                        onValueChange = { fontSizeDraft = it },
+                                        onValueChangeFinished = {
+                                            fontSizeDraft?.let(onSetFontSize)
+                                            fontSizeDraft = null
+                                        },
+                                        valueRange = 12f..32f,
+                                        steps = 9,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                    )
+                                    Text(
+                                        text = "%.0f".format(fontSizeDraft ?: prefs.fontSizeSp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("行距", style = MaterialTheme.typography.labelMedium)
+                                    Slider(
+                                        value = lineSpacingDraft ?: prefs.lineSpacingMultiplier,
+                                        onValueChange = { lineSpacingDraft = it },
+                                        onValueChangeFinished = {
+                                            lineSpacingDraft?.let(onSetLineSpacing)
+                                            lineSpacingDraft = null
+                                        },
+                                        valueRange = 1.0f..2.2f,
+                                        steps = 11,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                    )
+                                    Text(
+                                        text = "%.1f".format(lineSpacingDraft ?: prefs.lineSpacingMultiplier),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("行长", style = MaterialTheme.typography.labelMedium)
+                                    Slider(
+                                        value = maxLineCharsDraft ?: prefs.maxLineChars.toFloat(),
+                                        onValueChange = { maxLineCharsDraft = it },
+                                        onValueChangeFinished = {
+                                            maxLineCharsDraft?.let { onSetMaxLineChars(it.toInt()) }
+                                            maxLineCharsDraft = null
+                                        },
+                                        valueRange = 18f..40f,
+                                        steps = 21,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                    )
+                                    Text(
+                                        text = "%.0f".format(maxLineCharsDraft ?: prefs.maxLineChars.toFloat()),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("段距", style = MaterialTheme.typography.labelMedium)
+                                    Slider(
+                                        value = paragraphSpacingDraft ?: prefs.paragraphSpacingEm,
+                                        onValueChange = { paragraphSpacingDraft = it },
+                                        onValueChangeFinished = {
+                                            paragraphSpacingDraft?.let(onSetParagraphSpacing)
+                                            paragraphSpacingDraft = null
+                                        },
+                                        valueRange = 0f..1.0f,
+                                        steps = 9,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                    )
+                                    Text(
+                                        text = "%.1f".format(paragraphSpacingDraft ?: prefs.paragraphSpacingEm),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("字距", style = MaterialTheme.typography.labelMedium)
+                                    Slider(
+                                        value = letterSpacingDraft ?: prefs.letterSpacingEm,
+                                        onValueChange = { letterSpacingDraft = it },
+                                        onValueChangeFinished = {
+                                            letterSpacingDraft?.let(onSetLetterSpacing)
+                                            letterSpacingDraft = null
+                                        },
+                                        valueRange = 0f..0.2f,
+                                        steps = 9,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                    )
+                                    Text(
+                                        text = "%.2f".format(letterSpacingDraft ?: prefs.letterSpacingEm),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("边距", style = MaterialTheme.typography.labelMedium)
+                                    ButtonGroup(
+                                        overflowIndicator = {},
+                                        modifier = Modifier.padding(start = 12.dp),
+                                    ) {
+                                        listOf("小", "中", "大").forEachIndexed { level, label ->
+                                            toggleableItem(
+                                                checked = prefs.marginLevel == level,
+                                                label = label,
+                                                onCheckedChange = { onSetMarginLevel(level) },
+                                                weight = 1f,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            ReaderMenuSection.THEME -> ThemePicker(
+                                prefs = prefs,
+                                onSelectTheme = onSelectTheme,
+                                onPickCustomBackground = onPickCustomBackground,
+                                onPickCustomText = onPickCustomText,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+
+                            ReaderMenuSection.BRIGHTNESS -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("亮度", style = MaterialTheme.typography.labelMedium)
+                                Slider(
+                                    value = if (prefs.readerBrightness < 0f) 0.5f else prefs.readerBrightness,
+                                    onValueChange = onSetBrightness,
+                                    valueRange = 0.05f..1f,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 8.dp),
+                                )
+                                TextButton(onClick = { onSetBrightness(-1f) }) { Text("跟随系统") }
+                            }
+
+                            ReaderMenuSection.TTS -> {
+                                ButtonGroup(
+                                    overflowIndicator = {},
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    if (ttsPlaying) {
+                                        clickableItem(
+                                            onClick = onToggleSpeakPause,
+                                            label = if (ttsPaused) "继续朗读" else "暂停朗读",
+                                            weight = 1f,
+                                        )
+                                        clickableItem(
+                                            onClick = onSleepTimer,
+                                            label = "定时：${ttsSleepText ?: "关"}",
+                                            weight = 1f,
+                                        )
+                                        clickableItem(onClick = onStopSpeaking, label = "停止朗读", weight = 1f)
+                                    } else {
+                                        clickableItem(
+                                            onClick = onSpeakFromHere,
+                                            label = "从当前位置朗读",
+                                            weight = 1f,
+                                        )
+                                        clickableItem(onClick = onSpeakChapter, label = "朗读本章", weight = 1f)
+                                    }
+                                }
+                                if (ttsPlaying) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("语速", style = MaterialTheme.typography.labelMedium)
+                                        Slider(
+                                            value = ttsRateDraft ?: ttsSpeechRate,
+                                            onValueChange = { ttsRateDraft = it },
+                                            onValueChangeFinished = {
+                                                ttsRateDraft?.let(onTtsSpeechRate)
+                                                ttsRateDraft = null
+                                            },
+                                            valueRange = TtsSpeech.MIN_RATE..TtsSpeech.MAX_RATE,
+                                            steps = 14,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 8.dp),
+                                        )
+                                        Text(
+                                            text = TtsSpeech.formatRate(ttsRateDraft ?: ttsSpeechRate),
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("音调", style = MaterialTheme.typography.labelMedium)
+                                        Slider(
+                                            value = ttsPitchDraft ?: ttsPitch,
+                                            onValueChange = { ttsPitchDraft = it },
+                                            onValueChangeFinished = {
+                                                ttsPitchDraft?.let(onTtsPitch)
+                                                ttsPitchDraft = null
+                                            },
+                                            valueRange = TtsSpeech.MIN_PITCH..TtsSpeech.MAX_PITCH,
+                                            steps = 14,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 8.dp),
+                                        )
+                                        Text(
+                                            text = TtsSpeech.formatPitch(ttsPitchDraft ?: ttsPitch),
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    }
+                                }
+                            }
+
+                            ReaderMenuSection.TRANSLATION -> {
+                                ButtonGroup(
+                                    overflowIndicator = {},
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    if (!viewModeTranslated) {
+                                        clickableItem(onClick = onTranslatePage, label = "翻译本页", weight = 1f)
+                                        clickableItem(
+                                            onClick = onTranslateUnit,
+                                            label = when {
+                                                unitTranslateRunning -> "翻译中…"
+                                                hasChapters -> "翻译本章"
+                                                else -> "翻译本节"
+                                            },
+                                            weight = 1f,
+                                        )
+                                    }
+                                    if (viewModeTranslated || translationReady) {
+                                        clickableItem(
+                                            onClick = onToggleViewMode,
+                                            label = if (viewModeTranslated) "视角：译文" else "视角：原文",
+                                            weight = 1f,
+                                        )
+                                    }
+                                }
+                                if (onOpenBookQa != null && !viewModeTranslated) {
+                                    ButtonGroup(
+                                        overflowIndicator = {},
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        clickableItem(onClick = onOpenBookQa, label = "问书", weight = 1f)
+                                    }
+                                }
+                                if (!viewModeTranslated &&
+                                    (bilingualCompareAvailable || paragraphCompareAvailable)
+                                ) {
+                                    ButtonGroup(
+                                        overflowIndicator = {},
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        if (bilingualCompareAvailable) {
+                                            clickableItem(
+                                                onClick = onToggleBilingualCompare,
+                                                label = "双页对照：${if (bilingualCompareActive) "开" else "关"}",
+                                                weight = 1f,
+                                            )
+                                        }
+                                        if (paragraphCompareAvailable) {
+                                            clickableItem(
+                                                onClick = onToggleParagraphCompare,
+                                                label = "段落对照：${if (paragraphCompareActive) "开" else "关"}",
+                                                weight = 1f,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            ReaderMenuSection.MORE -> {
+                                Text(
+                                    text = "翻页与自动阅读",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                )
+                                PageTurnModeSplitButton(
+                                    current = displayPageTurnMode,
+                                    onCycle = onCyclePageTurnMode,
+                                    onSelect = onSelectPageTurnMode,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                ButtonGroup(
+                                    overflowIndicator = {},
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    clickableItem(
+                                        onClick = onCycleDualPageMode,
+                                        label = "双页：${dualPageModeLabel(prefs.dualPageMode)}",
+                                        weight = 1f,
+                                    )
+                                    clickableItem(
+                                        onClick = { onToggleAutoPage(!prefs.autoPageEnabled) },
+                                        label = "自动翻页：${if (prefs.autoPageEnabled) "开" else "关"}",
+                                        weight = 1f,
+                                    )
+                                }
+                                if (prefs.autoPageEnabled) {
+                                    ButtonGroup(
+                                        overflowIndicator = {},
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        clickableItem(
+                                            onClick = onCycleAutoPageMode,
+                                            label = "模式：${autoPageModeLabel(prefs.autoPageMode)}",
+                                            weight = 1f,
+                                        )
+                                        clickableItem(
+                                            onClick = onCycleAutoPageSpeed,
+                                            label = autoPageSpeedLabel(prefs),
+                                            weight = 1f,
+                                        )
+                                    }
+                                }
+                                if (autoPageStatus.enabled && autoPageStatus.paused) {
+                                    Text(
+                                        text = "自动翻页已暂停",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.accent,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                    )
+                                }
+                                Text(
+                                    text = "文本与阅读模式",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                                )
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                                    itemVerticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    EncodingMenuEntry()
+                                    MenuToggle("自动缩进：${if (prefs.autoIndentEnabled) "开" else "关"}") {
+                                        onToggleAutoIndent(!prefs.autoIndentEnabled)
+                                    }
+                                    MenuToggle("空白归一化：${if (prefs.normalizeWhitespaceEnabled) "开" else "关"}") {
+                                        onToggleNormalizeWhitespace(!prefs.normalizeWhitespaceEnabled)
+                                    }
+                                }
+                                if (onSwitchToPagedMode != null) {
+                                    TextButton(
+                                        onClick = onSwitchToPagedMode,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("切到页式阅读")
+                                    }
+                                }
+                                TextButton(
+                                    onClick = onOpenSettings,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp, bottom = 12.dp),
+                                ) {
+                                    Text("全部设置")
+                                }
+                            }
+
+                            ReaderMenuSection.HOME -> Unit
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+private enum class ReaderMenuSection(val title: String) {
+    HOME(""),
+    LAYOUT("版式设置"),
+    THEME("主题设置"),
+    BRIGHTNESS("亮度设置"),
+    TTS("听书"),
+    TRANSLATION("翻译与对照"),
+    MORE("更多设置"),
 }
 
 /**
