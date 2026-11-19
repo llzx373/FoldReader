@@ -1,6 +1,6 @@
 # OCR 推理执行后端（Execution Provider）评审（M35）
 
-> 2026-10-09。对象：onnxruntime-mobile 1.18.0（M21 钉版，评审预算 ~10MB 见 docs/AI功能需求与实施.md §2.4）。
+> 2026-10-09。对象：onnxruntime-mobile 1.18.0（M21 钉版，评审预算 ~10MB 见 docs/AI功能需求与实施.md §2.8）。
 > 触发点：整卷漫画翻译里 OCR（RT-DETR 气泡检测 + 页级 det/rec）在 CPU 上是主要耗时。
 
 ## 可选后端盘点
