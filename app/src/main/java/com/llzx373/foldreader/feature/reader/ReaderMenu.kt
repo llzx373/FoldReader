@@ -830,6 +830,15 @@ fun ChapterListContent(
     modifier: Modifier = Modifier,
     listHeight: Dp? = 360.dp,
     onTabChange: ((Boolean) -> Unit)? = null,
+    /**
+     * AI 是否已明确启用（`aiConfigured()`：开关打开 + 填了 baseUrl + 有 key）。
+     *
+     * 默认 false，是本组件的**安全默认值**：目录里所有 AI 元素（大纲、重译、摘要、
+     * AI 识别章节）都直接乘在这个开关上，而不只靠「回调是否为 null」隐式决定。
+     * 于是调用方即使误传了非 null 的 lambda，未启用时也不会漏出 AI 入口。
+     * 未启用＝整个槽位不渲染（不是置灰），沿用全书 AI 入口的合规口径。
+     */
+    aiEnabled: Boolean = false,
     /** M19：每章的翻译状态标签（null = 不显示），下标与 [chapters] 对齐。 */
     chapterStatus: List<String?> = emptyList(),
     /** M19：该章是否可点「重译」（存在已译/失败单位），下标与 [chapters] 对齐。 */
@@ -866,7 +875,8 @@ fun ChapterListContent(
                     },
                     weight = 1f)
             }
-            if (onOpenOutline != null) {
+            // AI 未明确启用时整个槽位不渲染（回调非 null 也不画，见 aiEnabled 注释）
+            if (aiEnabled && onOpenOutline != null) {
                 TextButton(onClick = onOpenOutline) { Text("全书大纲") }
             }
         }
@@ -919,8 +929,9 @@ fun ChapterListContent(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
-                // M15：仅 TXT + AI 已配置时渲染（组件内部自查，produceState 缓存判据）
-                ReaderChapterRuleAiEntry()
+                // M15：仅 TXT + AI 已配置时渲染。外层先过 aiEnabled，组件内部再自查
+                // TXT 格式（produceState 缓存判据）——两道判据同口径，不会打架。
+                if (aiEnabled) ReaderChapterRuleAiEntry()
             }
         } else {
             val listState = rememberLazyListState()
@@ -958,7 +969,8 @@ fun ChapterListContent(
                                 modifier = Modifier.padding(start = 8.dp),
                             )
                         }
-                        if (onRetranslateChapter != null &&
+                        if (aiEnabled &&
+                            onRetranslateChapter != null &&
                             chapterRetranslatable.getOrNull(index) == true
                         ) {
                             Text(
@@ -982,7 +994,7 @@ fun ChapterListContent(
                                     modifier = Modifier.padding(start = 8.dp),
                                 )
                             }
-                            if (onViewSummary != null && summaryRow.viewable) {
+                            if (aiEnabled && onViewSummary != null && summaryRow.viewable) {
                                 Text(
                                     text = "摘要",
                                     style = MaterialTheme.typography.labelSmall,
@@ -993,7 +1005,7 @@ fun ChapterListContent(
                                         .padding(start = 8.dp),
                                 )
                             }
-                            if (onGenerateSummary != null && summaryRow.generatable) {
+                            if (aiEnabled && onGenerateSummary != null && summaryRow.generatable) {
                                 Text(
                                     text = "生成摘要",
                                     style = MaterialTheme.typography.labelSmall,
@@ -1021,6 +1033,8 @@ fun ChapterListDialog(
     colors: ReaderColors,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
+    /** AI 是否已明确启用；false 时目录内所有 AI 元素不渲染。见 [ChapterListContent] 同名参数。 */
+    aiEnabled: Boolean = false,
     /** M19：每章的翻译状态标签（null = 不显示），下标与 [chapters] 对齐。 */
     chapterStatus: List<String?> = emptyList(),
     /** M19：该章是否可点「重译」（存在已译/失败单位），下标与 [chapters] 对齐。 */
@@ -1050,6 +1064,7 @@ fun ChapterListDialog(
                 colors = colors,
                 onSelect = onSelect,
                 onTabChange = { showPersons = it },
+                aiEnabled = aiEnabled,
                 chapterStatus = chapterStatus,
                 chapterRetranslatable = chapterRetranslatable,
                 onRetranslateChapter = onRetranslateChapter,

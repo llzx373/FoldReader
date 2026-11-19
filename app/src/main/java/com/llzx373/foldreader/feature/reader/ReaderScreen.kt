@@ -1892,6 +1892,8 @@ fun ReaderScreen(
                                 currentIndex = position.chapterIndex,
                                 remainingText = viewModel.remainingTimeText(),
                                 colors = colors,
+                                // 桌面半屏目录与对话框同一口径：AI 未启用时不出 AI 元素
+                                aiEnabled = aiConfigured,
                                 onSelect = { index ->
                                     scope.launch {
                                         viewModel.chapterAt(index)?.let { viewModel.seekToOffset(it.charStart) }
@@ -2140,17 +2142,20 @@ fun ReaderScreen(
             val position by viewModel.readingPosition.collectAsState()
             // 只在面板可见时收集人物索引（ViewModel 侧 WhileSubscribed 随之启停）
             val persons by viewModel.personAppearances.collectAsState()
+            // 目录里所有 AI 元素的唯一判据（大纲 / 重译 / 摘要 / AI 识别章节）。
+            // UI 侧（ChapterListContent）还会再乘一次自己的 aiEnabled，这里是第一道，也是唯一写判据的地方。
+            val catalogAi = aiConfigured
             // M19：目录行翻译状态——面板可见时预载单位清单并收集台账
-            LaunchedEffect(catalogVisible, aiConfigured) {
-                if (catalogVisible && aiConfigured) viewModel.prepareUnitStatuses()
+            LaunchedEffect(catalogVisible, catalogAi) {
+                if (catalogVisible && catalogAi) viewModel.prepareUnitStatuses()
             }
             val translationUnits by viewModel.translationUnits.collectAsState()
             val unitStatuses by viewModel.unitStatuses.collectAsState()
             // M29：目录行摘要状态——与翻译状态同一份单位清单
             val summaryStatuses by viewModel.summaryStatuses.collectAsState()
             val catalogChapters = viewModel.chapterList()
-            val chapterStatus = remember(catalogChapters, translationUnits, unitStatuses, aiConfigured) {
-                if (aiConfigured) {
+            val chapterStatus = remember(catalogChapters, translationUnits, unitStatuses, catalogAi) {
+                if (catalogAi) {
                     com.llzx373.foldreader.feature.translate.chapterStatusLabels(
                         catalogChapters, translationUnits, unitStatuses,
                     )
@@ -2158,8 +2163,8 @@ fun ReaderScreen(
                     emptyList()
                 }
             }
-            val chapterRetranslatable = remember(catalogChapters, translationUnits, unitStatuses, aiConfigured) {
-                if (aiConfigured) {
+            val chapterRetranslatable = remember(catalogChapters, translationUnits, unitStatuses, catalogAi) {
+                if (catalogAi) {
                     com.llzx373.foldreader.feature.translate.chapterRetranslatable(
                         catalogChapters, translationUnits, unitStatuses,
                     )
@@ -2167,8 +2172,8 @@ fun ReaderScreen(
                     emptyList()
                 }
             }
-            val chapterSummary = remember(catalogChapters, translationUnits, summaryStatuses, aiConfigured) {
-                if (aiConfigured) {
+            val chapterSummary = remember(catalogChapters, translationUnits, summaryStatuses, catalogAi) {
+                if (catalogAi) {
                     com.llzx373.foldreader.feature.summary.chapterSummaryRows(
                         catalogChapters, translationUnits, summaryStatuses,
                     )
@@ -2182,6 +2187,7 @@ fun ReaderScreen(
                 currentIndex = position.chapterIndex,
                 remainingText = viewModel.remainingTimeText(),
                 colors = colors,
+                aiEnabled = catalogAi,
                 onSelect = { index ->
                     catalogVisible = false
                     scope.launch {
@@ -2192,7 +2198,7 @@ fun ReaderScreen(
                 onDismiss = { catalogVisible = false },
                 chapterStatus = chapterStatus,
                 chapterRetranslatable = chapterRetranslatable,
-                onRetranslateChapter = if (aiConfigured && !viewModeTranslated) {
+                onRetranslateChapter = if (catalogAi && !viewModeTranslated) {
                     { index ->
                         catalogVisible = false
                         viewModel.retranslateChapter(index)
@@ -2201,17 +2207,17 @@ fun ReaderScreen(
                     null
                 },
                 chapterSummary = chapterSummary,
-                onViewSummary = if (aiConfigured) {
+                onViewSummary = if (catalogAi) {
                     { index -> summaryViewChapter = index }
                 } else {
                     null
                 },
-                onGenerateSummary = if (aiConfigured && !viewModeTranslated) {
+                onGenerateSummary = if (catalogAi && !viewModeTranslated) {
                     { index -> viewModel.summarizeChapter(index) }
                 } else {
                     null
                 },
-                onOpenOutline = if (aiConfigured) {
+                onOpenOutline = if (catalogAi) {
                     { outlineVisible = true }
                 } else {
                     null
